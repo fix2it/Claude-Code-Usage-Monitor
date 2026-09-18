@@ -707,7 +707,7 @@ pub(super) unsafe extern "system" fn on_tray_location_changed(
         return;
     }
 
-    let (is_tray, our_hwnd, tray_hwnd) = {
+    let (is_tray, our_hwnd) = {
         let state = lock_state();
         let Some(s) = state.as_ref() else {
             return;
@@ -719,7 +719,7 @@ pub(super) unsafe extern "system" fn on_tray_location_changed(
         let tray = s.tray_notify_hwnd.map(|h| h.to_hwnd());
         let taskbar = s.taskbar_hwnd.map(|h| h.to_hwnd());
         let is_tray = is_tray_event_source(hwnd, tray, taskbar, &our_hwnds);
-        (is_tray, s.hwnd.to_hwnd(), tray)
+        (is_tray, s.hwnd.to_hwnd())
     };
 
     if !is_tray {
