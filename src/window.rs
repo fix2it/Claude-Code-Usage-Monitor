@@ -2288,7 +2288,12 @@ fn render_layered() {
         unsafe {
             let show = nest != SurfaceNest::Floating
                 || !foreground_is_fullscreen_on_display(positioned.placement.reference.display);
-            let _ = ShowWindow(target_hwnd, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
+            let is_visible = IsWindowVisible(target_hwnd).as_bool();
+            if show && !is_visible {
+                let _ = ShowWindow(target_hwnd, SW_SHOWNOACTIVATE);
+            } else if !show && is_visible {
+                let _ = ShowWindow(target_hwnd, SW_HIDE);
+            }
         }
     }
 
@@ -2297,11 +2302,13 @@ fn render_layered() {
         .skip(target_count)
     {
         unsafe {
-            let _ = ShowWindow(target, SW_HIDE);
+            if IsWindowVisible(target).as_bool() {
+                let _ = ShowWindow(target, SW_HIDE);
+            }
         }
     }
 }
-fn theme_for_surface(theme: &ThemeDocument, surface_index: usize) -> ThemeDocument {
+pub(super) fn theme_for_surface(theme: &ThemeDocument, surface_index: usize) -> ThemeDocument {
     let mut result = theme.clone();
     if let Some(surface) = theme.surfaces.get(surface_index) {
         result.canvas.width_expression = Some(surface.width.clone());

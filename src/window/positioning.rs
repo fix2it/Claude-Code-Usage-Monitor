@@ -9,26 +9,65 @@ pub(super) fn position_at_taskbar() {
         return;
     }
     refresh_dpi();
-    let custom_position = {
+    let custom_positions = {
         let state = lock_state();
         state.as_ref().and_then(|s| {
             if s.custom_theme_enabled {
-                effective_theme_from_state(s).map(|mut theme| {
-                    let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(s));
-                    let (width, height) =
-                        theme_engine::resolve_surface_size(&theme, 0, s.data.as_ref(), runtime);
-                    theme.canvas.width = width;
-                    theme.canvas.height = height;
-                    let scale = theme_surface_scale(&theme, 0);
-                    (s.hwnd.to_hwnd(), theme, scale)
+                effective_theme_from_state(s).map(|theme| {
+                    let mut targets = Vec::new();
+                    let target_count = theme.surfaces.len();
+                    for surface_index in 0..target_count {
+                        let regular_hwnd = if surface_index == 0 {
+                            s.hwnd.to_hwnd()
+                        } else if let Some(mirror) = s.mirror_hwnds.get(surface_index - 1) {
+                            mirror.to_hwnd()
+                        } else {
+                            continue;
+                        };
+                        let nest = theme.surfaces[surface_index]
+                            .placement
+                            .nest
+                            .resolve(theme.surfaces[surface_index].placement.reference.region);
+                        let target_hwnd = if nest == SurfaceNest::Desktop {
+                            s.desktop_hwnds
+                                .get(surface_index)
+                                .and_then(|window| *window)
+                                .map(SendHwnd::to_hwnd)
+                                .unwrap_or(regular_hwnd)
+                        } else {
+                            regular_hwnd
+                        };
+                        if nest == SurfaceNest::TrayIcon {
+                            continue;
+                        }
+                        let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(s));
+                        let (logical_width, logical_height) =
+                            theme_engine::resolve_surface_size(&theme, surface_index, s.data.as_ref(), runtime);
+                        let mut positioned = theme_for_surface(&theme, surface_index);
+                        positioned.canvas.width = logical_width;
+                        positioned.canvas.height = logical_height;
+                        let placement = theme_engine::resolve_surface_placement(
+                            &theme,
+                            surface_index,
+                            s.data.as_ref(),
+                            runtime,
+                        );
+                        positioned.placement.offset_x = placement.offset_x;
+                        positioned.placement.offset_y = placement.offset_y;
+                        let scale = theme_surface_scale(&theme, surface_index);
+                        targets.push((target_hwnd, positioned, scale));
+                    }
+                    targets
                 })
             } else {
                 None
             }
         })
     };
-    if let Some((hwnd, theme, scale)) = custom_position {
-        position_custom_theme(hwnd, &theme, scale);
+    if let Some(targets) = custom_positions {
+        for (hwnd, theme, scale) in targets {
+            position_custom_theme(hwnd, &theme, scale);
+        }
         return;
     }
     // Drop the app-state lock before any Win32 call that may synchronously
@@ -115,14 +154,6 @@ pub(super) fn position_at_taskbar() {
     }
 }
 
-pub(super) fn reset_layered_window(hwnd: HWND) {
-    unsafe {
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED.0 as i32));
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
-    }
-}
-
 pub(super) fn render_desktop_custom_window(hwnd: HWND, rendered: &theme_engine::RenderedTheme) {
     if let Err(error) = crate::desktop_compositor::present(hwnd, rendered) {
         diagnose::log(format!(
@@ -145,10 +176,12 @@ pub(super) fn render_custom_window(
     let width = rendered.width as i32;
     let height = rendered.height as i32;
     unsafe {
-        // SetLayeredWindowAttributes and UpdateLayeredWindow cannot be used on
-        // the same layered-style lifetime. Reset it in case this surface was
-        // previously hosted on the desktop.
-        reset_layered_window(hwnd);
+        // Ensure WS_EX_LAYERED is set without clearing or resetting it,
+        // which would destroy the DWM surface and cause visual flickering.
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if (ex_style & WS_EX_LAYERED.0 as i32) == 0 {
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
+        }
         // UpdateLayeredWindow expects a screen-compatible destination DC. A
         // window DC happened to work for taskbar-hosted children, but desktop
         // WorkerW/DefView composition can discard the resulting surface.
@@ -297,16 +330,42 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
                 };
                 native_interop::embed_as_child(hwnd, taskbar.hwnd);
                 ensure_tray_event_hook_for_taskbar(taskbar.hwnd);
+
+                let target_screen_rect = RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + height,
+                };
+                let mut current_screen_rect = RECT::default();
+                let has_current_rect = GetWindowRect(hwnd, &mut current_screen_rect).is_ok();
+                if has_current_rect && current_screen_rect == target_screen_rect {
+                    return;
+                }
+
                 let mut point = [POINT { x, y }];
                 MapWindowPoints(None, Some(taskbar.hwnd), &mut point);
+
+                let mut flags = SWP_NOACTIVATE | SWP_NOZORDER;
+                if has_current_rect {
+                    if (current_screen_rect.right - current_screen_rect.left == width)
+                        && (current_screen_rect.bottom - current_screen_rect.top == height)
+                    {
+                        flags |= SWP_NOSIZE;
+                    }
+                    if current_screen_rect.left == x && current_screen_rect.top == y {
+                        flags |= SWP_NOMOVE;
+                    }
+                }
+
                 let _ = SetWindowPos(
                     hwnd,
-                    Some(HWND_TOP),
+                    None,
                     point[0].x,
                     point[0].y,
                     width,
                     height,
-                    SWP_NOACTIVATE,
+                    flags,
                 );
             }
             SurfaceNest::Desktop => {
@@ -314,6 +373,19 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
                     if GetParent(hwnd).ok() != Some(desktop.parent) {
                         native_interop::embed_as_child(hwnd, desktop.parent);
                     }
+
+                    let target_screen_rect = RECT {
+                        left: x,
+                        top: y,
+                        right: x + width,
+                        bottom: y + height,
+                    };
+                    let mut current_screen_rect = RECT::default();
+                    let has_current_rect = GetWindowRect(hwnd, &mut current_screen_rect).is_ok();
+                    if has_current_rect && current_screen_rect == target_screen_rect {
+                        return;
+                    }
+
                     let mut point = [POINT { x, y }];
                     MapWindowPoints(None, Some(desktop.parent), &mut point);
                     let _ = SetWindowPos(
@@ -336,6 +408,31 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
             }
             SurfaceNest::Floating | SurfaceNest::Auto => {
                 native_interop::make_popup(hwnd, true);
+
+                let target_screen_rect = RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + height,
+                };
+                let mut current_screen_rect = RECT::default();
+                let has_current_rect = GetWindowRect(hwnd, &mut current_screen_rect).is_ok();
+                if has_current_rect && current_screen_rect == target_screen_rect {
+                    return;
+                }
+
+                let mut flags = SWP_NOACTIVATE;
+                if has_current_rect {
+                    if (current_screen_rect.right - current_screen_rect.left == width)
+                        && (current_screen_rect.bottom - current_screen_rect.top == height)
+                    {
+                        flags |= SWP_NOSIZE;
+                    }
+                    if current_screen_rect.left == x && current_screen_rect.top == y {
+                        flags |= SWP_NOMOVE;
+                    }
+                }
+
                 let _ = SetWindowPos(
                     hwnd,
                     Some(HWND_TOPMOST),
@@ -343,7 +440,7 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
                     y,
                     width,
                     height,
-                    SWP_NOACTIVATE,
+                    flags,
                 );
             }
         }
@@ -629,44 +726,17 @@ pub(super) unsafe extern "system" fn on_tray_location_changed(
         return;
     }
 
-    // Schedule a trailing-edge timer so that after animations complete or multi-step
-    // layout passes settle, the widget reliably snaps to the final tray position.
-    const TRAY_REPOSITION_TRAILING_DELAY_MS: u32 = 120;
+    // Debounce tray location events: shell layout passes (e.g. icon addition,
+    // modification like G-Helper NIM_MODIFY, or animation) fire multiple intermediate
+    // events. Resetting a short trailing timer ensures we wait for the final settled
+    // geometry before updating the position, avoiding transient jumps and jitter.
+    const TRAY_REPOSITION_TRAILING_DELAY_MS: u32 = 80;
     let _ = SetTimer(
         Some(our_hwnd),
         TIMER_TRAY_REPOSITION,
         TRAY_REPOSITION_TRAILING_DELAY_MS,
         None,
     );
-
-    // Also perform an immediate reposition if the tray rect has actually changed,
-    // providing an instant visual response without waiting for the trailing timer.
-    static LAST_TRAY_RECT: Mutex<Option<RECT>> = Mutex::new(None);
-    static LAST_IMMEDIATE_REPOSITION: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-
-    let current_rect = tray_hwnd.and_then(native_interop::get_window_rect_safe);
-    let should_reposition_now = {
-        let mut last_rect = LAST_TRAY_RECT.lock().unwrap_or_else(|e| e.into_inner());
-        let mut last_time = LAST_IMMEDIATE_REPOSITION.lock().unwrap_or_else(|e| e.into_inner());
-        let now = std::time::Instant::now();
-        let changed = rect_changed(*last_rect, current_rect);
-        let time_ok = last_time
-            .map(|t| now.duration_since(t).as_millis() > 60)
-            .unwrap_or(true);
-        if changed && time_ok {
-            *last_rect = current_rect;
-            *last_time = Some(now);
-            true
-        } else {
-            false
-        }
-    };
-
-    if should_reposition_now {
-        refresh_theme_host_geometry();
-        position_at_taskbar();
-        render_layered();
-    }
 }
 
 pub(super) fn calculate_rect_overlap_ratio(a: RECT, b: RECT) -> f64 {

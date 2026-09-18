@@ -121,7 +121,6 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     let _ = KillTimer(Some(hwnd), TIMER_TRAY_REPOSITION);
                     refresh_theme_host_geometry();
                     position_at_taskbar();
-                    render_layered();
                 }
                 _ => {}
             }

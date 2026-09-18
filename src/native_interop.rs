@@ -189,18 +189,26 @@ pub fn embed_as_child(hwnd: HWND, parent: HWND) {
     unsafe {
         let current_parent = GetParent(hwnd).ok();
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let _ = SetWindowLongW(
-            hwnd,
-            GWL_EXSTYLE,
-            (ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32)
-                & !(WS_EX_TOPMOST.0 as i32),
-        );
+        let target_ex_style = (ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32)
+            & !(WS_EX_TOPMOST.0 as i32);
 
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let new_style = (style & !WS_POPUP_STYLE) | WS_CHILD_STYLE | WS_CLIPSIBLINGS_STYLE;
-        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
+        let target_style = (style & !WS_POPUP_STYLE) | WS_CHILD_STYLE | WS_CLIPSIBLINGS_STYLE;
 
-        if current_parent != Some(parent) {
+        let parent_changed = current_parent != Some(parent);
+        let style_changed = style != target_style || ex_style != target_ex_style;
+
+        if !parent_changed && !style_changed {
+            return;
+        }
+
+        if style != target_style {
+            let _ = SetWindowLongW(hwnd, GWL_STYLE, target_style as i32);
+        }
+        if ex_style != target_ex_style {
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, target_ex_style);
+        }
+        if parent_changed {
             let _ = SetParent(hwnd, Some(parent));
         }
         let _ = SetWindowPos(
@@ -218,18 +226,33 @@ pub fn embed_as_child(hwnd: HWND, parent: HWND) {
 /// Restore a shell-hosted surface to a regular top-level popup.
 pub fn make_popup(hwnd: HWND, topmost: bool) {
     unsafe {
+        let current_parent = GetParent(hwnd).ok();
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let new_style = (style & !WS_CHILD_STYLE & !WS_CLIPSIBLINGS_STYLE) | WS_POPUP_STYLE;
-        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
-        let _ = SetParent(hwnd, None);
+        let target_style = (style & !WS_CHILD_STYLE & !WS_CLIPSIBLINGS_STYLE) | WS_POPUP_STYLE;
 
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let ex_style = if topmost {
+        let target_ex_style = if topmost {
             ex_style | WS_EX_TOPMOST.0 as i32
         } else {
             ex_style & !(WS_EX_TOPMOST.0 as i32)
         };
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style);
+
+        let parent_changed = current_parent.is_some();
+        let style_changed = style != target_style || ex_style != target_ex_style;
+
+        if !parent_changed && !style_changed {
+            return;
+        }
+
+        if style != target_style {
+            let _ = SetWindowLongW(hwnd, GWL_STYLE, target_style as i32);
+        }
+        if parent_changed {
+            let _ = SetParent(hwnd, None);
+        }
+        if ex_style != target_ex_style {
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, target_ex_style);
+        }
         let _ = SetWindowPos(
             hwnd,
             Some(if topmost {
