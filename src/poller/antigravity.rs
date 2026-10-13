@@ -14,10 +14,11 @@ use crate::models::{UsageData, UsageSection};
 const ANTIGRAVITY_CREDENTIAL_TARGET: &str = "gemini:antigravity";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const EXPIRY_SKEW: Duration = Duration::from_secs(60);
+const ANTIGRAVITY_USER_AGENT: &str = "antigravity/2.24.0";
 const ANTIGRAVITY_ENDPOINTS: &[&str] = &[
     "https://daily-cloudcode-pa.googleapis.com",
-    "https://daily-cloudcode-pa.sandbox.googleapis.com",
     "https://cloudcode-pa.googleapis.com",
+    "https://daily-cloudcode-pa.sandbox.googleapis.com",
 ];
 
 #[derive(Deserialize)]
@@ -44,17 +45,17 @@ struct AntigravityLoadResponse {
 }
 
 #[derive(Deserialize)]
-struct AntigravityModelsResponse {
-    models: HashMap<String, AntigravityModelInfo>,
+pub(super) struct AntigravityModelsResponse {
+    pub(super) models: HashMap<String, AntigravityModelInfo>,
 }
 
 #[derive(Deserialize)]
-struct AntigravityModelInfo {
+pub(super) struct AntigravityModelInfo {
     #[serde(rename = "quotaInfo")]
-    quota_info: Option<AntigravityQuotaInfo>,
+    pub(super) quota_info: Option<AntigravityQuotaInfo>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct AntigravityQuotaInfo {
     #[serde(rename = "remainingFraction")]
     remaining_fraction: Option<f64>,
@@ -314,17 +315,37 @@ pub(super) fn antigravity_credential_watch_signature() -> String {
 }
 
 pub(super) fn fetch_antigravity_usage(token: &str) -> Result<UsageData, PollError> {
+    select_antigravity_usage(ANTIGRAVITY_ENDPOINTS, |base_url| {
+        fetch_antigravity_usage_from_endpoint(base_url, token)
+    })
+}
+
+pub(super) fn select_antigravity_usage(
+    endpoints: &[&str],
+    mut fetch: impl FnMut(&str) -> Result<(UsageData, AntigravitySource), PollError>,
+) -> Result<UsageData, PollError> {
+    let mut model_fallback: Option<UsageData> = None;
     let mut auth_error = false;
     let mut last_error = PollError::RequestFailed;
 
-    for base_url in ANTIGRAVITY_ENDPOINTS {
-        match fetch_antigravity_usage_from_endpoint(base_url, token) {
-            Ok(data) => return Ok(data),
+    for base_url in endpoints {
+        match fetch(base_url) {
+            // A quota summary names every window it has; it is authoritative
+            // for both pools, so later endpoints are neither asked nor merged.
+            Ok((data, AntigravitySource::Summary)) => return Ok(data),
+            // Model quotas do not name their window; keep them only as a last
+            // resort in case no endpoint answers with a summary.
+            Ok((data, AntigravitySource::Models)) => {
+                model_fallback.get_or_insert(data);
+            }
             Err(PollError::AuthRequired) => auth_error = true,
             Err(error) => last_error = error,
         }
     }
 
+    if let Some(data) = model_fallback {
+        return Ok(data);
+    }
     if auth_error {
         Err(PollError::AuthRequired)
     } else {
@@ -332,33 +353,69 @@ pub(super) fn fetch_antigravity_usage(token: &str) -> Result<UsageData, PollErro
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AntigravitySource {
+    Summary,
+    Models,
+}
+
 pub(super) fn fetch_antigravity_usage_from_endpoint(
     base_url: &str,
     token: &str,
-) -> Result<UsageData, PollError> {
+) -> Result<(UsageData, AntigravitySource), PollError> {
     let project = fetch_antigravity_project(base_url, token)?;
-    if let Some(project) = project.as_deref() {
+    let summary_result = if let Some(project) = project.as_deref() {
         match fetch_antigravity_quota_summary(base_url, token, project) {
-            Ok(data) => return Ok(data),
+            Ok(data) => Some(data),
             Err(PollError::AuthRequired) => return Err(PollError::AuthRequired),
-            Err(error) => diagnose::log(format!(
-                "Antigravity retrieveUserQuotaSummary failed, falling back to model quota: {error:?}"
-            )),
+            Err(error) => {
+                diagnose::log(format!(
+                    "Antigravity retrieveUserQuotaSummary failed: {error:?}"
+                ));
+                None
+            }
         }
+    } else {
+        None
+    };
+
+    // Per-model quotas do not say which window (5h or weekly) they belong to,
+    // so when the summary answered, both pools are taken from it alone and the
+    // models request is skipped.
+    if let Some(data) = summary_result {
+        return Ok((data, AntigravitySource::Summary));
     }
+    let models_result = fetch_antigravity_models_response(base_url, token, project.as_deref());
 
-    let session = fetch_antigravity_model_quota(base_url, token, project.as_deref())?;
-    let weekly = UsageSection::default();
+    match models_result {
+        Ok(models) => antigravity_usage_from_models(&models)
+            .map(|data| (data, AntigravitySource::Models))
+            .ok_or(PollError::RequestFailed),
+        Err(err) => Err(err),
+    }
+}
 
-    Ok(UsageData {
-        limits: Vec::new(),
-        session,
-        weekly,
-        weekly_label: None,
-        monthly: None,
-        credits: None,
-        stale: false,
+/// Fallback when the quota summary is unavailable: keep the two pools apart,
+/// Gemini models in the primary pool and Claude/GPT models in the external one.
+pub(super) fn antigravity_usage_from_models(models: &AntigravityModelsResponse) -> Option<UsageData> {
+    let gemini = best_gemini_model_quota(models);
+    // Claude/GPT model quotas do not say whether they are the 5h or the weekly
+    // window, so the external pool is left as "no limit data" here rather
+    // than guessed.
+    Some(UsageData {
+        session: gemini?,
+        ..Default::default()
     })
+}
+
+pub(super) fn best_gemini_model_quota(models: &AntigravityModelsResponse) -> Option<UsageSection> {
+    best_antigravity_section(models.models.iter().filter_map(|(model, info)| {
+        if !model.starts_with("gemini") {
+            return None;
+        }
+        let quota = info.quota_info.as_ref().cloned()?;
+        antigravity_section_from_quota(quota)
+    }))
 }
 
 pub(super) fn fetch_antigravity_project(
@@ -376,7 +433,7 @@ pub(super) fn fetch_antigravity_project(
         .post(&format!("{base_url}/v1internal:loadCodeAssist"))
         .header("Authorization", &format!("Bearer {token}"))
         .header("Content-Type", "application/json")
-        .header("User-Agent", "antigravity")
+        .header("User-Agent", ANTIGRAVITY_USER_AGENT)
         .send_json(&body)
         .and_then(super::check_http_status)
     {
@@ -404,11 +461,11 @@ pub(super) fn fetch_antigravity_project(
     Ok(response.project.filter(|project| !project.is_empty()))
 }
 
-pub(super) fn fetch_antigravity_model_quota(
+pub(super) fn fetch_antigravity_models_response(
     base_url: &str,
     token: &str,
     project: Option<&str>,
-) -> Result<UsageSection, PollError> {
+) -> Result<AntigravityModelsResponse, PollError> {
     let agent = build_agent()?;
     let body = match project {
         Some(project) => serde_json::json!({ "project": project }),
@@ -419,7 +476,7 @@ pub(super) fn fetch_antigravity_model_quota(
         .post(&format!("{base_url}/v1internal:fetchAvailableModels"))
         .header("Authorization", &format!("Bearer {token}"))
         .header("Content-Type", "application/json")
-        .header("User-Agent", "antigravity")
+        .header("User-Agent", ANTIGRAVITY_USER_AGENT)
         .send_json(&body)
         .and_then(super::check_http_status)
     {
@@ -447,6 +504,17 @@ pub(super) fn fetch_antigravity_model_quota(
         }
     };
 
+    Ok(response)
+}
+
+#[allow(dead_code)]
+pub(super) fn fetch_antigravity_model_quota(
+    base_url: &str,
+    token: &str,
+    project: Option<&str>,
+) -> Result<UsageSection, PollError> {
+    let response = fetch_antigravity_models_response(base_url, token, project)?;
+
     best_antigravity_section(response.models.into_iter().filter_map(|(model, info)| {
         let quota = info.quota_info?;
         if !is_antigravity_display_model(&model) {
@@ -469,7 +537,7 @@ pub(super) fn fetch_antigravity_quota_summary(
         .post(&format!("{base_url}/v1internal:retrieveUserQuotaSummary"))
         .header("Authorization", &format!("Bearer {token}"))
         .header("Content-Type", "application/json")
-        .header("User-Agent", "antigravity")
+        .header("User-Agent", ANTIGRAVITY_USER_AGENT)
         .send_json(&body)
         .and_then(super::check_http_status)
     {
@@ -520,22 +588,85 @@ pub(super) fn antigravity_section_from_summary_bucket(
 pub(super) fn antigravity_usage_from_summary(
     response: AntigravityQuotaSummaryResponse,
 ) -> Option<UsageData> {
-    let mut fallback = None;
+    let mut gemini_usage = None;
+    let mut external_usage = None;
+    let mut other_groups = Vec::new();
 
-    for group in response.groups.unwrap_or_default() {
+    // A summary that returns a group list (even an empty one) answered
+    // authoritatively: no recognised window means "no limit data", not a
+    // failure to be papered over with model quotas or another endpoint.
+    let answered = response.groups.is_some();
+    let groups = response.groups.unwrap_or_default();
+    for group in groups {
         let is_gemini = is_antigravity_gemini_summary_group(&group);
+        let is_external = is_antigravity_external_summary_group(&group);
         let usage = antigravity_usage_from_summary_group(group);
 
-        if is_gemini && usage.is_some() {
-            return usage;
-        }
-
-        if fallback.is_none() {
-            fallback = usage;
+        if is_gemini && gemini_usage.is_none() {
+            gemini_usage = usage;
+        } else if is_external && external_usage.is_none() {
+            external_usage = usage;
+        } else if let Some(u) = usage {
+            other_groups.push(u);
         }
     }
 
-    fallback
+    // An unrecognised group is assigned only when it is the sole group with
+    // quota and no named pool exists; otherwise a position guess could show one
+    // pool's usage under the other's label.
+    if gemini_usage.is_none() && external_usage.is_none() && other_groups.len() == 1 {
+        gemini_usage = other_groups.pop();
+    }
+
+    if let Some(mut gemini) = gemini_usage {
+        if let Some(external) = external_usage {
+            gemini.external_pool = Some(Box::new(external));
+        }
+        Some(gemini)
+    } else if let Some(external) = external_usage {
+        let mut gemini = UsageData::default();
+        gemini.session.available = false;
+        gemini.weekly.available = false;
+        gemini.external_pool = Some(Box::new(external));
+        Some(gemini)
+    } else {
+        answered.then(UsageData::default)
+    }
+}
+
+pub(super) fn is_antigravity_external_summary_group(group: &AntigravityQuotaSummaryGroup) -> bool {
+    group
+        .display_name
+        .as_deref()
+        .is_some_and(|name| {
+            let n = name.to_ascii_lowercase();
+            n.contains("claude") || n.contains("gpt") || n.contains("external")
+        })
+        || group
+            .description
+            .as_deref()
+            .is_some_and(|description| {
+                let d = description.to_ascii_lowercase();
+                d.contains("claude") || d.contains("gpt") || d.contains("external")
+            })
+        || group.buckets.as_ref().is_some_and(|buckets| {
+            buckets.iter().any(|bucket| {
+                bucket
+                    .bucket_id
+                    .as_deref()
+                    .is_some_and(|id| {
+                        let id = id.to_ascii_lowercase();
+                        id.starts_with("claude-") || id.starts_with("gpt-") || id.starts_with("3p-")
+                    })
+                    || bucket
+                        .display_name
+                        .as_deref()
+                        .is_some_and(|name| {
+                            let n = name.to_ascii_lowercase();
+                            n.contains("claude") || n.contains("gpt")
+                        })
+            })
+        })
 }
 
 pub(super) fn antigravity_usage_from_summary_group(
@@ -824,5 +955,29 @@ mod auth_tests {
         assert!(old.token.refresh_token.is_none());
         let current: AntigravityAuthFile = serde_json::from_str(r#"{"token":{"access_token":"old","refresh_token":"refresh","expiry":"2026-01-01T00:00:00Z"}}"#).unwrap();
         assert_eq!(current.token.refresh_token.as_deref(), Some("refresh"));
+    }
+}
+
+#[cfg(test)]
+mod live_probe {
+    use super::*;
+
+    /// Manual probe: `cargo test live_quota_summary_shape -- --ignored --nocapture`.
+    /// Prints the parsed quota summary (percentages and resets only; no tokens).
+    #[test]
+    #[ignore]
+    fn live_quota_summary_shape() {
+        let creds = read_antigravity_credentials().expect("no credentials");
+        let mut token = creds.access_token.clone();
+        if parse_iso8601(creds.expiry.as_deref()).is_some_and(|e| e <= SystemTime::now()) {
+            token = refresh_antigravity_token(creds.refresh_token.as_deref().unwrap()).unwrap();
+        }
+        let usage = fetch_antigravity_usage(&token).expect("fetch_antigravity_usage failed");
+        println!("Gemini Session: {}% resets_at={:?}", usage.session.percentage, usage.session.resets_at);
+        println!("Gemini Weekly: {}% resets_at={:?}", usage.weekly.percentage, usage.weekly.resets_at);
+        if let Some(ext) = usage.external_pool {
+            println!("Ext Session: {}% resets_at={:?}", ext.session.percentage, ext.session.resets_at);
+            println!("Ext Weekly: {}% resets_at={:?}", ext.weekly.percentage, ext.weekly.resets_at);
+        }
     }
 }

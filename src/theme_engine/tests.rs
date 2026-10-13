@@ -485,7 +485,61 @@ fn templates_apply_numeric_character_formats() {
         format_template("Used {claude.session.percentage:0.0}%", &context),
         "Used 73.5%"
     );
-    assert_eq!(format_template("{reset:duration_short}", &context), "4d");
+    assert_eq!(format_template("{reset:duration_short}", &context), "5d");
+}
+
+#[test]
+fn duration_short_precision_scale_and_half_steps() {
+    let mut context = DataContext::default();
+    context.insert_string("i18n.day_suffix", "д");
+    context.insert_string("i18n.hour_suffix", "ч");
+    context.insert_string("i18n.minute_suffix", "м");
+    context.insert_string("i18n.second_suffix", "с");
+    context.insert_string("i18n.now", "сейчас");
+
+    let check = |secs: f64, expected: &str, ctx: &DataContext| {
+        let mut c = ctx.clone();
+        c.insert("val", secs);
+        assert_eq!(format_template("{val:duration_short}", &c), expected);
+    };
+
+    // Minutes under 1 hour (< 3600s)
+    check(3580.0, "59м", &context); // 59m 40s must clamp to 59m, never 60m
+    check(3300.0, "55м", &context);
+    check(2700.0, "45м", &context);
+    check(900.0, "15м", &context);
+    check(60.0, "1м", &context);
+
+    // Hours under 10 hours (1h .. 10h): 0.5 step rounding with dot
+    check(3600.0, "1ч", &context);
+    check(3900.0, "1ч", &context); // 1h 05m -> 1ч
+    check(5400.0, "1.5ч", &context); // 1h 30m -> 1.5ч
+    check(7800.0, "2ч", &context); // 2h 10m -> 2ч
+    check(9300.0, "2.5ч", &context); // 2h 35m -> 2.5ч
+    check(10500.0, "3ч", &context); // 2h 55m -> 3ч
+    check(34200.0, "9.5ч", &context); // 9h 30m -> 9.5ч
+
+    // Hours >= 10 hours: integer math rounding
+    check(36000.0, "10ч", &context);
+    check(43200.0, "12ч", &context);
+    check(66300.0, "18ч", &context); // 18h 25m -> 18ч
+    check(85500.0, "1д", &context); // 23h 45m -> rolls over to 1д
+
+    // Days < 10 days: 0.5 step rounding with dot
+    check(86400.0, "1д", &context);
+    check(129600.0, "1.5д", &context); // 1d 12h -> 1.5д
+    check(216000.0, "2.5д", &context); // 2d 12h -> 2.5д
+    check(532800.0, "6д", &context); // 6d 4h -> strictly 6д
+    check(565200.0, "6.5д", &context); // 6d 13h -> 6.5д
+    check(604800.0, "7д", &context); // 7d -> 7д
+
+    // Days >= 10 days: integer math rounding
+    check(892800.0, "10д", &context); // 10d 8h -> 10д
+    check(1036800.0, "12д", &context); // 12d -> 12д
+
+    // Seconds and now
+    check(45.0, "45с", &context);
+    check(0.0, "сейчас", &context);
 }
 
 #[test]
@@ -704,6 +758,7 @@ fn usage_lines_handle_loading_errors_missing_resets_and_language() {
             monthly: None,
             credits: None,
             stale: false,
+            ..Default::default()
         },
     )]);
     let ready = DataContext::from_usage_with_runtime(
@@ -1014,6 +1069,7 @@ fn reset_stats_and_duration_formats_are_available_to_every_provider() {
             monthly: None,
             credits: None,
             stale: false,
+            ..Default::default()
         },
     )]);
     let context = DataContext::from_usage(Some(&usage), &Canvas::default());
@@ -2177,6 +2233,13 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
                     remaining: 24.1,
                     total: 40.83,
                 }),
+                external_pool: (provider == ProviderId::Antigravity).then(|| {
+                    Box::new(UsageData {
+                        session: section.clone(),
+                        weekly: section.clone(),
+                        ..Default::default()
+                    })
+                }),
                 ..Default::default()
             },
         )
@@ -3236,3 +3299,180 @@ fn action_values_are_found_around_the_caret() {
     assert_eq!(at(r#"layer_actions("toggle(self, |render)")"#), None);
     assert_eq!(at(r#"layer_actions(|"set(self, x, 1)")"#), None);
 }
+
+#[test]
+fn compact_fluent_quad_antigravity_dual_and_solo_modes() {
+    use crate::models::{UsageData, UsageSection};
+
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+
+    let gemini_section = UsageSection {
+        available: true,
+        percentage: 30.0,
+        resets_at: None,
+    };
+    let external_section = UsageSection {
+        available: true,
+        percentage: 70.0,
+        resets_at: None,
+    };
+
+    let mut usage = AppUsageData::default();
+    usage.insert(
+        ProviderId::Antigravity,
+        UsageData {
+            session: gemini_section.clone(),
+            weekly: gemini_section.clone(),
+            external_pool: Some(Box::new(UsageData {
+                session: external_section.clone(),
+                weekly: external_section.clone(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        },
+    );
+
+    // 1. Solo Gemini
+    {
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(true, false, 1.0);
+        let mut context = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 0.0);
+        assert_eq!(evaluate("antigravity.gemini.enabled", &context).unwrap(), 1.0);
+        assert_eq!(evaluate("antigravity.external.enabled", &context).unwrap(), 0.0);
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(find_render("antigravity-session-gemini-solo-dark"));
+        assert!(!find_render("antigravity-session-external-solo-dark"));
+        assert!(!find_render("antigravity-session-gemini-dual-dark"));
+        assert!(!find_render("antigravity-session-external-dual-dark"));
+        assert!(find_render("antigravity-session-gemini-value-dark"));
+        assert!(!find_render("antigravity-session-external-value-dark"));
+    }
+
+    // 2. Solo External
+    {
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(false, true, 1.0);
+        let mut context = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 0.0);
+        assert_eq!(evaluate("antigravity.gemini.enabled", &context).unwrap(), 0.0);
+        assert_eq!(evaluate("antigravity.external.enabled", &context).unwrap(), 1.0);
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(!find_render("antigravity-session-gemini-solo-dark"));
+        assert!(find_render("antigravity-session-external-solo-dark"));
+        assert!(!find_render("antigravity-session-gemini-dual-dark"));
+        assert!(!find_render("antigravity-session-external-dual-dark"));
+        assert!(!find_render("antigravity-session-gemini-value-dark"));
+        assert!(find_render("antigravity-session-external-value-dark"));
+    }
+
+    // 3. Dual Mode Crossfade
+    {
+        // At opacity 1.0 (Gemini holding)
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(true, true, 1.0);
+        let mut context = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 1.0);
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(!find_render("antigravity-session-gemini-solo-dark"));
+        assert!(!find_render("antigravity-session-external-solo-dark"));
+        assert!(find_render("antigravity-session-gemini-dual-dark"));
+        assert!(find_render("antigravity-session-external-dual-dark"));
+        assert!(find_render("antigravity-session-gemini-value-dark"));
+        assert!(!find_render("antigravity-session-external-value-dark"));
+
+        // At opacity 0.5 (Mid-transition)
+        let runtime_mid = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(true, true, 0.5);
+        let mut context_mid = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime_mid);
+        context_mid.insert("system.dark", 1.0);
+        let find_render_mid = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context_mid).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+        assert!(find_render_mid("antigravity-session-gemini-value-dark"));
+        assert!(find_render_mid("antigravity-session-external-value-dark"));
+
+        // At opacity 0.0 (External holding)
+        let runtime_ext = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(true, true, 0.0);
+        let mut context_ext = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime_ext);
+        context_ext.insert("system.dark", 1.0);
+        let find_render_ext = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context_ext).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+        assert!(!find_render_ext("antigravity-session-gemini-value-dark"));
+        assert!(find_render_ext("antigravity-session-external-value-dark"));
+    }
+}
+
+#[test]
+fn missing_antigravity_external_pool_draws_an_empty_gauge() {
+    use crate::models::{UsageData, UsageSection};
+
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Antigravity,
+        UsageData {
+            session: UsageSection {
+                available: true,
+                percentage: 25.0,
+                resets_at: None,
+            },
+            ..Default::default()
+        },
+    )]);
+    let context = DataContext::from_usage_with_runtime(
+        Some(&usage),
+        &Canvas::default(),
+        ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_countdown(true),
+    );
+    let value = |expression: &str| {
+        evaluate(expression, &context)
+            .unwrap()
+    };
+    assert_eq!(value("antigravity.gemini.session.display"), 75.0);
+    assert_eq!(value("antigravity.gemini.weekly.display"), 0.0);
+    assert_eq!(value("antigravity.external.session.display"), 0.0);
+}
+
