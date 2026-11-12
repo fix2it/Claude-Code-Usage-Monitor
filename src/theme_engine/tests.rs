@@ -1592,7 +1592,7 @@ fn compact_fluent_quad_adds_a_fable_column_only_when_opted_in() {
         },
     )]);
     let runtime = ThemeRuntime::new(true, false, false);
-    let (base_width, height) = resolve_surface_size(&theme, 0, None, runtime);
+    let (base_width, height) = resolve_surface_size(&theme, 0, Some(&usage), runtime);
 
     // A reported Fable quota alone no longer grows the widget: the column is
     // opt-in, off by default.
@@ -4553,15 +4553,11 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         .filter(|o| o.id.contains("-marker-"))
         .collect::<Vec<_>>();
     assert_eq!(markers.len(), 24);
-    let boxes = markers
-        .iter()
-        .map(|o| (o.x.0.clone(), o.width.0.clone()))
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        boxes,
-        std::collections::BTreeSet::from([("0".to_string(), "10".to_string())]),
-        "markers no longer share one fixed box"
-    );
+    for marker in &markers {
+        let key = marker.id.split('-').next().unwrap();
+        assert_eq!(marker.x.0, "0");
+        assert_eq!(marker.width.0, format!("display.marker_box.{key}"));
+    }
     for marker in &markers {
         match &marker.content {
             SceneContent::Text {
@@ -4599,8 +4595,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         ])
     );
 
-    // Claude/Codex gauges start at x = 12, so the marker box ending at x = 9
-    // leaves a 3 px structural gap (glyph ink is centred inside the box).
+    // The measured marker box has a two-pixel gap before the gauge.
     // Antigravity gauges are parent-relative and carry no explicit `x`.
     let gauges = theme.surfaces[0]
         .children
@@ -4613,7 +4608,12 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         .collect::<Vec<_>>();
     assert_eq!(gauges.len(), 16);
     for gauge in gauges {
-        assert_eq!(gauge.x.0, "12", "{}", gauge.id);
+        assert_eq!(
+            gauge.x.0,
+            format!("display.origin.{}", gauge.id.split('-').next().unwrap()),
+            "{}",
+            gauge.id
+        );
     }
 }
 
@@ -4991,7 +4991,12 @@ fn compact_view_mode_widths_collapse_and_mode_one_is_exact() {
     // Mode 1 is byte-for-byte the accepted Stage 4 layout: the 10 px padding
     // experiment (0275302) must NOT apply to the full or compact modes.
     let original = "providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62) + max(0, providers.count - 1) * 6 + providers.cursor.enabled * 18 + providers.claude.enabled * claude.model.fable.available * 96 + providers.codex.enabled * codex.dual_mode * 12 + providers.claude.enabled * claude.dual_mode * 12 + providers.opencode.enabled * 12";
-    let context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime(0.0, 1));
+    let mut context =
+        DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime(0.0, 1));
+    insert_display_metrics(
+        &mut context,
+        &display_metrics(&theme, None, runtime(0.0, 1)),
+    );
     assert_eq!(
         evaluate(&theme.surfaces[0].width.0, &context).unwrap(),
         evaluate(original, &context).unwrap() + 4.0,
@@ -5031,7 +5036,8 @@ fn compact_all_modes_share_one_trailing_gap() {
     // Trailing empty column = surface width - (enabled providers + gaps).
     for phase in [0.0_f64, 0.5, 1.0, 1.5, 2.0] {
         let runtime = ThemeRuntime::default().with_mode_phase(phase);
-        let context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        let mut context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        insert_display_metrics(&mut context, &display_metrics(&theme, None, runtime));
         let surface_width = evaluate(root, &context).unwrap();
         let mut content = 0.0_f64;
         let mut enabled = 0_usize;
@@ -5076,17 +5082,19 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
             "{} is not gated by the mode",
             twin.id
         );
-        assert_eq!(twin.width.0, "30", "{}", twin.id);
+        let key = label.id.split('-').next().unwrap();
+        let (width, x) = if key == "fable" {
+            ("30".to_string(), "0".to_string())
+        } else {
+            (
+                format!("display.percent_box.{key}"),
+                format!("display.origin.{key}"),
+            )
+        };
+        assert_eq!(twin.width.0, width, "{}", twin.id);
         assert_eq!(twin.parent, label.parent, "{}", twin.id);
         assert_eq!(twin.y.0, label.y.0, "{}", twin.id);
-        // Dual-mode rows keep the 12 px marker column; solo rows start at 0.
-        // A wrong x here would overlap the fixed o/x marker in mode 3.
-        let expected_x = if label.x.0.starts_with("12 + ") {
-            "12"
-        } else {
-            "0"
-        };
-        assert_eq!(twin.x.0, expected_x, "{}", twin.id);
+        assert_eq!(twin.x.0, x, "{}", twin.id);
         match &twin.content {
             SceneContent::Text { template, .. } => assert!(
                 template.contains(":usage_badge"),
@@ -5356,8 +5364,8 @@ fn opencode_has_three_gauges_with_row_two_divided_into_two_horizontal_sub_bars()
     assert_eq!(marker_m.x.0, "0");
     assert_eq!(marker_w.y.0, "25");
     assert_eq!(marker_m.y.0, "25");
-    assert_eq!(marker_w.width.0, "10");
-    assert_eq!(marker_m.width.0, "10");
+    assert_eq!(marker_w.width.0, "display.marker_box.opencode");
+    assert_eq!(marker_m.width.0, "display.marker_box.opencode");
 }
 
 #[test]
@@ -5414,9 +5422,9 @@ fn opencode_text_labels_do_not_contain_prefixes_and_have_standard_width() {
         .find(|o| o.id == "opencode-monthly-text-dark-hover")
         .unwrap();
 
-    assert_eq!(session_text.width.0, "62");
-    assert_eq!(week_text.width.0, "62");
-    assert_eq!(monthly_text.width.0, "62");
+    assert_eq!(session_text.width.0, "display.text_box.opencode");
+    assert_eq!(week_text.width.0, "display.text_box.opencode");
+    assert_eq!(monthly_text.width.0, "display.text_box.opencode");
     assert_eq!(session_text.y.0, "8");
     assert_eq!(week_text.y.0, "25");
     assert_eq!(monthly_text.y.0, "25");
@@ -5460,10 +5468,7 @@ fn opencode_widget_width_matches_dual_mode_provider_width() {
         .find(|o| o.id == "opencode-provider")
         .unwrap();
 
-    assert_eq!(
-        provider.width.0,
-        "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress + 12"
-    );
+    assert_eq!(provider.width.0, "display.row_width.opencode");
 }
 
 #[test]
@@ -5674,6 +5679,276 @@ fn qoder_rows_hide_when_their_pool_is_unknown() {
                 0.0,
                 "{}",
                 row.id
+            );
+        }
+    }
+}
+
+#[test]
+fn compact_adaptive_root_and_mode_geometry() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let sets = [
+        ProviderSet::from_enabled([
+            ProviderId::Claude,
+            ProviderId::Codex,
+            ProviderId::Antigravity,
+            ProviderId::OpenCode,
+        ]),
+        ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Qoder]),
+        ProviderSet::from_enabled([ProviderId::Cursor, ProviderId::Grok, ProviderId::Copilot]),
+    ];
+    for providers in sets {
+        for phase in [0.0, 0.5, 1.0, 1.5, 2.0] {
+            let runtime = ThemeRuntime::from_providers(providers).with_mode_phase(phase);
+            let metrics = display_metrics(&theme, None, runtime);
+            let mut context =
+                DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+            insert_display_metrics(&mut context, &metrics);
+            let root = evaluate(&theme.surfaces[0].width.0, &context).unwrap();
+            assert_eq!(root, metrics.providers_width + 4.0);
+            let bar = evaluate("display.bar_width", &context).unwrap();
+            for key in DISPLAY_PROVIDER_KEYS {
+                let m = metrics.provider(key).unwrap();
+                if phase == 1.0 {
+                    assert_eq!(m.row_width, m.origin + bar);
+                    assert_eq!(
+                        m.origin + bar + 4.0 + m.text_slide + m.text_box,
+                        m.origin + bar + 4.0
+                    );
+                }
+                if phase == 2.0 {
+                    assert_eq!(m.row_width, m.origin + m.percent_box);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn compact_adaptive_no_data_baselines_and_hover() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let providers = ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+        ProviderId::OpenCode,
+    ]);
+    for (dual, expected) in [
+        (false, [426.0, 162.0, 154.0]),
+        (true, [448.0, 184.0, 176.0]),
+    ] {
+        for (phase, expected) in [0.0, 1.0, 2.0].into_iter().zip(expected) {
+            let runtime = ThemeRuntime::from_providers(providers)
+                .with_claude_state(false, true, dual, 0.0)
+                .with_codex_state(false, true, dual, 0.0)
+                .with_mode_phase(phase);
+            let normal = display_metrics(&theme, None, runtime);
+            let hover = display_metrics(
+                &theme,
+                None,
+                runtime
+                    .with_claude_state(true, true, dual, 1.0)
+                    .with_codex_state(true, true, dual, 1.0),
+            );
+            assert_eq!(normal.providers_width + 4.0, expected);
+            for key in DISPLAY_PROVIDER_KEYS {
+                let a = normal.provider(key).unwrap();
+                let b = hover.provider(key).unwrap();
+                assert_eq!((a.row_width, a.origin), (b.row_width, b.origin));
+            }
+        }
+    }
+    let providers = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Qoder]);
+    for (phase, expected) in [0.0, 1.0, 2.0].into_iter().zip([262.0, 130.0, 82.0]) {
+        let runtime = ThemeRuntime::from_providers(providers).with_mode_phase(phase);
+        assert_eq!(
+            display_metrics(&theme, None, runtime).providers_width + 4.0,
+            expected
+        );
+    }
+}
+
+fn adaptive_qoder_data(session: bool, week: bool) -> AppUsageData {
+    use crate::models::{UsageData, UsageSection};
+    use std::time::{Duration, SystemTime};
+    let section = || UsageSection {
+        available: true,
+        percentage: 45.0,
+        resets_at: Some(SystemTime::now() + Duration::from_secs(6 * 86400 + 3600)),
+    };
+    AppUsageData::from_iter([(
+        ProviderId::Qoder,
+        UsageData {
+            session: if session {
+                section()
+            } else {
+                UsageSection::default()
+            },
+            session_label: session.then(|| "u".into()),
+            week: week.then(section),
+            week_label: week.then(|| "c".into()),
+            ..Default::default()
+        },
+    )])
+}
+
+#[test]
+fn compact_adaptive_data_markers_hover_and_bounds() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let providers = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Qoder]);
+    let runtime = ThemeRuntime::from_providers(providers);
+    let states = [
+        (false, false, 12.0, 10.0),
+        (true, false, 10.0, 8.0),
+        (false, true, 9.0, 7.0),
+        (true, true, 10.0, 8.0),
+    ];
+    for (session, week, origin, marker) in states {
+        let data = adaptive_qoder_data(session, week);
+        for dual in [false, true] {
+            for phase in [0.0, 1.0, 2.0] {
+                let normal_runtime =
+                    ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL))
+                        .with_mode_phase(phase)
+                        .with_claude_state(false, true, dual, 0.0)
+                        .with_codex_state(false, true, dual, 0.0);
+                let hover_runtime = normal_runtime
+                    .with_claude_state(true, true, dual, 1.0)
+                    .with_codex_state(true, true, dual, 1.0)
+                    .with_opencode_state(1.0)
+                    .with_qoder_state(1.0);
+                let normal = display_metrics(&theme, Some(&data), normal_runtime);
+                let hover = display_metrics(&theme, Some(&data), hover_runtime);
+                for key in DISPLAY_PROVIDER_KEYS {
+                    let a = normal.provider(key).unwrap();
+                    let b = hover.provider(key).unwrap();
+                    assert_eq!(
+                        (a.row_width, a.origin),
+                        (b.row_width, b.origin),
+                        "{key}, session={session}, week={week}, phase={phase}"
+                    );
+                }
+                for key in ["claude", "codex"] {
+                    let m = normal.provider(key).unwrap();
+                    assert_eq!(
+                        (m.origin, m.marker_box),
+                        if dual { (11.0, 9.0) } else { (0.0, 0.0) },
+                        "{key}"
+                    );
+                }
+                let m = normal.provider("opencode").unwrap();
+                assert_eq!((m.origin, m.marker_box), (12.0, 10.0));
+                let m = normal.provider("qoder").unwrap();
+                assert_eq!((m.origin, m.marker_box), (origin, marker));
+                for key in ["antigravity", "cursor", "grok", "copilot"] {
+                    let m = normal.provider(key).unwrap();
+                    assert_eq!((m.origin, m.marker_box), (0.0, 0.0), "{key}");
+                }
+            }
+        }
+        if session && !week {
+            let m = display_metrics(&theme, Some(&data), runtime);
+            let q = m.provider("qoder").unwrap();
+            let context =
+                DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+            assert_eq!(
+                format_template("{qoder.session.display:usage_line}", &context),
+                "45% · 6d"
+            );
+            assert_eq!(
+                (
+                    q.text_box,
+                    q.percent_box,
+                    q.row_width,
+                    m.providers_width + 4.0
+                ),
+                (49.0, 24.0, 117.0, 247.0)
+            );
+        }
+        let index = theme.surfaces[0]
+            .children
+            .iter()
+            .position(|o| o.id == "qoder-provider")
+            .unwrap();
+        let a = object_bounds(&theme, 0, Some(&data), runtime, "qoder-provider").unwrap();
+        let b = resolve_object_bounds_with_runtime(&theme, 0, index, Some(&data), runtime).unwrap();
+        assert_eq!((a.0, a.2), (b.0, b.2));
+        assert_eq!(
+            a.2,
+            display_metrics(&theme, Some(&data), runtime)
+                .provider("qoder")
+                .unwrap()
+                .row_width
+        );
+    }
+}
+
+#[test]
+fn compact_adaptive_credit_box_grows() {
+    use crate::models::{CreditsSection, UsageData};
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let data = AppUsageData::from_iter([(
+        ProviderId::Claude,
+        UsageData {
+            credits: Some(CreditsSection {
+                remaining: 123456.78,
+                total: 123456.78,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )]);
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]));
+    let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+    assert_eq!(
+        format_template("${claude.credits.balance:0.00}", &context),
+        "$123456.78"
+    );
+    assert!(
+        display_metrics(&theme, Some(&data), runtime)
+            .provider("claude")
+            .unwrap()
+            .text_box
+            > 62.0
+    );
+}
+
+#[test]
+fn compact_adaptive_physical_text_fits_at_all_scales() {
+    let family = crate::widget_font::segoe_ui_family(500);
+    for (line, size, box_width, slack) in [
+        ("45% · 6d", 12.0, 49.0, true),
+        ("100% · 23h", 12.0, 62.0, true),
+        ("int 45% · 6d", 12.0, 80.0, true),
+        ("45%", 11.0, 24.0, true),
+        ("o", 11.0, 9.0, false),
+        ("x", 11.0, 7.0, false),
+        ("m", 11.0, 11.0, false),
+        ("u", 11.0, 8.0, false),
+        ("c", 11.0, 7.0, false),
+    ] {
+        let Some(logical) = text_measure::measure_text(line, family, size, 500) else {
+            eprintln!("GDI measurement unavailable; skipping physical fit test");
+            return;
+        };
+        if slack {
+            assert!(
+                logical + 2.0 <= box_width,
+                "{line}: {logical} > {box_width}"
+            );
+        }
+        for scale in text_measure::MEASURE_SCALES {
+            let physical =
+                text_measure::physical_advance(line, family, (size * scale).round() as i32, 500)
+                    .unwrap();
+            assert!(
+                f64::from(physical) <= (box_width * scale).round(),
+                "{line} at {scale}: {physical} > {}",
+                (box_width * scale).round()
             );
         }
     }

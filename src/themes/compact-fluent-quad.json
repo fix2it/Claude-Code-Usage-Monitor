@@ -21,7 +21,7 @@
         "offset_x": 6,
         "offset_y": 0
       },
-      "width": "providers.count * (display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress) + max(0, providers.count - 1) * 6 + providers.cursor.enabled * 18 * (1 - display.mode_text_progress) + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + 90 * (1 - display.mode_text_progress) + (floor((90 + 1) / 11) * 11 - 1) * display.mode_text_progress * (1 - display.mode_bar_progress) + 30 * display.mode_bar_progress) + providers.codex.enabled * codex.dual_mode * 12 + providers.claude.enabled * claude.dual_mode * 12 + providers.opencode.enabled * 12 + providers.qoder.enabled * 12 + 4",
+      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + 90 * (1 - display.mode_text_progress) + (floor((90 + 1) / 11) * 11 - 1) * display.mode_text_progress * (1 - display.mode_bar_progress) + 30 * display.mode_bar_progress) + 4",
       "height": "46",
       "background": {
         "type": "none"
@@ -44,7 +44,7 @@
           "render": "providers.cursor.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + 80 * (1 - display.mode_text_progress) + 30 * display.mode_bar_progress",
+          "width": "display.row_width.cursor",
           "height": "46",
           "background": {
             "type": "none"
@@ -99,9 +99,9 @@
           "render": "system.dark",
           "visibility": "display.text_opacity",
           "parent": "cursor-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.cursor + display.bar_width + 4 + display.text_slide.cursor",
           "y": "8",
-          "width": "80",
+          "width": "display.text_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -167,9 +167,9 @@
           "render": "1 - system.dark",
           "visibility": "display.text_opacity",
           "parent": "cursor-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.cursor + display.bar_width + 4 + display.text_slide.cursor",
           "y": "8",
-          "width": "80",
+          "width": "display.text_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -235,9 +235,9 @@
           "render": "system.dark",
           "visibility": "display.text_opacity",
           "parent": "cursor-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.cursor + display.bar_width + 4 + display.text_slide.cursor",
           "y": "25",
-          "width": "80",
+          "width": "display.text_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -303,9 +303,9 @@
           "render": "1 - system.dark",
           "visibility": "display.text_opacity",
           "parent": "cursor-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.cursor + display.bar_width + 4 + display.text_slide.cursor",
           "y": "25",
-          "width": "80",
+          "width": "display.text_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -356,7 +356,7 @@
           "render": "providers.claude.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress + (claude.dual_mode * 12)",
+          "width": "display.row_width.claude",
           "height": "46",
           "background": {
             "type": "none"
@@ -437,9 +437,9 @@
           "render": "(system.dark) && (!claude.dual_mode) && claude.session.available",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -531,9 +531,9 @@
           "render": "(1 - system.dark) && (!claude.dual_mode) && claude.session.available",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -625,9 +625,9 @@
           "render": "((system.dark) && !claude.credits.available) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -719,9 +719,9 @@
           "render": "((1 - system.dark) && !claude.credits.available) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -906,7 +906,7 @@
           "render": "providers.codex.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress + (codex.dual_mode * 12)",
+          "width": "display.row_width.codex",
           "height": "46",
           "background": {
             "type": "none"
@@ -987,9 +987,9 @@
           "render": "(system.dark) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -1081,9 +1081,9 @@
           "render": "(1 - system.dark) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -1175,9 +1175,9 @@
           "render": "((system.dark) && !codex.credits.available) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -1269,9 +1269,9 @@
           "render": "((1 - system.dark) && !codex.credits.available) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -1302,7 +1302,7 @@
           "render": "providers.antigravity.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress",
+          "width": "display.row_width.antigravity",
           "height": "46",
           "background": {
             "type": "none"
@@ -2030,9 +2030,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2063,9 +2063,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2096,9 +2096,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2129,9 +2129,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2626,9 +2626,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2659,9 +2659,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2692,9 +2692,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2725,9 +2725,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2758,9 +2758,9 @@
           "render": "system.dark && !antigravity.dual_mode && antigravity.gemini.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2791,9 +2791,9 @@
           "render": "(1 - system.dark && !antigravity.dual_mode) && antigravity.gemini.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2824,9 +2824,9 @@
           "render": "system.dark && !antigravity.dual_mode && antigravity.external.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -2857,9 +2857,9 @@
           "render": "(1 - system.dark && !antigravity.dual_mode) && antigravity.external.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -3134,9 +3134,9 @@
           "render": "system.dark && !antigravity.dual_mode && antigravity.gemini.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -3167,9 +3167,9 @@
           "render": "(1 - system.dark && !antigravity.dual_mode) && antigravity.gemini.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -3200,9 +3200,9 @@
           "render": "system.dark && !antigravity.dual_mode && antigravity.external.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -3233,9 +3233,9 @@
           "render": "(1 - system.dark && !antigravity.dual_mode) && antigravity.external.opacity > 0.01",
           "visibility": "display.text_opacity",
           "parent": "antigravity-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.antigravity + display.bar_width + 4 + display.text_slide.antigravity",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -3266,7 +3266,7 @@
           "render": "providers.opencode.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress + 12",
+          "width": "display.row_width.opencode",
           "height": "46",
           "background": {
             "type": "none"
@@ -3286,7 +3286,7 @@
           "render": "system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "10",
           "width": "display.bar_width",
           "height": "9",
@@ -3322,7 +3322,7 @@
           "render": "system.dark",
           "visibility": "(100) * opencode.session.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "9",
           "width": "1",
           "height": "11",
@@ -3348,9 +3348,9 @@
           "render": "system.dark",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3381,7 +3381,7 @@
           "render": "1 - system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "10",
           "width": "display.bar_width",
           "height": "9",
@@ -3417,7 +3417,7 @@
           "render": "1 - system.dark",
           "visibility": "(100) * opencode.session.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "9",
           "width": "1",
           "height": "11",
@@ -3443,9 +3443,9 @@
           "render": "1 - system.dark",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3478,7 +3478,7 @@
           "parent": "opencode-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3511,7 +3511,7 @@
           "parent": "opencode-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3544,7 +3544,7 @@
           "parent": "opencode-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3577,7 +3577,7 @@
           "parent": "opencode-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3608,7 +3608,7 @@
           "render": "system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * opencode.hover_phase",
@@ -3644,7 +3644,7 @@
           "render": "system.dark",
           "visibility": "(100) * opencode.week.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * opencode.hover_phase",
@@ -3670,7 +3670,7 @@
           "render": "1 - system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * opencode.hover_phase",
@@ -3706,7 +3706,7 @@
           "render": "1 - system.dark",
           "visibility": "(100) * opencode.week.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * opencode.hover_phase",
@@ -3732,7 +3732,7 @@
           "render": "system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "35 - 3 * opencode.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * opencode.hover_phase",
@@ -3768,7 +3768,7 @@
           "render": "system.dark",
           "visibility": "(100) * opencode.monthly.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "34 - 3 * opencode.hover_phase",
           "width": "1",
           "height": "5 + 3 * opencode.hover_phase",
@@ -3794,7 +3794,7 @@
           "render": "1 - system.dark",
           "visibility": "100",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "35 - 3 * opencode.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * opencode.hover_phase",
@@ -3830,7 +3830,7 @@
           "render": "1 - system.dark",
           "visibility": "(100) * opencode.monthly.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "opencode-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(opencode.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.opencode + clamp(round((display.bar_width - 1) * clamp(opencode.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "34 - 3 * opencode.hover_phase",
           "width": "1",
           "height": "5 + 3 * opencode.hover_phase",
@@ -3856,9 +3856,9 @@
           "render": "(system.dark) && (opencode.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3889,9 +3889,9 @@
           "render": "(1 - system.dark) && (opencode.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3922,9 +3922,9 @@
           "render": "(system.dark) && (opencode.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -3955,9 +3955,9 @@
           "render": "(1 - system.dark) && (opencode.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "opencode-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.opencode + display.bar_width + 4 + display.text_slide.opencode",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -4023,9 +4023,9 @@
           "render": "((system.dark) && claude.credits.available) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4091,9 +4091,9 @@
           "render": "((1 - system.dark) && claude.credits.available) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4126,7 +4126,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4159,7 +4159,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4192,7 +4192,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4225,7 +4225,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4256,7 +4256,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -4292,7 +4292,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.session.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -4318,7 +4318,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -4354,7 +4354,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.session.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -4380,7 +4380,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -4416,7 +4416,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.session.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -4442,7 +4442,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -4478,7 +4478,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.session.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -4504,7 +4504,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "16 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -4540,7 +4540,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.weekly.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -4566,7 +4566,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "16 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -4602,7 +4602,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.weekly.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -4628,7 +4628,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "16 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -4664,7 +4664,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.weekly.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -4690,7 +4690,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "16 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -4726,7 +4726,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.default.weekly.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -4752,9 +4752,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4785,9 +4785,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4818,9 +4818,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4851,9 +4851,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4886,7 +4886,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4919,7 +4919,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4952,7 +4952,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -4985,7 +4985,7 @@
           "parent": "claude-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -5016,7 +5016,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -5052,7 +5052,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.session.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -5078,7 +5078,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -5114,7 +5114,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.session.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -5140,7 +5140,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -5176,7 +5176,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.session.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -5202,7 +5202,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * claude.hover_phase",
@@ -5238,7 +5238,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.session.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * claude.hover_phase",
@@ -5264,7 +5264,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "35 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -5300,7 +5300,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.weekly.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -5326,7 +5326,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "35 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -5362,7 +5362,7 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.weekly.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -5388,7 +5388,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "100 * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "35 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -5424,7 +5424,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.weekly.expected_available * display.show_pace * claude.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -5450,7 +5450,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "100 * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "35 - 3 * claude.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * claude.hover_phase",
@@ -5486,7 +5486,7 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.claude.claude_x.weekly.expected_available * display.show_pace * claude.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "claude-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.claude + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * claude.hover_phase",
           "width": "1",
           "height": "5 + 3 * claude.hover_phase",
@@ -5512,9 +5512,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -5545,9 +5545,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -5578,9 +5578,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -5611,9 +5611,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "claude-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -5679,9 +5679,9 @@
           "render": "((system.dark) && codex.credits.available) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5747,9 +5747,9 @@
           "render": "((1 - system.dark) && codex.credits.available) && (!codex.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5782,7 +5782,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5815,7 +5815,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5848,7 +5848,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5881,7 +5881,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "7",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -5912,7 +5912,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -5948,7 +5948,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.session.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -5974,7 +5974,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6010,7 +6010,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.session.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6036,7 +6036,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6072,7 +6072,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.session.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6098,7 +6098,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "8",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6134,7 +6134,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.session.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6160,7 +6160,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "16 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -6196,7 +6196,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.weekly.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -6222,7 +6222,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "16 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -6258,7 +6258,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.weekly.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -6284,7 +6284,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "16 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -6320,7 +6320,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.weekly.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -6346,7 +6346,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "16 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -6382,7 +6382,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.default.weekly.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.default.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -6408,9 +6408,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6441,9 +6441,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6474,9 +6474,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6507,9 +6507,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "7",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6542,7 +6542,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6575,7 +6575,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6608,7 +6608,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6641,7 +6641,7 @@
           "parent": "codex-provider",
           "x": "0",
           "y": "26",
-          "width": "10",
+          "width": "display.marker_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -6672,7 +6672,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6708,7 +6708,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.session.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6734,7 +6734,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6770,7 +6770,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.session.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6796,7 +6796,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6832,7 +6832,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.session.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6858,7 +6858,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 - 3 * codex.hover_phase",
@@ -6894,7 +6894,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.session.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * codex.hover_phase",
@@ -6920,7 +6920,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "35 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -6956,7 +6956,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.weekly.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -6982,7 +6982,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "35 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -7018,7 +7018,7 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.weekly.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -7044,7 +7044,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "100 * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "35 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -7080,7 +7080,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.weekly.expected_available * display.show_pace * codex.normal.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -7106,7 +7106,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "100 * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "35 - 3 * codex.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * codex.hover_phase",
@@ -7142,7 +7142,7 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "(100) * accounts.codex.codex_x.weekly.expected_available * display.show_pace * codex.hover.opacity * (1 - display.mode_bar_progress)",
           "parent": "codex-provider",
-          "x": "12 + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.codex + round((display.bar_width - 1) * clamp(accounts.codex.codex_x.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * codex.hover_phase",
           "width": "1",
           "height": "5 + 3 * codex.hover_phase",
@@ -7168,9 +7168,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -7201,9 +7201,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -7234,9 +7234,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -7267,9 +7267,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01)",
           "visibility": "display.text_opacity",
           "parent": "codex-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.codex + display.bar_width + 4 + display.text_slide.codex",
           "y": "26",
-          "width": "62",
+          "width": "display.text_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -7299,7 +7299,7 @@
           "name": "Grok provider",
           "render": "providers.grok.enabled",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress",
+          "width": "display.row_width.grok",
           "height": "46"
         },
         {
@@ -7343,9 +7343,9 @@
           "render": "(system.dark) && !grok.credits.available",
           "visibility": "display.text_opacity",
           "parent": "grok-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.grok + display.bar_width + 4 + display.text_slide.grok",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -7411,9 +7411,9 @@
           "render": "(1 - system.dark) && !grok.credits.available",
           "visibility": "display.text_opacity",
           "parent": "grok-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.grok + display.bar_width + 4 + display.text_slide.grok",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -7479,9 +7479,9 @@
           "render": "(system.dark) && grok.credits.available",
           "visibility": "display.text_opacity",
           "parent": "grok-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.grok + display.bar_width + 4 + display.text_slide.grok",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -7547,9 +7547,9 @@
           "render": "(1 - system.dark) && grok.credits.available",
           "visibility": "display.text_opacity",
           "parent": "grok-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.grok + display.bar_width + 4 + display.text_slide.grok",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -7579,7 +7579,7 @@
           "name": "Copilot provider",
           "render": "providers.copilot.enabled",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress",
+          "width": "display.row_width.copilot",
           "height": "46"
         },
         {
@@ -7623,9 +7623,9 @@
           "render": "system.dark",
           "visibility": "display.text_opacity",
           "parent": "copilot-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.copilot + display.bar_width + 4 + display.text_slide.copilot",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.copilot",
           "height": "13",
           "background": {
             "type": "none"
@@ -7691,9 +7691,9 @@
           "render": "1 - system.dark",
           "visibility": "display.text_opacity",
           "parent": "copilot-provider",
-          "x": "display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.copilot + display.bar_width + 4 + display.text_slide.copilot",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.copilot",
           "height": "13",
           "background": {
             "type": "none"
@@ -7724,7 +7724,7 @@
           "render": "providers.qoder.enabled",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "display.bar_width + 4 * (1 - display.mode_text_progress) + display.text_width + 30 * display.mode_bar_progress + 12",
+          "width": "display.row_width.qoder",
           "height": "46",
           "background": {
             "type": "none"
@@ -7744,9 +7744,9 @@
           "render": "(system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "cursor-provider",
-          "x": "0",
+          "x": "display.origin.cursor",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -7777,9 +7777,9 @@
           "render": "(1 - system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "cursor-provider",
-          "x": "0",
+          "x": "display.origin.cursor",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -7810,9 +7810,9 @@
           "render": "(system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "cursor-provider",
-          "x": "0",
+          "x": "display.origin.cursor",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -7843,9 +7843,9 @@
           "render": "(1 - system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "cursor-provider",
-          "x": "0",
+          "x": "display.origin.cursor",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.cursor",
           "height": "13",
           "background": {
             "type": "none"
@@ -7876,9 +7876,9 @@
           "render": "((system.dark) && (!claude.dual_mode) && claude.session.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -7909,9 +7909,9 @@
           "render": "((1 - system.dark) && (!claude.dual_mode) && claude.session.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -7942,9 +7942,9 @@
           "render": "((system.dark) && !claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -7975,9 +7975,9 @@
           "render": "((1 - system.dark) && !claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -8074,9 +8074,9 @@
           "render": "(system.dark) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -8107,9 +8107,9 @@
           "render": "(1 - system.dark) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -8140,9 +8140,9 @@
           "render": "((system.dark) && !codex.credits.available) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -8173,9 +8173,9 @@
           "render": "((1 - system.dark) && !codex.credits.available) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -8206,9 +8206,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.normal.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8239,9 +8239,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.hover.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8272,9 +8272,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.normal.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8305,9 +8305,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.hover.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8338,9 +8338,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.normal.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8371,9 +8371,9 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.hover.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8404,9 +8404,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.normal.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8437,9 +8437,9 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * antigravity.hover.opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8470,9 +8470,9 @@
           "render": "(system.dark && !antigravity.dual_mode && antigravity.gemini.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8503,9 +8503,9 @@
           "render": "((1 - system.dark && !antigravity.dual_mode) && antigravity.gemini.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8536,9 +8536,9 @@
           "render": "(system.dark && !antigravity.dual_mode && antigravity.external.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8569,9 +8569,9 @@
           "render": "((1 - system.dark && !antigravity.dual_mode) && antigravity.external.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8602,9 +8602,9 @@
           "render": "(system.dark && !antigravity.dual_mode && antigravity.gemini.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8635,9 +8635,9 @@
           "render": "((1 - system.dark && !antigravity.dual_mode) && antigravity.gemini.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8668,9 +8668,9 @@
           "render": "(system.dark && !antigravity.dual_mode && antigravity.external.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8701,9 +8701,9 @@
           "render": "((1 - system.dark && !antigravity.dual_mode) && antigravity.external.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "antigravity-provider",
-          "x": "0",
+          "x": "display.origin.antigravity",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.antigravity",
           "height": "13",
           "background": {
             "type": "none"
@@ -8734,9 +8734,9 @@
           "render": "(system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8767,9 +8767,9 @@
           "render": "(1 - system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8800,9 +8800,9 @@
           "render": "(system.dark) && (opencode.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * opencode.normal.opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8833,9 +8833,9 @@
           "render": "(1 - system.dark) && (opencode.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * opencode.normal.opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8866,9 +8866,9 @@
           "render": "(system.dark) && (opencode.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * opencode.hover.opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8899,9 +8899,9 @@
           "render": "(1 - system.dark) && (opencode.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * opencode.hover.opacity",
           "parent": "opencode-provider",
-          "x": "12",
+          "x": "display.origin.opencode",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.opencode",
           "height": "13",
           "background": {
             "type": "none"
@@ -8932,9 +8932,9 @@
           "render": "((system.dark) && claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -8965,7 +8965,7 @@
           "render": "(system.dark) && (qoder.monthly.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "10",
           "width": "display.bar_width",
           "height": "9",
@@ -9001,7 +9001,7 @@
           "render": "(system.dark) && (qoder.monthly.available)",
           "visibility": "(100) * qoder.monthly.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "9",
           "width": "1",
           "height": "11",
@@ -9027,9 +9027,9 @@
           "render": "(system.dark) && (qoder.monthly.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9060,7 +9060,7 @@
           "render": "(1 - system.dark) && (qoder.monthly.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "10",
           "width": "display.bar_width",
           "height": "9",
@@ -9096,7 +9096,7 @@
           "render": "(1 - system.dark) && (qoder.monthly.available)",
           "visibility": "(100) * qoder.monthly.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.monthly.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "9",
           "width": "1",
           "height": "11",
@@ -9122,9 +9122,9 @@
           "render": "(1 - system.dark) && (qoder.monthly.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "8",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9157,7 +9157,7 @@
           "parent": "qoder-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9190,7 +9190,7 @@
           "parent": "qoder-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9223,7 +9223,7 @@
           "parent": "qoder-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9256,7 +9256,7 @@
           "parent": "qoder-provider",
           "x": "0",
           "y": "25",
-          "width": "10",
+          "width": "display.marker_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9287,7 +9287,7 @@
           "render": "(system.dark) && (qoder.session.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 + 3 * (1 - qoder.week.available) - 3 * qoder.hover_phase",
@@ -9323,7 +9323,7 @@
           "render": "(system.dark) && (qoder.session.available)",
           "visibility": "(100) * qoder.session.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "26",
           "width": "1",
           "height": "8 + 3 * (1 - qoder.week.available) - 3 * qoder.hover_phase",
@@ -9349,7 +9349,7 @@
           "render": "(1 - system.dark) && (qoder.session.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "27",
           "width": "display.bar_width",
           "height": "6 + 3 * (1 - qoder.week.available) - 3 * qoder.hover_phase",
@@ -9385,7 +9385,7 @@
           "render": "(1 - system.dark) && (qoder.session.available)",
           "visibility": "(100) * qoder.session.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.session.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "26",
           "width": "1",
           "height": "8 + 3 * (1 - qoder.week.available) - 3 * qoder.hover_phase",
@@ -9411,7 +9411,7 @@
           "render": "(system.dark) && (qoder.week.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "35 - 3 * qoder.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * qoder.hover_phase",
@@ -9447,7 +9447,7 @@
           "render": "(system.dark) && (qoder.week.available)",
           "visibility": "(100) * qoder.week.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "34 - 3 * qoder.hover_phase",
           "width": "1",
           "height": "5 + 3 * qoder.hover_phase",
@@ -9473,7 +9473,7 @@
           "render": "(1 - system.dark) && (qoder.week.available)",
           "visibility": "100",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "35 - 3 * qoder.hover_phase",
           "width": "display.bar_width",
           "height": "3 + 3 * qoder.hover_phase",
@@ -9509,7 +9509,7 @@
           "render": "(1 - system.dark) && (qoder.week.available)",
           "visibility": "(100) * qoder.week.expected_available * display.show_pace * (1 - display.mode_bar_progress)",
           "parent": "qoder-provider",
-          "x": "12 + clamp(round((display.bar_width - 1) * clamp(qoder.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
+          "x": "display.origin.qoder + clamp(round((display.bar_width - 1) * clamp(qoder.week.expected_display, 0, 100) / 100), 0, max(0, floor(display.bar_width) - 1))",
           "y": "34 - 3 * qoder.hover_phase",
           "width": "1",
           "height": "5 + 3 * qoder.hover_phase",
@@ -9535,9 +9535,9 @@
           "render": "((system.dark) && (qoder.normal.opacity > 0.01)) && (qoder.session.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9568,9 +9568,9 @@
           "render": "((1 - system.dark) && (qoder.normal.opacity > 0.01)) && (qoder.session.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9601,9 +9601,9 @@
           "render": "((system.dark) && (qoder.hover.opacity > 0.01)) && (qoder.week.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9634,9 +9634,9 @@
           "render": "((1 - system.dark) && (qoder.hover.opacity > 0.01)) && (qoder.week.available)",
           "visibility": "display.text_opacity",
           "parent": "qoder-provider",
-          "x": "12 + display.bar_width + 4 + display.text_slide_x",
+          "x": "display.origin.qoder + display.bar_width + 4 + display.text_slide.qoder",
           "y": "25",
-          "width": "62",
+          "width": "display.text_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9667,9 +9667,9 @@
           "render": "((system.dark) && (display.percent_opacity > 0.01)) && (qoder.monthly.available)",
           "visibility": "display.percent_opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9700,9 +9700,9 @@
           "render": "((1 - system.dark) && (display.percent_opacity > 0.01)) && (qoder.monthly.available)",
           "visibility": "display.percent_opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "8",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9733,9 +9733,9 @@
           "render": "((system.dark) && (qoder.normal.opacity > 0.01) && (display.percent_opacity > 0.01)) && (qoder.session.available)",
           "visibility": "display.percent_opacity * qoder.normal.opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9766,9 +9766,9 @@
           "render": "((1 - system.dark) && (qoder.normal.opacity > 0.01) && (display.percent_opacity > 0.01)) && (qoder.session.available)",
           "visibility": "display.percent_opacity * qoder.normal.opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9799,9 +9799,9 @@
           "render": "((system.dark) && (qoder.hover.opacity > 0.01) && (display.percent_opacity > 0.01)) && (qoder.week.available)",
           "visibility": "display.percent_opacity * qoder.hover.opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9832,9 +9832,9 @@
           "render": "((1 - system.dark) && (qoder.hover.opacity > 0.01) && (display.percent_opacity > 0.01)) && (qoder.week.available)",
           "visibility": "display.percent_opacity * qoder.hover.opacity",
           "parent": "qoder-provider",
-          "x": "12",
+          "x": "display.origin.qoder",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.qoder",
           "height": "13",
           "background": {
             "type": "none"
@@ -9865,9 +9865,9 @@
           "render": "((1 - system.dark) && claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "claude-provider",
-          "x": "0",
+          "x": "display.origin.claude",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -9898,9 +9898,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -9931,9 +9931,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -9964,9 +9964,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -9997,9 +9997,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -10030,9 +10030,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -10063,9 +10063,9 @@
           "render": "(system.dark) && (claude.dual_mode) && (claude.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -10096,9 +10096,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.normal.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -10129,9 +10129,9 @@
           "render": "((1 - system.dark)) && (claude.dual_mode) && (claude.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * claude.hover.opacity",
           "parent": "claude-provider",
-          "x": "12",
+          "x": "display.origin.claude",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.claude",
           "height": "13",
           "background": {
             "type": "none"
@@ -10162,9 +10162,9 @@
           "render": "((system.dark) && codex.credits.available) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10195,9 +10195,9 @@
           "render": "((1 - system.dark) && codex.credits.available) && (!codex.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "codex-provider",
-          "x": "0",
+          "x": "display.origin.codex",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10228,9 +10228,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10261,9 +10261,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10294,9 +10294,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10327,9 +10327,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "7",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10360,9 +10360,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10393,9 +10393,9 @@
           "render": "(system.dark) && (codex.dual_mode) && (codex.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10426,9 +10426,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.normal.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.normal.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10459,9 +10459,9 @@
           "render": "((1 - system.dark)) && (codex.dual_mode) && (codex.hover.opacity > 0.01) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity * codex.hover.opacity",
           "parent": "codex-provider",
-          "x": "12",
+          "x": "display.origin.codex",
           "y": "26",
-          "width": "30",
+          "width": "display.percent_box.codex",
           "height": "13",
           "background": {
             "type": "none"
@@ -10492,9 +10492,9 @@
           "render": "((system.dark) && !grok.credits.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "grok-provider",
-          "x": "0",
+          "x": "display.origin.grok",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -10525,9 +10525,9 @@
           "render": "((1 - system.dark) && !grok.credits.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "grok-provider",
-          "x": "0",
+          "x": "display.origin.grok",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -10558,9 +10558,9 @@
           "render": "((system.dark) && grok.credits.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "grok-provider",
-          "x": "0",
+          "x": "display.origin.grok",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -10591,9 +10591,9 @@
           "render": "((1 - system.dark) && grok.credits.available) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "grok-provider",
-          "x": "0",
+          "x": "display.origin.grok",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.grok",
           "height": "13",
           "background": {
             "type": "none"
@@ -10624,9 +10624,9 @@
           "render": "(system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "copilot-provider",
-          "x": "0",
+          "x": "display.origin.copilot",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.copilot",
           "height": "13",
           "background": {
             "type": "none"
@@ -10657,9 +10657,9 @@
           "render": "(1 - system.dark) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "copilot-provider",
-          "x": "0",
+          "x": "display.origin.copilot",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.copilot",
           "height": "13",
           "background": {
             "type": "none"

@@ -4,7 +4,7 @@
 //! persisted structs directly. That keeps malformed user input recoverable and
 //! makes theme files portable across machines and future renderer revisions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -1649,7 +1649,7 @@ pub fn decompose_mode_phase(phase: f64) -> ModePhases {
     }
 }
 
-/// Row geometry mirrored from the Compact theme. Stage 5 replaces the theme's
+/// Row geometry mirrored from the Compact theme. Stage 2 replaces the theme's
 /// own expressions with the `display.*` bindings below, which makes these the
 /// single source of truth; until then the bindings are simply unused.
 const COMPACT_BAR_SEGMENTS: f64 = 10.0;
@@ -1698,6 +1698,511 @@ pub fn mode_row_bindings(
         marker_opacity: 100.0,
         provider_width: bar_width + text_width + gap + marker_width,
     }
+}
+
+/// Provider keys that carry an adaptive Compact column, in the same order the
+/// bindings are read by the theme.
+pub const DISPLAY_PROVIDER_KEYS: [&str; 8] = [
+    "cursor",
+    "claude",
+    "codex",
+    "antigravity",
+    "opencode",
+    "qoder",
+    "grok",
+    "copilot",
+];
+
+const COMPACT_PERCENT_WIDTH: f64 = 30.0;
+const COMPACT_CURSOR_TEXT_WIDTH: f64 = 80.0;
+const DISPLAY_METRICS_CACHE_CAPACITY: usize = 8;
+
+/// One provider's adaptive column. `text_slide` and `row_width` are already
+/// resolved for the runtime's mode phase, so the theme never recomputes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ProviderMetrics {
+    pub text_box: f64,
+    pub percent_box: f64,
+    pub marker_box: f64,
+    pub origin: f64,
+    pub text_slide: f64,
+    pub row_width: f64,
+}
+
+/// Measured Compact geometry for the current data snapshot and mode phase.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayMetrics {
+    providers: [ProviderMetrics; 8],
+    pub providers_width: f64,
+}
+
+impl DisplayMetrics {
+    #[cfg(test)]
+    pub fn provider(&self, key: &str) -> Option<ProviderMetrics> {
+        DISPLAY_PROVIDER_KEYS
+            .iter()
+            .position(|candidate| *candidate == key)
+            .map(|index| self.providers[index])
+    }
+
+    /// Legacy reserves, used whenever a line cannot be measured and as the
+    /// base context that theme validation and Studio build before data exists.
+    pub fn legacy(runtime: ThemeRuntime) -> Self {
+        let phases = decompose_mode_phase(runtime.mode_phase);
+        let bar = compact_bar_full_width(runtime.provider_count());
+        let mut metrics = Self {
+            providers: [ProviderMetrics::default(); 8],
+            providers_width: 0.0,
+        };
+        for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
+            let text_box = if *key == "cursor" {
+                COMPACT_CURSOR_TEXT_WIDTH
+            } else {
+                COMPACT_TEXT_WIDTH
+            };
+            let (marker_box, origin) = match *key {
+                "claude" | "codex" | "opencode" | "qoder" => {
+                    (COMPACT_MARKER_WIDTH, COMPACT_ORIGIN_LEGACY)
+                }
+                _ => (0.0, 0.0),
+            };
+            metrics.providers[index] = ProviderMetrics {
+                text_box,
+                percent_box: COMPACT_PERCENT_WIDTH,
+                marker_box,
+                origin,
+                text_slide: -text_box * phases.text_collapse,
+                row_width: compact_row_width(bar, text_box, COMPACT_PERCENT_WIDTH, origin, phases),
+            };
+        }
+        metrics.providers_width = compact_providers_width(
+            DISPLAY_PROVIDER_KEYS
+                .iter()
+                .enumerate()
+                .filter_map(|(index, key)| {
+                    let id = display_provider_id(key);
+                    runtime
+                        .provider_enabled(id)
+                        .then_some(metrics.providers[index].row_width)
+                }),
+            runtime.provider_count(),
+        );
+        metrics
+    }
+}
+
+const COMPACT_ORIGIN_LEGACY: f64 = 12.0;
+
+fn display_provider_id(key: &str) -> ProviderId {
+    match key {
+        "claude" => ProviderId::Claude,
+        "codex" => ProviderId::Codex,
+        "antigravity" => ProviderId::Antigravity,
+        "opencode" => ProviderId::OpenCode,
+        "cursor" => ProviderId::Cursor,
+        "grok" => ProviderId::Grok,
+        "copilot" => ProviderId::Copilot,
+        "qoder" => ProviderId::Qoder,
+        other => {
+            debug_assert!(false, "unknown Compact provider key {other}");
+            ProviderId::Claude
+        }
+    }
+}
+
+/// `display.row_width.<key>` for one row: the visible bar plus whatever text,
+/// percent badge and marker column the current mode phase keeps on screen.
+pub fn compact_row_width(
+    bar_full_width: f64,
+    text_box: f64,
+    percent_box: f64,
+    origin: f64,
+    phases: ModePhases,
+) -> f64 {
+    bar_full_width * (1.0 - phases.bar_collapse)
+        + COMPACT_ROW_GAP * (1.0 - phases.text_collapse)
+        + text_box * (1.0 - phases.text_collapse)
+        + percent_box * phases.bar_collapse
+        + origin
+}
+
+/// Sum of the enabled rows plus the 6 px inter-widget gap. `count` is already
+/// clamped to one row exactly like `providers.count`.
+pub fn compact_providers_width(rows: impl IntoIterator<Item = f64>, count: usize) -> f64 {
+    let rows: f64 = rows.into_iter().sum();
+    rows + count.saturating_sub(1) as f64 * 6.0
+}
+
+fn display_provider_key(provider_id: &str) -> Option<&'static str> {
+    DISPLAY_PROVIDER_KEYS
+        .iter()
+        .copied()
+        .find(|key| provider_id.eq_ignore_ascii_case(&format!("{key}-provider")))
+}
+
+fn scene_provider_key<'a>(
+    object: &'a SceneObject,
+    by_id: &HashMap<&'a str, &'a SceneObject>,
+) -> Option<&'static str> {
+    let mut current = object.parent.as_deref();
+    while let Some(parent_id) = current {
+        if let Some(key) = display_provider_key(parent_id) {
+            return Some(key);
+        }
+        current = by_id
+            .get(parent_id)
+            .and_then(|parent| parent.parent.as_deref());
+    }
+    None
+}
+
+fn scene_object_renders(
+    object: &SceneObject,
+    by_id: &HashMap<&str, &SceneObject>,
+    context: &DataContext,
+) -> bool {
+    let mut current = Some(object);
+    while let Some(candidate) = current {
+        if !evaluate(&candidate.render.0, context)
+            .is_ok_and(|value| value.is_finite() && value != 0.0)
+        {
+            return false;
+        }
+        current = candidate
+            .parent
+            .as_deref()
+            .and_then(|parent_id| by_id.get(parent_id).copied());
+    }
+    true
+}
+
+/// Mirrors `format_template`'s token walk and reports whether a usage
+/// substitution produced a placeholder. Cursor prefixes (`int `, `ext `) mean
+/// the whole string must never be compared against `--`.
+fn template_has_placeholder_usage(template: &str, context: &DataContext) -> bool {
+    let chars: Vec<char> = template.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '{' && index + 1 < chars.len() && chars[index + 1] == '{' {
+            index += 2;
+            continue;
+        }
+        if chars[index] != '{' {
+            index += 1;
+            continue;
+        }
+        let Some(relative_end) = chars[index + 1..].iter().position(|c| *c == '}') else {
+            index += 1;
+            continue;
+        };
+        let end = index + 1 + relative_end;
+        let token: String = chars[index + 1..end].iter().collect();
+        let (expression, format) = split_template_token(&token);
+        let expression = expression.trim();
+        let format = format.trim();
+        let value = if !format.eq_ignore_ascii_case("usage_line")
+            && !format.eq_ignore_ascii_case("usage_badge")
+        {
+            None
+        } else if let Some(value) = context.get_string(expression) {
+            Some(value.to_string())
+        } else if format.eq_ignore_ascii_case("usage_line") {
+            Some(format_usage_line(expression, context).unwrap_or_else(|| "--".into()))
+        } else if format.eq_ignore_ascii_case("usage_badge") {
+            Some(format_usage_badge(expression, context).unwrap_or_else(|| "--".into()))
+        } else {
+            None
+        };
+        if let Some(value) = value {
+            if value.is_empty() || value == "--" || value == "!" {
+                return true;
+            }
+        }
+        index = end + 1;
+    }
+    false
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum MeasuredLineKind {
+    Text,
+    Percent,
+    Marker,
+}
+
+struct MeasuredLine {
+    provider_index: usize,
+    kind: MeasuredLineKind,
+    text: String,
+    family: String,
+    font_size: f64,
+    weight: i32,
+}
+
+/// Build the eight extremes the theme can show: normal/hover and the text and
+/// percent mode phases, each in both system themes. `visibility` is ignored
+/// because it follows the mode animations; `render` is not.
+fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> Vec<DataContext> {
+    let mut contexts = Vec::with_capacity(8);
+    for dark in [0u8, 1] {
+        for (phase, view_mode) in [(0.0, 1), (2.0, 3)] {
+            for hover in [false, true] {
+                let mut variant = runtime;
+                variant.mode_phase = phase;
+                variant.view_mode = view_mode;
+                let (claude, codex, antigravity, opencode, qoder) = if hover {
+                    (1.0, 1.0, 0.0, 1.0, 1.0)
+                } else {
+                    (0.0, 0.0, 1.0, 0.0, 0.0)
+                };
+                variant.claude_crossfade_opacity = claude;
+                variant.codex_crossfade_opacity = codex;
+                variant.crossfade_opacity = antigravity;
+                variant.opencode_crossfade_opacity = opencode;
+                variant.qoder_crossfade_opacity = qoder;
+                let mut context =
+                    DataContext::from_usage_with_runtime(data, &Canvas::default(), variant);
+                context.insert("system.dark", f64::from(dark));
+                contexts.push(context);
+            }
+        }
+    }
+    contexts
+}
+
+fn display_metrics_cache_key(
+    theme: &ThemeDocument,
+    runtime: ThemeRuntime,
+    data: Option<&AppUsageData>,
+    surface: &SceneObject,
+    fingerprint: &str,
+) -> String {
+    let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
+    let mut key = format!(
+        "{}|{:.6}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        theme.id,
+        runtime.mode_phase,
+        runtime.countdown,
+        runtime.use_windows_default_font,
+        runtime.provider_count(),
+        DISPLAY_PROVIDER_KEYS
+            .iter()
+            .filter(|key| runtime.provider_enabled(display_provider_id(key)))
+            .copied()
+            .collect::<Vec<_>>()
+            .join(","),
+        base.get("claude.dual_mode").unwrap_or(0.0),
+        base.get("codex.dual_mode").unwrap_or(0.0),
+        base.get("qoder.session.available").unwrap_or(0.0),
+        base.get("qoder.week.available").unwrap_or(0.0),
+    );
+    key.push_str(&surface.id);
+    key.push('|');
+    key.push_str(fingerprint);
+    key
+}
+
+fn cached_display_metrics(key: &str) -> Option<DisplayMetrics> {
+    let cache = DISPLAY_METRICS_CACHE.get_or_init(|| Mutex::new(VecDeque::new()));
+    let cache = cache.lock().ok()?;
+    cache
+        .iter()
+        .find(|(candidate, _)| candidate == key)
+        .map(|(_, metrics)| metrics.clone())
+}
+
+fn store_display_metrics(key: String, metrics: &DisplayMetrics) {
+    let cache = DISPLAY_METRICS_CACHE.get_or_init(|| Mutex::new(VecDeque::new()));
+    let Ok(mut cache) = cache.lock() else {
+        return;
+    };
+    if cache.len() >= DISPLAY_METRICS_CACHE_CAPACITY {
+        cache.pop_front();
+    }
+    cache.push_back((key, metrics.clone()));
+}
+
+static DISPLAY_METRICS_CACHE: OnceLock<Mutex<VecDeque<(String, DisplayMetrics)>>> = OnceLock::new();
+
+/// Measure every Full/percent/marker line the Compact surface can show.
+/// Repeated calls in one frame reuse the cached result through the theme,
+/// formatted-string and runtime fingerprint.
+pub(crate) fn display_metrics(
+    theme: &ThemeDocument,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+) -> DisplayMetrics {
+    let Some(surface) = theme.surfaces.first() else {
+        return DisplayMetrics::legacy(runtime);
+    };
+    let by_id: HashMap<&str, &SceneObject> = surface
+        .children
+        .iter()
+        .map(|object| (object.id.as_str(), object))
+        .collect();
+    let contexts = measurement_contexts(data, runtime);
+    let mut fingerprint = String::new();
+    let mut lines = Vec::new();
+    for object in &surface.children {
+        let SceneContent::Text {
+            template,
+            font_family,
+            font_size,
+            weight,
+            ..
+        } = &object.content
+        else {
+            continue;
+        };
+        let Some(key) = scene_provider_key(object, &by_id) else {
+            continue;
+        };
+        let provider_index = DISPLAY_PROVIDER_KEYS
+            .iter()
+            .position(|candidate| *candidate == key)
+            .unwrap_or(0);
+        let kind = if object.id.contains("-marker-") {
+            MeasuredLineKind::Marker
+        } else if object.id.ends_with("-pct") {
+            MeasuredLineKind::Percent
+        } else {
+            MeasuredLineKind::Text
+        };
+        fingerprint.push_str(&format!(
+            "{}|{}|{}|{}|{}|{}|",
+            object.id,
+            template,
+            font_family,
+            font_size.0,
+            weight.gdi_weight(),
+            object.render.0
+        ));
+        for context in &contexts {
+            if !scene_object_renders(object, &by_id, context) {
+                fingerprint.push_str("0;");
+                continue;
+            }
+            let text = format_template(template, context);
+            if kind != MeasuredLineKind::Marker && template_has_placeholder_usage(template, context)
+            {
+                fingerprint.push_str("p;");
+                continue;
+            }
+            fingerprint.push_str("1:");
+            fingerprint.push_str(&text);
+            fingerprint.push(';');
+            if text.is_empty() {
+                continue;
+            }
+            let font_size = evaluate(&font_size.0, context).unwrap_or(13.0);
+            let family = if context.force_segoe_ui {
+                crate::widget_font::segoe_ui_family(weight.gdi_weight()).to_string()
+            } else {
+                font_family.clone()
+            };
+            fingerprint.push_str(&format!("font:{family}:{font_size};"));
+            lines.push(MeasuredLine {
+                provider_index,
+                kind,
+                text,
+                family,
+                font_size,
+                weight: weight.gdi_weight(),
+            });
+        }
+    }
+    let key = display_metrics_cache_key(theme, runtime, data, surface, &fingerprint);
+    if let Some(metrics) = cached_display_metrics(&key) {
+        return metrics;
+    }
+
+    let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
+    let mut text_advance = [None::<f64>; 8];
+    let mut percent_advance = [None::<f64>; 8];
+    let mut marker_advance = [None::<f64>; 8];
+    for line in &lines {
+        let Some(advance) =
+            text_measure::measure_text(&line.text, &line.family, line.font_size, line.weight)
+        else {
+            continue;
+        };
+        let slot = match line.kind {
+            MeasuredLineKind::Text => &mut text_advance[line.provider_index],
+            MeasuredLineKind::Percent => &mut percent_advance[line.provider_index],
+            MeasuredLineKind::Marker => &mut marker_advance[line.provider_index],
+        };
+        *slot = Some((*slot).map_or(advance, |current: f64| current.max(advance)));
+    }
+
+    let legacy = DisplayMetrics::legacy(runtime);
+    let phases = decompose_mode_phase(runtime.mode_phase);
+    let bar = compact_bar_full_width(runtime.provider_count());
+    let claude_dual = base.get("claude.dual_mode").unwrap_or(0.0) != 0.0;
+    let codex_dual = base.get("codex.dual_mode").unwrap_or(0.0) != 0.0;
+    let qoder_pool = base.get("qoder.session.available").unwrap_or(0.0) != 0.0
+        || base.get("qoder.week.available").unwrap_or(0.0) != 0.0;
+    let mut metrics = legacy.clone();
+    for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
+        let fallback = legacy.providers[index];
+        let text_box = text_advance[index].map_or(fallback.text_box, |advance| advance + 2.0);
+        let percent_box =
+            percent_advance[index].map_or(fallback.percent_box, |advance| advance + 2.0);
+        let (marker_box, origin) = match *key {
+            "claude" if !claude_dual => (0.0, 0.0),
+            "codex" if !codex_dual => (0.0, 0.0),
+            "claude" | "codex" => marker_column(marker_advance[index], fallback),
+            "opencode" => (fallback.marker_box, fallback.origin),
+            "qoder" if qoder_pool => marker_column(marker_advance[index], fallback),
+            "qoder" => (fallback.marker_box, fallback.origin),
+            _ => (0.0, 0.0),
+        };
+        metrics.providers[index] = ProviderMetrics {
+            text_box,
+            percent_box,
+            marker_box,
+            origin,
+            text_slide: -text_box * phases.text_collapse,
+            row_width: compact_row_width(bar, text_box, percent_box, origin, phases),
+        };
+    }
+    metrics.providers_width = compact_providers_width(
+        DISPLAY_PROVIDER_KEYS
+            .iter()
+            .enumerate()
+            .filter_map(|(index, key)| {
+                runtime
+                    .provider_enabled(display_provider_id(key))
+                    .then_some(metrics.providers[index].row_width)
+            }),
+        runtime.provider_count(),
+    );
+    store_display_metrics(key, &metrics);
+    metrics
+}
+
+/// Measured marker column: widest available glyph plus a 1 px frame and a
+/// 2 px gap to the bar. Falls back to the legacy 10/12 when GDI refused.
+fn marker_column(advance: Option<f64>, fallback: ProviderMetrics) -> (f64, f64) {
+    match advance {
+        Some(advance) => {
+            let marker_box = advance + 1.0;
+            (marker_box, marker_box + 2.0)
+        }
+        None => (fallback.marker_box, fallback.origin),
+    }
+}
+
+fn insert_display_metrics(context: &mut DataContext, metrics: &DisplayMetrics) {
+    for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
+        let provider = metrics.providers[index];
+        context.insert(&format!("display.text_box.{key}"), provider.text_box);
+        context.insert(&format!("display.percent_box.{key}"), provider.percent_box);
+        context.insert(&format!("display.marker_box.{key}"), provider.marker_box);
+        context.insert(&format!("display.origin.{key}"), provider.origin);
+        context.insert(&format!("display.text_slide.{key}"), provider.text_slide);
+        context.insert(&format!("display.row_width.{key}"), provider.row_width);
+    }
+    context.insert("display.providers_width", metrics.providers_width);
 }
 
 /// Insert every binding derived from the animation state. Called once per
@@ -1756,6 +2261,11 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime) 
         clamp(runtime.opencode_crossfade_opacity),
     );
     context.insert("qoder.hover_phase", clamp(runtime.qoder_crossfade_opacity));
+
+    // Adaptive Compact columns. Legacy reserves are the base every context
+    // sees; theme-aware resolvers overwrite them with measured values.
+    let metrics = DisplayMetrics::legacy(*runtime);
+    insert_display_metrics(context, &metrics);
 }
 
 impl DataContext {
@@ -2689,11 +3199,20 @@ fn mouse_action_object_context(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    let metrics = display_metrics(theme, data, runtime);
+    let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    insert_display_metrics(&mut context, &metrics);
     if surface.id.eq_ignore_ascii_case(object_id) {
         return Ok(context);
     }
-    let (resolved, _) = resolve_objects_for(surface, &canvas, &surface.children, data, runtime);
+    let (resolved, _) = resolve_objects_for_with_metrics(
+        surface,
+        &canvas,
+        &surface.children,
+        data,
+        runtime,
+        &metrics,
+    );
     Ok(resolved
         .iter()
         .find(|object| object.source.id.eq_ignore_ascii_case(object_id))
@@ -2847,7 +3366,8 @@ pub fn execute_mouse_actions(
                     height_expression: Some(surface.height.clone()),
                     background: surface.background.canvas_paint(),
                 };
-                let context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+                let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+                insert_display_metrics(&mut context, &display_metrics(&effective, data, runtime));
                 let current = evaluate(&mouse_property_expression(object, property).0, &context)
                     .unwrap_or(0.0);
                 overrides.insert(
@@ -3421,6 +3941,9 @@ pub use theme_rendering::*;
 mod theme_expression;
 pub use theme_expression::*;
 
+#[cfg(windows)]
+mod text_measure;
+
 mod theme_datetime;
 mod theme_limits;
 use theme_datetime::*;
@@ -3505,3 +4028,56 @@ fn safe_file_stem(id: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod adaptive_metrics_tests {
+    use super::*;
+
+    #[test]
+    fn row_width_and_no_data_baselines() {
+        let totals = |count: usize, origins: &[f64]| -> Vec<f64> {
+            [0.0, 1.0, 2.0]
+                .into_iter()
+                .map(|phase| {
+                    let p = decompose_mode_phase(phase);
+                    compact_providers_width(
+                        origins.iter().map(|origin| {
+                            compact_row_width(compact_bar_full_width(count), 62.0, 30.0, *origin, p)
+                        }),
+                        count,
+                    ) + 4.0
+                })
+                .collect()
+        };
+        assert_eq!(
+            totals(4, &[10.0, 10.0, 0.0, 12.0]),
+            vec![446.0, 182.0, 174.0]
+        );
+        assert_eq!(totals(4, &[0.0, 0.0, 0.0, 12.0]), vec![426.0, 162.0, 154.0]);
+        assert_eq!(totals(2, &[0.0, 12.0]), vec![262.0, 130.0, 82.0]);
+        let phase = decompose_mode_phase(0.5);
+        assert_eq!(compact_row_width(32.0, 62.0, 30.0, 10.0, phase), 75.0);
+    }
+
+    #[test]
+    fn cursor_loading_preserves_legacy_text_box() {
+        let theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let mut runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Cursor]));
+        runtime.poll_ok = false;
+        let context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        assert_eq!(context.get("data.loading"), Some(1.0));
+        assert!(template_has_placeholder_usage(
+            "int {cursor.api:usage_line}",
+            &context
+        ));
+        assert_eq!(
+            display_metrics(&theme, None, runtime)
+                .provider("cursor")
+                .unwrap()
+                .text_box,
+            80.0
+        );
+    }
+}

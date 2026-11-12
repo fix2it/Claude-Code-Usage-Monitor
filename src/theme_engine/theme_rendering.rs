@@ -99,8 +99,10 @@ pub fn render_theme_surface_with_runtime_at_scale(
     };
     let scale = normalized_render_scale(scale);
     let mut warnings = Vec::new();
+    let metrics = display_metrics(theme, data, runtime);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
     let (logical_width, logical_height) =
-        resolve_object_size(surface, data, runtime, &mut warnings);
+        resolve_object_size_with_context(surface, &size_context, &mut warnings);
     let padding = surface_horizontal_padding(theme, surface_index, runtime);
     // Snap the translation once, including parent clips, so fractional DPI
     // cannot trim a content pixel at the far edge of the inset.
@@ -114,7 +116,7 @@ pub fn render_theme_surface_with_runtime_at_scale(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = DataContext::from_usage_with_runtime(data, &resolved_canvas, runtime);
+    let context = context_with_metrics(data, &resolved_canvas, runtime, &metrics);
     let mut pixels = vec![0u32; width as usize * height as usize];
     if runtime.surface_nest == SurfaceNest::Floating
         && matches!(surface.background, LayerBackground::None)
@@ -188,8 +190,14 @@ pub fn render_theme_surface_with_runtime_at_scale(
         &mut warnings,
     );
 
-    let (resolved, layer_warnings) =
-        resolve_objects_for(surface, &resolved_canvas, &surface.children, data, runtime);
+    let (resolved, layer_warnings) = resolve_objects_for_with_metrics(
+        surface,
+        &resolved_canvas,
+        &surface.children,
+        data,
+        runtime,
+        &metrics,
+    );
     warnings.extend(layer_warnings);
     for mut object in resolved {
         for clip in &mut object.clip {
@@ -314,6 +322,7 @@ pub(super) fn render_resolved_object(
     );
 }
 
+#[cfg(test)]
 pub(super) fn resolve_objects_for<'a>(
     root: &SceneObject,
     canvas: &Canvas,
@@ -321,7 +330,25 @@ pub(super) fn resolve_objects_for<'a>(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> (Vec<ResolvedObject<'a>>, Vec<String>) {
-    let context = DataContext::from_usage_with_runtime(data, canvas, runtime);
+    resolve_objects_for_with_metrics(
+        root,
+        canvas,
+        layers,
+        data,
+        runtime,
+        &DisplayMetrics::legacy(runtime),
+    )
+}
+
+pub(super) fn resolve_objects_for_with_metrics<'a>(
+    root: &SceneObject,
+    canvas: &Canvas,
+    layers: &'a [SceneObject],
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> (Vec<ResolvedObject<'a>>, Vec<String>) {
+    let context = context_with_metrics(data, canvas, runtime, metrics);
     let mut resolved = Vec::new();
     let mut warnings = Vec::new();
     let mut cache = vec![None; layers.len()];
@@ -372,7 +399,9 @@ pub fn object_bounds(
     if !surface_should_render(theme, surface_index, data, runtime) {
         return None;
     }
-    let (width, height) = resolve_object_size(surface, data, runtime, &mut Vec::new());
+    let metrics = display_metrics(theme, data, runtime);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut Vec::new());
     let padding = surface_horizontal_padding(theme, surface_index, runtime) as f64;
     let canvas = Canvas {
         width,
@@ -381,7 +410,14 @@ pub fn object_bounds(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let (resolved, _) = resolve_objects_for(surface, &canvas, &surface.children, data, runtime);
+    let (resolved, _) = resolve_objects_for_with_metrics(
+        surface,
+        &canvas,
+        &surface.children,
+        data,
+        runtime,
+        &metrics,
+    );
     resolved
         .into_iter()
         .find(|object| object.source.id == object_id && object.width > 0.0 && object.height > 0.0)
@@ -400,7 +436,9 @@ pub fn hit_test_mouse_event(
     if !surface_should_render(theme, surface_index, data, runtime) {
         return None;
     }
-    let (width, height) = resolve_object_size(surface, data, runtime, &mut Vec::new());
+    let metrics = display_metrics(theme, data, runtime);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut Vec::new());
     let padding = surface_horizontal_padding(theme, surface_index, runtime) as f64;
     let x = x - padding;
     let canvas = Canvas {
@@ -410,7 +448,14 @@ pub fn hit_test_mouse_event(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let (resolved, _) = resolve_objects_for(surface, &canvas, &surface.children, data, runtime);
+    let (resolved, _) = resolve_objects_for_with_metrics(
+        surface,
+        &canvas,
+        &surface.children,
+        data,
+        runtime,
+        &metrics,
+    );
     for object in resolved.into_iter().rev() {
         if object.opacity <= 0.0
             || object.width <= 0.0
@@ -440,7 +485,7 @@ pub fn hit_test_mouse_event(
         }
     }
 
-    let root_is_visible = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    let root_is_visible = context_with_metrics(data, &canvas, runtime, &metrics);
     let root_is_visible = evaluate(&surface.visibility.0, &root_is_visible)
         .is_ok_and(|value| value.is_finite() && value > 0.0);
     if root_is_visible
@@ -457,7 +502,7 @@ pub fn hit_test_mouse_event(
                 height: height as f64,
                 rotation: evaluate(
                     &surface.rotation.0,
-                    &DataContext::from_usage_with_runtime(data, &canvas, runtime),
+                    &context_with_metrics(data, &canvas, runtime, &metrics),
                 )
                 .unwrap_or(0.0),
             },
@@ -483,7 +528,9 @@ pub fn resolve_object_bounds_with_runtime(
         return None;
     }
     let mut warnings = Vec::new();
-    let (width, height) = resolve_object_size(surface, data, runtime, &mut warnings);
+    let metrics = display_metrics(theme, data, runtime);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut warnings);
     let canvas = Canvas {
         width,
         width_expression: Some(surface.width.clone()),
@@ -491,7 +538,7 @@ pub fn resolve_object_bounds_with_runtime(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    let context = context_with_metrics(data, &canvas, runtime, &metrics);
     let mut cache = vec![None; surface.children.len()];
     let geometry = resolve_geometry(
         object_index,
@@ -534,7 +581,11 @@ pub fn resolve_surface_content_size(
     theme
         .surfaces
         .get(surface_index)
-        .map(|surface| resolve_object_size(surface, data, runtime, &mut Vec::new()))
+        .map(|surface| {
+            let metrics = display_metrics(theme, data, runtime);
+            let context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+            resolve_object_size_with_context(surface, &context, &mut Vec::new())
+        })
         .unwrap_or((theme.canvas.width.max(1), theme.canvas.height.max(1)))
 }
 
@@ -544,8 +595,28 @@ pub(super) fn resolve_object_size(
     runtime: ThemeRuntime,
     warnings: &mut Vec<String>,
 ) -> (u32, u32) {
+    let context = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
+    resolve_object_size_with_context(object, &context, warnings)
+}
+
+fn context_with_metrics(
+    data: Option<&AppUsageData>,
+    canvas: &Canvas,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> DataContext {
+    let mut context = DataContext::from_usage_with_runtime(data, canvas, runtime);
+    insert_display_metrics(&mut context, metrics);
+    context
+}
+
+fn resolve_object_size_with_context(
+    object: &SceneObject,
+    context: &DataContext,
+    warnings: &mut Vec<String>,
+) -> (u32, u32) {
     let fallback = Canvas::default();
-    let mut context = DataContext::from_usage_with_runtime(data, &fallback, runtime);
+    let mut context = context.clone();
     let gap = match evaluate(&object.gap.0, &context) {
         Ok(value) if value.is_finite() => value.max(0.0),
         Ok(_) => {
