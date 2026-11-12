@@ -105,7 +105,7 @@ pub const PROVIDER_DESCRIPTORS: [ProviderDescriptor; 8] = [
         cache_key: "qoder",
         display_name: "Qoder",
         settings_description: "Collect usage from Qoder",
-        native_menu_command_id: 67,
+        native_menu_command_id: 74,
         default_enabled: false,
     },
 ];

@@ -5219,3 +5219,38 @@ mod phase_animation_tests {
         assert_eq!(trace, vec![1, 2, 3, 2, 1]);
     }
 }
+
+#[cfg(test)]
+mod menu_command_id_tests {
+    use super::*;
+
+    /// A provider toggle that shares a command id with another menu item
+    /// toggles that item instead (Qoder once reused Antigravity's 67).
+    #[test]
+    fn provider_menu_ids_do_not_collide_with_other_commands() {
+        let fixed = [
+            IDM_FREQ_1MIN,
+            IDM_FREQ_5MIN,
+            IDM_FREQ_15MIN,
+            IDM_FREQ_1HOUR,
+            IDM_START_WITH_WINDOWS,
+            IDM_LOCK_TASKBAR,
+            IDM_SHOW_PACE,
+            IDM_SHOW_FABLE,
+            IDM_VERSION_ACTION,
+            IDM_DASHBOARD,
+            IDM_PROVIDER_ANTIGRAVITY_GEMINI,
+            IDM_PROVIDER_ANTIGRAVITY_EXTERNAL,
+            IDM_PROVIDER_CODEX_MAIN,
+            IDM_PROVIDER_CODEX_X,
+            IDM_PROVIDER_CLAUDE_MAIN,
+            IDM_PROVIDER_CLAUDE_X,
+            IDM_LANG_SYSTEM,
+        ];
+        for provider in ProviderId::ALL {
+            let id = provider.descriptor().native_menu_command_id;
+            assert!(!fixed.contains(&id), "{provider:?} reuses command id {id}");
+            assert!(id != 1 && id < IDM_LANG_FIRST, "{provider:?} id {id}");
+        }
+    }
+}
