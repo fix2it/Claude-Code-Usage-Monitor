@@ -895,6 +895,8 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
         ThemeDocument::starter(),
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap(),
     ] {
+        // Both the starter and the quad theme label the column "f".
+        let label = "f";
         let surface = &theme.surfaces[0];
         let fable_index = surface
             .children
@@ -912,8 +914,10 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
             resolve_object_bounds_with_runtime(&theme, 0, fable_index, Some(&usage), disabled)
                 .is_none()
         );
-        for (countdown, percentage, text) in [(false, 43.0, "Fable 43%"), (true, 57.0, "Fable 57%")]
-        {
+        for (countdown, percentage, text) in [
+            (false, 43.0, format!("{label} 43%")),
+            (true, 57.0, format!("{label} 57%")),
+        ] {
             // Fable is opt-in now; the enabled-column checks must opt in.
             let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL))
                 .with_countdown(countdown)
@@ -1472,11 +1476,12 @@ fn compact_fluent_quad_adds_a_fable_column_only_when_opted_in() {
         resolve_surface_size(&theme, 0, Some(&usage), runtime),
         (base_width, height)
     );
-    // Opting in restores the +96 px column (90 px + 6 px row gap).
+    // Opting in adds the column: one bar width (54 px) + 6 px row gap,
+    // since the short "f 43%" text fits under the bar.
     let opted_in = runtime.with_show_fable(true);
     assert_eq!(
         resolve_surface_size(&theme, 0, Some(&usage), opted_in),
-        (base_width + 96, height)
+        (base_width + 60, height)
     );
     assert!(theme.surfaces[0]
         .children
@@ -4517,7 +4522,7 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
         );
         let key = label.id.split('-').next().unwrap();
         let (width, x) = if key == "fable" {
-            ("30".to_string(), "0".to_string())
+            ("display.percent_box.fable".to_string(), "0".to_string())
         } else {
             (
                 format!("display.percent_box.{key}"),
@@ -5439,6 +5444,104 @@ fn fable_usage() -> AppUsageData {
     )])
 }
 
+/// Fable plus session/weekly data (with reset times) for every provider the
+/// Compact tests enable, so text lines measure real strings instead of `--`.
+fn full_usage_with_fable() -> AppUsageData {
+    use crate::models::{UsageData, UsageSection};
+
+    let section = |percentage: f64, hours: u64| UsageSection {
+        available: true,
+        percentage,
+        resets_at: Some(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(hours * 3600),
+        ),
+    };
+    let mut claude = fable_usage().get(ProviderId::Claude).cloned().unwrap();
+    claude.session = section(37.0, 2);
+    claude.weekly = section(61.0, 70);
+    let other = || UsageData {
+        session: section(42.0, 2),
+        weekly: section(58.0, 70),
+        week: Some(section(58.0, 70)),
+        ..Default::default()
+    };
+    AppUsageData::from_iter([
+        (ProviderId::Claude, claude),
+        (ProviderId::Codex, other()),
+        (ProviderId::Antigravity, other()),
+        (ProviderId::OpenCode, other()),
+        (ProviderId::Qoder, other()),
+    ])
+}
+
+#[test]
+fn fable_label_is_f_and_column_width_follows_the_measured_text() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let surface = &theme.surfaces[0];
+    let usage = fable_usage();
+    let fable_index = surface
+        .children
+        .iter()
+        .position(|object| object.id == "fable-provider")
+        .unwrap();
+    let column_width = |providers: &[ProviderId]| {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled(providers.iter().copied()))
+                .with_show_fable(true);
+        let (_, _, width, _) =
+            resolve_object_bounds_with_runtime(&theme, 0, fable_index, Some(&usage), runtime)
+                .unwrap();
+        (
+            width,
+            display_metrics(&theme, Some(&usage), runtime),
+            runtime,
+        )
+    };
+
+    // The text line starts with "f ", never "Fable".
+    let (_, _, runtime) = column_width(&[ProviderId::Claude]);
+    let context = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+    let mut text_lines = 0;
+    for object in surface
+        .children
+        .iter()
+        .filter(|object| object.id.starts_with("fable-weekly-value-"))
+        .filter(|object| !object.id.ends_with("-pct"))
+    {
+        let SceneContent::Text { template, .. } = &object.content else {
+            panic!("{} is not text", object.id);
+        };
+        let text = format_template(template, &context);
+        assert!(text.starts_with("f "), "{text}");
+        assert!(!text.contains("Fable"), "{text}");
+        text_lines += 1;
+    }
+    assert_eq!(text_lines, 2);
+
+    // Two widgets: a 5-cube bar (54) is wider than "f 43%", so the column is
+    // exactly the bar and reserves nothing extra.
+    let (short, metrics, _) = column_width(&[ProviderId::Claude]);
+    assert_eq!(metrics.widget_count, 2);
+    assert_eq!(compact_bar_full_width(2), 54.0);
+    assert!(metrics.fable_text_box > 0.0 && metrics.fable_text_box < 54.0);
+    assert_eq!(short, 54.0);
+
+    // Six widgets: the bar shrinks to 2 cubes (21) and the text no longer
+    // fits, so the column grows to the measured text.
+    let (long, metrics, _) = column_width(&[
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+        ProviderId::OpenCode,
+        ProviderId::Qoder,
+    ]);
+    assert_eq!(metrics.widget_count, 6);
+    assert_eq!(compact_bar_full_width(6), 21.0);
+    assert!(metrics.fable_text_box > 21.0);
+    assert_eq!(long, metrics.fable_text_box);
+}
+
 fn cubes_for(widgets: usize) -> f64 {
     (10.0 / widgets.max(1) as f64).ceil().min(5.0)
 }
@@ -5518,7 +5621,8 @@ fn every_compact_bar_uses_the_widget_count_cube_rule() {
 fn fable_width_delta_is_not_larger_than_another_provider_delta() {
     let theme: ThemeDocument =
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
-    let usage = fable_usage();
+    // Real data for every provider, so each column measures actual text.
+    let usage = full_usage_with_fable();
     let width = |providers: &[ProviderId], fable: bool, phase: f64| {
         let runtime =
             ThemeRuntime::from_providers(ProviderSet::from_enabled(providers.iter().copied()))

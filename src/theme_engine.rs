@@ -1590,6 +1590,11 @@ pub struct DisplayMetrics {
     pub providers_width: f64,
     /// Providers plus the Fable column when shown; sizes every bar.
     pub widget_count: usize,
+    /// Measured Fable text line plus 2 px; 0 when it cannot be measured, so
+    /// the theme's `max(bar, text_box.fable)` falls back to the bar width.
+    pub fable_text_box: f64,
+    /// Measured Fable percent line plus 2 px; the percent reserve otherwise.
+    pub fable_percent_box: f64,
 }
 
 impl DisplayMetrics {
@@ -1614,6 +1619,8 @@ impl DisplayMetrics {
             providers: [ProviderMetrics::default(); 8],
             providers_width: 0.0,
             widget_count,
+            fable_text_box: 0.0,
+            fable_percent_box: COMPACT_PERCENT_WIDTH,
         };
         for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
             let text_box = if *key == "cursor" {
@@ -1694,10 +1701,14 @@ pub fn compact_providers_width(rows: impl IntoIterator<Item = f64>, count: usize
     rows + count.saturating_sub(1) as f64 * 6.0
 }
 
+/// Slot after the eight providers: the Fable column's text measurement.
+const FABLE_METRICS_INDEX: usize = DISPLAY_PROVIDER_KEYS.len();
+
 fn display_provider_key(provider_id: &str) -> Option<&'static str> {
     DISPLAY_PROVIDER_KEYS
         .iter()
         .copied()
+        .chain(std::iter::once("fable"))
         .find(|key| provider_id.eq_ignore_ascii_case(&format!("{key}-provider")))
 }
 
@@ -1922,10 +1933,14 @@ pub(crate) fn display_metrics(
         let Some(key) = scene_provider_key(object, &by_id) else {
             continue;
         };
-        let provider_index = DISPLAY_PROVIDER_KEYS
-            .iter()
-            .position(|candidate| *candidate == key)
-            .unwrap_or(0);
+        let provider_index = if key == "fable" {
+            FABLE_METRICS_INDEX
+        } else {
+            DISPLAY_PROVIDER_KEYS
+                .iter()
+                .position(|candidate| *candidate == key)
+                .unwrap_or(0)
+        };
         let kind = if object.id.contains("-marker-") {
             MeasuredLineKind::Marker
         } else if object.id.ends_with("-pct") {
@@ -1982,9 +1997,9 @@ pub(crate) fn display_metrics(
     }
 
     let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
-    let mut text_advance = [None::<f64>; 8];
-    let mut percent_advance = [None::<f64>; 8];
-    let mut marker_advance = [None::<f64>; 8];
+    let mut text_advance = [None::<f64>; 9];
+    let mut percent_advance = [None::<f64>; 9];
+    let mut marker_advance = [None::<f64>; 9];
     let mut advances = HashMap::new();
     for line in &lines {
         let advance = *advances
@@ -2018,6 +2033,9 @@ pub(crate) fn display_metrics(
     let qoder_pool = base.get("qoder.session.available").unwrap_or(0.0) != 0.0
         || base.get("qoder.week.available").unwrap_or(0.0) != 0.0;
     let mut metrics = legacy.clone();
+    metrics.fable_text_box = text_advance[FABLE_METRICS_INDEX].map_or(0.0, |advance| advance + 2.0);
+    metrics.fable_percent_box =
+        percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0);
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
         let fallback = legacy.providers[index];
         let text_box = text_advance[index].map_or(fallback.text_box, |advance| advance + 2.0);
@@ -2107,6 +2125,12 @@ fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
         return Some(metrics.providers_width);
     }
     let (prefix, key) = name.rsplit_once('.')?;
+    if prefix.eq_ignore_ascii_case("display.text_box") && key.eq_ignore_ascii_case("fable") {
+        return Some(metrics.fable_text_box);
+    }
+    if prefix.eq_ignore_ascii_case("display.percent_box") && key.eq_ignore_ascii_case("fable") {
+        return Some(metrics.fable_percent_box);
+    }
     let index = DISPLAY_PROVIDER_KEYS
         .iter()
         .position(|candidate| key.eq_ignore_ascii_case(candidate))?;

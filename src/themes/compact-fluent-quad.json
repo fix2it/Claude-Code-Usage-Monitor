@@ -21,7 +21,7 @@
         "offset_x": 6,
         "offset_y": 0
       },
-      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + 90 * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + 30 * display.mode_bar_progress) + 4",
+      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + max(display.bar_full_width, display.text_box.fable) * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + display.percent_box.fable * display.mode_bar_progress) + 4",
       "height": "46",
       "background": {
         "type": "none"
@@ -752,7 +752,7 @@
           "render": "providers.claude.enabled && claude.model.fable.available && display.show_fable",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "(90 * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + 30 * display.mode_bar_progress)",
+          "width": "(max(display.bar_full_width, display.text_box.fable) * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + display.percent_box.fable * display.mode_bar_progress)",
           "height": "46",
           "background": {
             "type": "none"
@@ -808,7 +808,7 @@
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
           "y": "25",
-          "width": "90",
+          "width": "max(display.bar_full_width, display.text_box.fable)",
           "height": "13",
           "background": {
             "type": "none"
@@ -820,7 +820,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "Fable {claude.model.fable.display:usage_line}",
+            "template": "f {claude.model.fable.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -875,7 +875,7 @@
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
           "y": "25",
-          "width": "90",
+          "width": "max(display.bar_full_width, display.text_box.fable)",
           "height": "13",
           "background": {
             "type": "none"
@@ -887,7 +887,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "Fable {claude.model.fable.display:usage_line}",
+            "template": "f {claude.model.fable.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -8009,7 +8009,7 @@
           "visibility": "display.percent_opacity",
           "parent": "fable-provider",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.fable",
           "height": "13",
           "background": {
             "type": "none"
@@ -8042,7 +8042,7 @@
           "visibility": "display.percent_opacity",
           "parent": "fable-provider",
           "y": "25",
-          "width": "30",
+          "width": "display.percent_box.fable",
           "height": "13",
           "background": {
             "type": "none"
