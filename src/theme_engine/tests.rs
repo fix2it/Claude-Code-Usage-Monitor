@@ -863,7 +863,8 @@ fn built_in_themes_hide_absent_claude_sessions_and_keep_weekly_and_fable_limits(
                     }
                     assert_eq!(session_layers, if session_available { 2 } else { 0 });
                     assert_eq!(weekly_layers, 2);
-                    assert_eq!(fable_layers, 2);
+                    // Segments, value text and the "f" marker.
+                    assert_eq!(fable_layers, 3);
                 }
             }
         }
@@ -895,9 +896,14 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
         ThemeDocument::starter(),
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap(),
     ] {
-        // Both the starter and the quad theme label the column "f".
+        // Both themes label the column "f": the starter in the value line, the
+        // quad theme in a marker node next to the bar.
         let label = "f";
         let surface = &theme.surfaces[0];
+        let has_marker = surface
+            .children
+            .iter()
+            .any(|object| object.id.starts_with("fable-weekly-marker-"));
         let fable_index = surface
             .children
             .iter()
@@ -914,10 +920,7 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
             resolve_object_bounds_with_runtime(&theme, 0, fable_index, Some(&usage), disabled)
                 .is_none()
         );
-        for (countdown, percentage, text) in [
-            (false, 43.0, format!("{label} 43%")),
-            (true, 57.0, format!("{label} 57%")),
-        ] {
+        for (countdown, percentage, text) in [(false, 43.0, "43%"), (true, 57.0, "57%")] {
             // Fable is opt-in now; the enabled-column checks must opt in.
             let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL))
                 .with_countdown(countdown)
@@ -942,7 +945,14 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
                             assert_eq!(evaluate(&value.0, &context).unwrap(), percentage);
                         }
                         SceneContent::Text { template, .. } => {
-                            assert_eq!(format_template(template, &context), text);
+                            let expected = if object.id.contains("-marker-") {
+                                label.to_string()
+                            } else if has_marker {
+                                text.to_string()
+                            } else {
+                                format!("{label} {text}")
+                            };
+                            assert_eq!(format_template(template, &context), expected);
                         }
                         _ => panic!("unexpected Fable content"),
                     }
@@ -1476,12 +1486,14 @@ fn compact_fluent_quad_adds_a_fable_column_only_when_opted_in() {
         resolve_surface_size(&theme, 0, Some(&usage), runtime),
         (base_width, height)
     );
-    // Opting in adds the column: one bar width (54 px) + 6 px row gap,
-    // since the short "f 43%" text fits under the bar.
+    // Opting in adds the column: the "f" marker column, one bar width (54 px)
+    // and the 6 px row gap, since the short "43%" text fits under the bar.
     let opted_in = runtime.with_show_fable(true);
+    let origin = display_metrics(&theme, Some(&usage), opted_in).fable.origin;
+    assert!(origin > 0.0);
     assert_eq!(
         resolve_surface_size(&theme, 0, Some(&usage), opted_in),
-        (base_width + 60, height)
+        (base_width + 60 + origin.round() as u32, height)
     );
     assert!(theme.surfaces[0]
         .children
@@ -3990,7 +4002,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         .iter()
         .filter(|o| o.id.contains("-marker-"))
         .collect::<Vec<_>>();
-    assert_eq!(markers.len(), 24);
+    assert_eq!(markers.len(), 26);
     for marker in &markers {
         let key = marker.id.split('-').next().unwrap();
         assert_eq!(marker.x.0, "0");
@@ -4005,7 +4017,12 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
                 assert!(
                     matches!(
                         template.as_str(),
-                        "o" | "x" | "w" | "m" | "{qoder.session.label}" | "{qoder.week.label}"
+                        "o" | "x"
+                            | "w"
+                            | "m"
+                            | "f"
+                            | "{qoder.session.label}"
+                            | "{qoder.week.label}"
                     ),
                     "{}",
                     marker.id
@@ -4024,6 +4041,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
     assert_eq!(
         templates,
         std::collections::BTreeSet::from([
+            "f",
             "m",
             "o",
             "w",
@@ -4521,14 +4539,10 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
             twin.id
         );
         let key = label.id.split('-').next().unwrap();
-        let (width, x) = if key == "fable" {
-            ("display.percent_box.fable".to_string(), "0".to_string())
-        } else {
-            (
-                format!("display.percent_box.{key}"),
-                format!("display.origin.{key}"),
-            )
-        };
+        let (width, x) = (
+            format!("display.percent_box.{key}"),
+            format!("display.origin.{key}"),
+        );
         assert_eq!(twin.width.0, width, "{}", twin.id);
         assert_eq!(twin.parent, label.parent, "{}", twin.id);
         assert_eq!(twin.y.0, label.y.0, "{}", twin.id);
@@ -5475,7 +5489,7 @@ fn full_usage_with_fable() -> AppUsageData {
 }
 
 #[test]
-fn fable_label_is_f_and_column_width_follows_the_measured_text() {
+fn fable_marker_f_sits_beside_the_bar_and_column_width_follows_the_measured_text() {
     let theme: ThemeDocument =
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
     let surface = &theme.surfaces[0];
@@ -5499,36 +5513,65 @@ fn fable_label_is_f_and_column_width_follows_the_measured_text() {
         )
     };
 
-    // The text line starts with "f ", never "Fable".
+    // The value line has no "f " prefix: a marker node carries the "f".
     let (_, _, runtime) = column_width(&[ProviderId::Claude]);
     let context = DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
     let mut text_lines = 0;
+    let mut markers = 0;
     for object in surface
         .children
         .iter()
-        .filter(|object| object.id.starts_with("fable-weekly-value-"))
-        .filter(|object| !object.id.ends_with("-pct"))
+        .filter(|object| object.parent.as_deref() == Some("fable-provider"))
     {
-        let SceneContent::Text { template, .. } = &object.content else {
-            panic!("{} is not text", object.id);
-        };
-        let text = format_template(template, &context);
-        assert!(text.starts_with("f "), "{text}");
-        assert!(!text.contains("Fable"), "{text}");
-        text_lines += 1;
+        match &object.content {
+            SceneContent::Text { template, .. } if object.id.contains("-marker-") => {
+                assert_eq!(template, "f");
+                assert_eq!(object.x.0, "0", "{}", object.id);
+                assert_eq!(object.width.0, "display.marker_box.fable", "{}", object.id);
+                markers += 1;
+            }
+            SceneContent::Text { template, .. } => {
+                assert_eq!(object.x.0, "display.origin.fable", "{}", object.id);
+                if !object.id.ends_with("-pct") {
+                    let text = format_template(template, &context);
+                    assert_eq!(text, "43%");
+                    text_lines += 1;
+                }
+            }
+            SceneContent::Progress { .. } => {
+                assert_eq!(object.x.0, "display.origin.fable", "{}", object.id);
+            }
+            _ => {}
+        }
     }
+    assert_eq!(markers, 2);
     assert_eq!(text_lines, 2);
+    let mut renders = Vec::new();
+    for dark in [0.0, 1.0] {
+        let mut context = context.clone();
+        context.insert("system.dark", dark);
+        renders.push(
+            surface
+                .children
+                .iter()
+                .filter(|object| object.id.starts_with("fable-weekly-marker-"))
+                .filter(|object| evaluate(&object.render.0, &context).unwrap() != 0.0)
+                .count(),
+        );
+    }
+    assert_eq!(renders, [1, 1]);
 
-    // Two widgets: a 5-cube bar (54) is wider than "f 43%", so the column is
-    // exactly the bar and reserves nothing extra.
+    // Two widgets: a 5-cube bar (54) is wider than "43%", so the column is the
+    // marker origin plus exactly the bar.
     let (short, metrics, _) = column_width(&[ProviderId::Claude]);
     assert_eq!(metrics.widget_count, 2);
     assert_eq!(compact_bar_full_width(2), 54.0);
-    assert!(metrics.fable_text_box > 0.0 && metrics.fable_text_box < 54.0);
-    assert_eq!(short, 54.0);
+    assert!(metrics.fable.text_box > 0.0 && metrics.fable.text_box < 54.0);
+    assert!(metrics.fable.origin > 0.0);
+    assert_eq!(short, metrics.fable.origin + 54.0);
 
-    // Six widgets: the bar shrinks to 2 cubes (21) and the text no longer
-    // fits, so the column grows to the measured text.
+    // Six widgets: the bar shrinks to 2 cubes (21); the column follows the
+    // measured text when it no longer fits, never less than the bar.
     let (long, metrics, _) = column_width(&[
         ProviderId::Claude,
         ProviderId::Codex,
@@ -5538,8 +5581,8 @@ fn fable_label_is_f_and_column_width_follows_the_measured_text() {
     ]);
     assert_eq!(metrics.widget_count, 6);
     assert_eq!(compact_bar_full_width(6), 21.0);
-    assert!(metrics.fable_text_box > 21.0);
-    assert_eq!(long, metrics.fable_text_box);
+    assert!(metrics.fable.text_box > 21.0);
+    assert_eq!(long, metrics.fable.origin + metrics.fable.text_box);
 }
 
 fn cubes_for(widgets: usize) -> f64 {
@@ -5623,6 +5666,14 @@ fn fable_width_delta_is_not_larger_than_another_provider_delta() {
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
     // Real data for every provider, so each column measures actual text.
     let usage = full_usage_with_fable();
+    // The Fable column carries its own "f" marker column on top of what a
+    // provider without a marker (Codex without dual mode) costs.
+    let marker_column = |providers: &[ProviderId]| {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled(providers.iter().copied()))
+                .with_show_fable(true);
+        display_metrics(&theme, Some(&usage), runtime).fable.origin
+    };
     let width = |providers: &[ProviderId], fable: bool, phase: f64| {
         let runtime =
             ThemeRuntime::from_providers(ProviderSet::from_enabled(providers.iter().copied()))
@@ -5649,7 +5700,7 @@ fn fable_width_delta_is_not_larger_than_another_provider_delta() {
                 with_extra.push(extra);
                 let provider = width(&with_extra, false, phase) - start;
                 assert!(
-                    fable <= provider,
+                    fable <= provider + marker_column(base).ceil() as u32,
                     "{} widgets, phase {phase}: fable {fable} > {extra:?} {provider}",
                     base.len()
                 );

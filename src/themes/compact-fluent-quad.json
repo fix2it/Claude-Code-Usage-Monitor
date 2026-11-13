@@ -21,7 +21,7 @@
         "offset_x": 6,
         "offset_y": 0
       },
-      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + max(display.bar_full_width, display.text_box.fable) * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + display.percent_box.fable * display.mode_bar_progress) + 4",
+      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + display.row_width.fable) + 4",
       "height": "46",
       "background": {
         "type": "none"
@@ -752,7 +752,7 @@
           "render": "providers.claude.enabled && claude.model.fable.available && display.show_fable",
           "visibility": "100",
           "parent": "provider-row",
-          "width": "(max(display.bar_full_width, display.text_box.fable) * (1 - display.mode_text_progress) + display.bar_full_width * display.mode_text_progress * (1 - display.mode_bar_progress) + display.percent_box.fable * display.mode_bar_progress)",
+          "width": "display.row_width.fable",
           "height": "46",
           "background": {
             "type": "none"
@@ -772,6 +772,7 @@
           "render": "system.dark",
           "visibility": "100",
           "parent": "fable-provider",
+          "x": "display.origin.fable",
           "y": "10",
           "width": "display.bar_full_width * (1 - display.mode_bar_progress)",
           "height": "9",
@@ -807,6 +808,7 @@
           "render": "system.dark",
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
+          "x": "display.origin.fable",
           "y": "25",
           "width": "max(display.bar_full_width, display.text_box.fable)",
           "height": "13",
@@ -820,7 +822,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "f {claude.model.fable.display:usage_line}",
+            "template": "{claude.model.fable.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -839,6 +841,7 @@
           "render": "1 - system.dark",
           "visibility": "100",
           "parent": "fable-provider",
+          "x": "display.origin.fable",
           "y": "10",
           "width": "display.bar_full_width * (1 - display.mode_bar_progress)",
           "height": "9",
@@ -874,6 +877,7 @@
           "render": "1 - system.dark",
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
+          "x": "display.origin.fable",
           "y": "25",
           "width": "max(display.bar_full_width, display.text_box.fable)",
           "height": "13",
@@ -887,13 +891,79 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "f {claude.model.fable.display:usage_line}",
+            "template": "{claude.model.fable.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
             "rendering": "clear_type",
             "contrast": "1",
             "align": "left",
+            "color": {
+              "color": "#5B4B8AFF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "fable-weekly-marker-dark",
+          "name": "dark Fable marker f",
+          "render": "system.dark",
+          "visibility": "100",
+          "parent": "fable-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.fable",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "f",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#B5A8E0FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "fable-weekly-marker-light",
+          "name": "light Fable marker f",
+          "render": "1 - system.dark",
+          "visibility": "100",
+          "parent": "fable-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.fable",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "f",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
             "color": {
               "color": "#5B4B8AFF",
               "opacity": "1"
@@ -8033,7 +8103,7 @@
               "opacity": "1"
             }
           },
-          "x": "0"
+          "x": "display.origin.fable"
         },
         {
           "id": "fable-weekly-value-light-pct",
@@ -8066,7 +8136,7 @@
               "opacity": "1"
             }
           },
-          "x": "0"
+          "x": "display.origin.fable"
         },
         {
           "id": "codex-session-value-dark-pct",

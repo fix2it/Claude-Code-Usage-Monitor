@@ -1590,11 +1590,10 @@ pub struct DisplayMetrics {
     pub providers_width: f64,
     /// Providers plus the Fable column when shown; sizes every bar.
     pub widget_count: usize,
-    /// Measured Fable text line plus 2 px; 0 when it cannot be measured, so
-    /// the theme's `max(bar, text_box.fable)` falls back to the bar width.
-    pub fable_text_box: f64,
-    /// Measured Fable percent line plus 2 px; the percent reserve otherwise.
-    pub fable_percent_box: f64,
+    /// The Fable column, measured like a provider. Its `text_box` is 0 when
+    /// the line cannot be measured, so the theme's `max(bar, text_box.fable)`
+    /// falls back to the bar width.
+    fable: ProviderMetrics,
 }
 
 impl DisplayMetrics {
@@ -1619,9 +1618,16 @@ impl DisplayMetrics {
             providers: [ProviderMetrics::default(); 8],
             providers_width: 0.0,
             widget_count,
-            fable_text_box: 0.0,
-            fable_percent_box: COMPACT_PERCENT_WIDTH,
+            fable: ProviderMetrics::default(),
         };
+        metrics.fable = fable_column(
+            bar,
+            0.0,
+            COMPACT_PERCENT_WIDTH,
+            COMPACT_MARKER_WIDTH,
+            COMPACT_ORIGIN_LEGACY,
+            phases,
+        );
         for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
             let text_box = if *key == "cursor" {
                 COMPACT_CURSOR_TEXT_WIDTH
@@ -1692,6 +1698,28 @@ pub fn compact_row_width(
         + text_box * (1.0 - phases.text_collapse)
         + percent_box * phases.bar_collapse
         + origin
+}
+
+/// The Fable column: a marker, then the bar stacked above its text line. The
+/// bar still sets the minimum width, so the stacked text extent is expressed
+/// through `compact_row_width` as `max(bar, text) - bar - gap`.
+fn fable_column(
+    bar_full_width: f64,
+    text_box: f64,
+    percent_box: f64,
+    marker_box: f64,
+    origin: f64,
+    phases: ModePhases,
+) -> ProviderMetrics {
+    let stacked_text = bar_full_width.max(text_box) - bar_full_width - COMPACT_ROW_GAP;
+    ProviderMetrics {
+        text_box,
+        percent_box,
+        marker_box,
+        origin,
+        text_slide: -text_box * phases.text_collapse,
+        row_width: compact_row_width(bar_full_width, stacked_text, percent_box, origin, phases),
+    }
 }
 
 /// Sum of the enabled rows plus the 6 px inter-widget gap. `count` is already
@@ -2033,9 +2061,16 @@ pub(crate) fn display_metrics(
     let qoder_pool = base.get("qoder.session.available").unwrap_or(0.0) != 0.0
         || base.get("qoder.week.available").unwrap_or(0.0) != 0.0;
     let mut metrics = legacy.clone();
-    metrics.fable_text_box = text_advance[FABLE_METRICS_INDEX].map_or(0.0, |advance| advance + 2.0);
-    metrics.fable_percent_box =
-        percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0);
+    let (fable_marker_box, fable_origin) =
+        marker_column(marker_advance[FABLE_METRICS_INDEX], legacy.fable);
+    metrics.fable = fable_column(
+        bar,
+        text_advance[FABLE_METRICS_INDEX].map_or(0.0, |advance| advance + 2.0),
+        percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0),
+        fable_marker_box,
+        fable_origin,
+        phases,
+    );
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
         let fallback = legacy.providers[index];
         let text_box = text_advance[index].map_or(fallback.text_box, |advance| advance + 2.0);
@@ -2090,6 +2125,14 @@ pub(crate) fn metrics_for_phase(
             phases,
         );
     }
+    metrics.fable = fable_column(
+        bar,
+        metrics.fable.text_box,
+        metrics.fable.percent_box,
+        metrics.fable.marker_box,
+        metrics.fable.origin,
+        phases,
+    );
     metrics.providers_width = compact_providers_width(
         DISPLAY_PROVIDER_KEYS
             .iter()
@@ -2125,16 +2168,14 @@ fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
         return Some(metrics.providers_width);
     }
     let (prefix, key) = name.rsplit_once('.')?;
-    if prefix.eq_ignore_ascii_case("display.text_box") && key.eq_ignore_ascii_case("fable") {
-        return Some(metrics.fable_text_box);
-    }
-    if prefix.eq_ignore_ascii_case("display.percent_box") && key.eq_ignore_ascii_case("fable") {
-        return Some(metrics.fable_percent_box);
-    }
-    let index = DISPLAY_PROVIDER_KEYS
-        .iter()
-        .position(|candidate| key.eq_ignore_ascii_case(candidate))?;
-    let provider = metrics.providers[index];
+    let provider = if key.eq_ignore_ascii_case("fable") {
+        metrics.fable
+    } else {
+        let index = DISPLAY_PROVIDER_KEYS
+            .iter()
+            .position(|candidate| key.eq_ignore_ascii_case(candidate))?;
+        metrics.providers[index]
+    };
     if prefix.eq_ignore_ascii_case("display.text_box") {
         Some(provider.text_box)
     } else if prefix.eq_ignore_ascii_case("display.percent_box") {
