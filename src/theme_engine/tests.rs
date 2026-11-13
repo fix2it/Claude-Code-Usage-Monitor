@@ -1184,7 +1184,7 @@ fn opencode_monthly_window_is_available_to_templates_when_present() {
 fn starter_theme_renders_transparent_pixels_at_declared_size() {
     let theme = ThemeDocument::starter();
     let absent = render_theme(&theme, None);
-    assert!((30..136).all(|x| absent.pixels[10 * absent.width as usize + x] >> 24 == 0));
+    assert!((30..81).all(|x| absent.pixels[10 * absent.width as usize + x] >> 24 == 0));
     let usage = AppUsageData::from_iter([(
         ProviderId::Claude,
         crate::models::UsageData {
@@ -1196,15 +1196,15 @@ fn starter_theme_renders_transparent_pixels_at_declared_size() {
         },
     )]);
     let rendered = render_theme(&theme, Some(&usage));
-    assert_eq!((rendered.width, rendered.height), (136, 46));
-    assert_eq!(rendered.pixels.len(), 136 * 46);
+    assert_eq!((rendered.width, rendered.height), (81, 46));
+    assert_eq!(rendered.pixels.len(), 81 * 46);
     assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
     assert_eq!(rendered.pixels[0] >> 24, 0);
-    let track_alpha = (30..136)
+    let track_alpha = (30..81)
         .map(|x| rendered.pixels[10 * rendered.width as usize + x] >> 24)
         .collect::<Vec<_>>();
-    assert!(track_alpha.iter().filter(|alpha| **alpha == 0).count() >= 9);
-    assert!(track_alpha.iter().filter(|alpha| **alpha > 0).count() >= 70);
+    assert!(track_alpha.iter().filter(|alpha| **alpha == 0).count() >= 2);
+    assert!(track_alpha.iter().filter(|alpha| **alpha > 0).count() >= 25);
     assert!(rendered.warnings.is_empty());
 }
 
@@ -5412,4 +5412,144 @@ fn removed_managed_theme_selection_falls_back_to_compact() {
     assert!(is_removed_managed_theme(
         &dotted.join("classic-usage-widget.json")
     ));
+}
+
+fn fable_usage() -> AppUsageData {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    AppUsageData::from_iter([(
+        ProviderId::Claude,
+        UsageData {
+            limits: vec![UsageLimit {
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                model_id: None,
+                scope: None,
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage: 43.0,
+                    resets_at: None,
+                },
+            }],
+            ..Default::default()
+        },
+    )])
+}
+
+fn cubes_for(widgets: usize) -> f64 {
+    (10.0 / widgets.max(1) as f64).ceil().min(5.0)
+}
+
+#[test]
+fn widget_count_counts_the_fable_column_and_caps_cubes_at_five() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let usage = fable_usage();
+    let all = [
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+        ProviderId::OpenCode,
+        ProviderId::Qoder,
+    ];
+    for providers in 1..=all.len() {
+        let set = ProviderSet::from_enabled(all[..providers].iter().copied());
+        for fable in [false, true] {
+            let runtime = ThemeRuntime::from_providers(set).with_show_fable(fable);
+            let widgets = providers + fable as usize;
+            assert_eq!(widget_count(Some(&usage), runtime), widgets);
+            let context =
+                DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+            assert_eq!(context.get("display.widget_count"), Some(widgets as f64));
+            let cubes =
+                evaluate("min(5, ceil(10 / max(1, display.widget_count)))", &context).unwrap();
+            assert_eq!(cubes, cubes_for(widgets));
+            assert!(cubes <= 5.0);
+            assert_eq!(compact_bar_cubes(widgets), cubes);
+            assert_eq!(
+                context.get("display.bar_full_width"),
+                Some(cubes * 11.0 - 1.0)
+            );
+            assert_eq!(compact_bar_full_width(widgets), cubes * 11.0 - 1.0);
+            assert_eq!(
+                display_metrics(&theme, Some(&usage), runtime).widget_count,
+                widgets
+            );
+        }
+    }
+    // No Fable data, Claude off, or setting off: the column is not a widget.
+    let claude = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true);
+    assert_eq!(widget_count(None, claude), 1);
+    let codex = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
+        .with_show_fable(true);
+    assert_eq!(widget_count(Some(&usage), codex), 1);
+}
+
+#[test]
+fn every_compact_bar_uses_the_widget_count_cube_rule() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let raw = include_str!("../themes/compact-fluent-quad.json");
+    assert!(!raw.contains("ceil(10 / max(1, providers.count))"));
+    assert!(!raw.contains("floor((90 + 1) / 11)"));
+    let mut bars = 0;
+    for object in &theme.surfaces[0].children {
+        if let SceneContent::Progress {
+            segments_expression: Some(expression),
+            ..
+        } = &object.content
+        {
+            bars += 1;
+            assert_eq!(
+                expression.0, "min(5, ceil(10 / max(1, display.widget_count)))",
+                "{}",
+                object.id
+            );
+        }
+    }
+    assert!(bars > 0);
+}
+
+#[test]
+fn fable_width_delta_is_not_larger_than_another_provider_delta() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let usage = fable_usage();
+    let width = |providers: &[ProviderId], fable: bool, phase: f64| {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled(providers.iter().copied()))
+                .with_show_fable(fable)
+                .with_mode_phase(phase);
+        resolve_surface_size(&theme, 0, Some(&usage), runtime).0
+    };
+    let bases: [&[ProviderId]; 3] = [
+        &[ProviderId::Claude],
+        &[ProviderId::Claude, ProviderId::Antigravity],
+        &[
+            ProviderId::Claude,
+            ProviderId::Antigravity,
+            ProviderId::OpenCode,
+        ],
+    ];
+    let extras = [ProviderId::Codex, ProviderId::Qoder];
+    for base in bases {
+        for phase in [0.0, 0.5, 1.0, 1.5, 2.0] {
+            let start = width(base, false, phase);
+            let fable = width(base, true, phase) - start;
+            for extra in extras {
+                let mut with_extra = base.to_vec();
+                with_extra.push(extra);
+                let provider = width(&with_extra, false, phase) - start;
+                assert!(
+                    fable <= provider,
+                    "{} widgets, phase {phase}: fable {fable} > {extra:?} {provider}",
+                    base.len()
+                );
+            }
+        }
+    }
 }

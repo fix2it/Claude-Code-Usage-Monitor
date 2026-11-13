@@ -1482,13 +1482,38 @@ pub fn decompose_mode_phase(phase: f64) -> ModePhases {
 /// own expressions with the `display.*` bindings below, which makes these the
 /// single source of truth; until then the bindings are simply unused.
 const COMPACT_BAR_SEGMENTS: f64 = 10.0;
+/// A bar never shows more cubes than this, whatever the widget count.
+const COMPACT_MAX_CUBES: f64 = 5.0;
 const COMPACT_TEXT_WIDTH: f64 = 62.0;
 const COMPACT_TEXT_WIDTH_WIDE: f64 = 90.0;
 const COMPACT_MARKER_WIDTH: f64 = 10.0;
 const COMPACT_ROW_GAP: f64 = 4.0;
 
-fn compact_bar_full_width(provider_count: usize) -> f64 {
-    (COMPACT_BAR_SEGMENTS / provider_count.max(1) as f64).ceil() * 11.0 - 1.0
+/// Cubes per bar: `min(5, ceil(10 / max(1, widgets)))`. The theme's
+/// `segments_expression` uses the same formula over `display.widget_count`.
+fn compact_bar_cubes(widget_count: usize) -> f64 {
+    (COMPACT_BAR_SEGMENTS / widget_count.max(1) as f64)
+        .ceil()
+        .min(COMPACT_MAX_CUBES)
+}
+
+/// `widget_count` is providers plus one when the Fable column is shown.
+fn compact_bar_full_width(widget_count: usize) -> f64 {
+    compact_bar_cubes(widget_count) * 11.0 - 1.0
+}
+
+/// Widgets in the Compact row: the enabled providers, plus the Fable column
+/// when it is opted in, Claude is enabled and Claude reports a Fable quota.
+/// Derived from the same limits the theme's `claude.model.fable.available`
+/// binding reads, so no extra metrics pass is needed.
+pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> usize {
+    let fable = runtime.show_fable
+        && runtime.provider_enabled(ProviderId::Claude)
+        && theme_limits::model_limit_available(
+            data.and_then(|data| data.get(ProviderId::Claude)),
+            "fable",
+        );
+    runtime.provider_count() + fable as usize
 }
 
 /// Geometry and visibility for one widget row at a given mode phase. Pure:
@@ -1563,6 +1588,8 @@ pub struct ProviderMetrics {
 pub struct DisplayMetrics {
     providers: [ProviderMetrics; 8],
     pub providers_width: f64,
+    /// Providers plus the Fable column when shown; sizes every bar.
+    pub widget_count: usize,
 }
 
 impl DisplayMetrics {
@@ -1577,11 +1604,16 @@ impl DisplayMetrics {
     /// Legacy reserves, used whenever a line cannot be measured and as the
     /// base context that theme validation and Studio build before data exists.
     pub fn legacy(runtime: ThemeRuntime) -> Self {
+        Self::legacy_with_widgets(runtime, runtime.provider_count())
+    }
+
+    pub(crate) fn legacy_with_widgets(runtime: ThemeRuntime, widget_count: usize) -> Self {
         let phases = decompose_mode_phase(runtime.mode_phase);
-        let bar = compact_bar_full_width(runtime.provider_count());
+        let bar = compact_bar_full_width(widget_count);
         let mut metrics = Self {
             providers: [ProviderMetrics::default(); 8],
             providers_width: 0.0,
+            widget_count,
         };
         for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
             let text_box = if *key == "cursor" {
@@ -1814,7 +1846,7 @@ fn display_metrics_cache_key(
         theme.id,
         runtime.countdown,
         runtime.use_windows_default_font,
-        runtime.provider_count(),
+        base.get("display.widget_count").unwrap_or(0.0),
         DISPLAY_PROVIDER_KEYS
             .iter()
             .filter(|key| runtime.provider_enabled(display_provider_id(key)))
@@ -1864,8 +1896,9 @@ pub(crate) fn display_metrics(
 ) -> DisplayMetrics {
     #[cfg(test)]
     METRICS_COMPUTATION_COUNT.with(|count| count.set(count.get() + 1));
+    let widgets = widget_count(data, runtime);
     let Some(surface) = theme.surfaces.first() else {
-        return DisplayMetrics::legacy(runtime);
+        return DisplayMetrics::legacy_with_widgets(runtime, widgets);
     };
     let by_id: HashMap<&str, &SceneObject> = surface
         .children
@@ -1977,9 +2010,9 @@ pub(crate) fn display_metrics(
         *slot = Some((*slot).map_or(advance, |current: f64| current.max(advance)));
     }
 
-    let legacy = DisplayMetrics::legacy(runtime);
+    let legacy = DisplayMetrics::legacy_with_widgets(runtime, widgets);
     let phases = decompose_mode_phase(runtime.mode_phase);
-    let bar = compact_bar_full_width(runtime.provider_count());
+    let bar = compact_bar_full_width(widgets);
     let claude_dual = base.get("claude.dual_mode").unwrap_or(0.0) != 0.0;
     let codex_dual = base.get("codex.dual_mode").unwrap_or(0.0) != 0.0;
     let qoder_pool = base.get("qoder.session.available").unwrap_or(0.0) != 0.0
@@ -2028,7 +2061,7 @@ pub(crate) fn metrics_for_phase(
     runtime: ThemeRuntime,
 ) -> DisplayMetrics {
     let phases = decompose_mode_phase(runtime.mode_phase);
-    let bar = compact_bar_full_width(runtime.provider_count());
+    let bar = compact_bar_full_width(metrics.widget_count);
     for provider in &mut metrics.providers {
         provider.text_slide = -provider.text_box * phases.text_collapse;
         provider.row_width = compact_row_width(
@@ -2097,7 +2130,7 @@ fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
 
 /// Insert every binding derived from the animation state. Called once per
 /// render, so the theme never duplicates the formulas.
-fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime) {
+fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, widgets: usize) {
     let phase = runtime.mode_phase.clamp(0.0, 2.0);
     let phases = decompose_mode_phase(phase);
     context.insert("display.view_mode", f64::from(runtime.view_mode));
@@ -2105,7 +2138,9 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime) 
     context.insert("display.mode_text_progress", phases.text_collapse);
     context.insert("display.mode_bar_progress", phases.bar_collapse);
 
-    let bar = compact_bar_full_width((*runtime).provider_count());
+    let bar = compact_bar_full_width(widgets);
+    context.insert("display.widget_count", widgets as f64);
+    context.insert("display.bar_full_width", bar);
     let narrow = mode_row_bindings(
         phase,
         bar,
@@ -2154,7 +2189,7 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime) 
 
     // Adaptive Compact columns. Legacy reserves are the base every context
     // sees; theme-aware resolvers overwrite them with measured values.
-    let metrics = DisplayMetrics::legacy(*runtime);
+    let metrics = DisplayMetrics::legacy_with_widgets(*runtime, widgets);
     insert_display_metrics(context, &metrics);
 }
 
@@ -2262,7 +2297,7 @@ impl DataContext {
         context.insert("display.countdown", runtime.countdown as u8 as f64);
         context.insert("display.show_pace", runtime.show_pace as u8 as f64);
         context.insert("display.show_fable", runtime.show_fable as u8 as f64);
-        insert_animation_bindings(&mut context, &runtime);
+        insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
         context.insert(
             "antigravity.gemini.enabled",
             runtime.antigravity_gemini_enabled as u8 as f64,
@@ -4061,6 +4096,43 @@ mod adaptive_metrics_tests {
         METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
         hit_test_mouse_event(&theme, 0, 1.0, 1.0, None, runtime);
         assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+    }
+
+    #[test]
+    fn fable_widget_count_adds_no_metrics_computation() {
+        let theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let usage = AppUsageData::from_iter([(
+            ProviderId::Claude,
+            crate::models::UsageData {
+                limits: vec![crate::models::UsageLimit {
+                    key: "weekly_scoped_fable".into(),
+                    kind: "weekly_scoped".into(),
+                    label: "Fable".into(),
+                    model: Some("Fable".into()),
+                    model_id: None,
+                    scope: None,
+                    is_active: true,
+                    usage: crate::models::UsageSection {
+                        available: true,
+                        percentage: 43.0,
+                        resets_at: None,
+                    },
+                }],
+                ..Default::default()
+            },
+        )]);
+        for fable in [false, true] {
+            let runtime =
+                ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+                    .with_show_fable(fable);
+            METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+            render_theme_surface_with_runtime(&theme, 0, Some(&usage), runtime);
+            assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+            METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+            hit_test_mouse_event(&theme, 0, 1.0, 1.0, Some(&usage), runtime);
+            assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+        }
     }
 
     #[test]
