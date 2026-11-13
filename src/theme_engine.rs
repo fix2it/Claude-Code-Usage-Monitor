@@ -1502,12 +1502,9 @@ fn compact_bar_full_width(widget_count: usize) -> f64 {
     compact_bar_cubes(widget_count) * 11.0 - 1.0
 }
 
-/// Widgets in the Compact row: the enabled providers, plus the Fable column
-/// when it is opted in, Claude is enabled and Claude reports a Fable quota.
-/// Derived from the same limits the theme's `claude.model.fable.available`
-/// binding reads, so no extra metrics pass is needed.
+/// Count enabled providers and the separate two-pool Fable column.
 pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> usize {
-    runtime.provider_count() + fable_visible(data, runtime) as usize
+    runtime.provider_count() + (fable_visible(data, runtime) && claude_dual(runtime)) as usize
 }
 
 /// Both Claude pools are on: the Fable column then shows one row per pool.
@@ -2018,12 +2015,12 @@ pub(crate) fn display_metrics(
                 fingerprint.push_str("0;");
                 continue;
             }
-            if provider_index == FABLE_METRICS_INDEX
-                && kind != MeasuredLineKind::Marker
-                && object.id.starts_with("fable-dual-")
+            if kind != MeasuredLineKind::Marker
+                && (object.id.starts_with("fable-dual-")
+                    || object.id.starts_with("claude-fable-value-"))
             {
-                // The two-pool column reserves the widest realistic line, so
-                // its width is the same while loading and once data arrives.
+                // Reserve a representative Fable line while loading as well as
+                // after data arrives, in either Claude or the Fable column.
                 let sample_text = match kind {
                     MeasuredLineKind::Percent => FABLE_DUAL_PERCENT_SAMPLE,
                     _ => FABLE_DUAL_SAMPLE,
@@ -2421,6 +2418,14 @@ impl DataContext {
         context.insert(
             "display.fable_visible",
             fable_visible(data, runtime) as u8 as f64,
+        );
+        context.insert(
+            "display.fable_separate",
+            (fable_visible(data, runtime) && claude_dual(runtime)) as u8 as f64,
+        );
+        context.insert(
+            "display.fable_row",
+            (fable_visible(data, runtime) && !claude_dual(runtime)) as u8 as f64,
         );
         insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
         context.insert(

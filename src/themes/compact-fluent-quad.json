@@ -21,7 +21,7 @@
         "offset_x": 6,
         "offset_y": 0
       },
-      "width": "display.providers_width + providers.claude.enabled * display.fable_visible * display.show_fable * (6 + display.row_width.fable) + 4",
+      "width": "display.providers_width + display.fable_separate * (6 + display.row_width.fable) + 4",
       "height": "46",
       "background": {
         "type": "none"
@@ -566,7 +566,7 @@
           "parent": "claude-provider",
           "y": "27",
           "width": "display.bar_width",
-          "height": "9",
+          "height": "9 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "none"
           },
@@ -602,7 +602,7 @@
           "x": "round((display.bar_width - 1) * clamp(claude.weekly.expected_display, 0, 100) / 100)",
           "y": "(27) - 1",
           "width": "1",
-          "height": "(9) + 2",
+          "height": "11 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "colour",
             "colour": {
@@ -623,7 +623,7 @@
           "id": "claude-weekly-value-dark",
           "name": "dark Claude Code 7-day value",
           "render": "((system.dark) && !claude.credits.available) && (!claude.dual_mode)",
-          "visibility": "display.text_opacity",
+          "visibility": "display.text_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
@@ -660,7 +660,7 @@
           "parent": "claude-provider",
           "y": "27",
           "width": "display.bar_width",
-          "height": "9",
+          "height": "9 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "none"
           },
@@ -696,7 +696,7 @@
           "x": "round((display.bar_width - 1) * clamp(claude.weekly.expected_display, 0, 100) / 100)",
           "y": "(27) - 1",
           "width": "1",
-          "height": "(9) + 2",
+          "height": "11 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "colour",
             "colour": {
@@ -717,7 +717,7 @@
           "id": "claude-weekly-value-light",
           "name": "light Claude Code 7-day value",
           "render": "((1 - system.dark) && !claude.credits.available) && (!claude.dual_mode)",
-          "visibility": "display.text_opacity",
+          "visibility": "display.text_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
@@ -746,10 +746,18 @@
             }
           }
         },
+        {"id":"claude-fable-segments-dark","name":"dark Claude Fable segments","render":"((system.dark) && (!claude.dual_mode)) && display.fable_row","visibility":"100","parent":"claude-provider","y":"35 - 3 * claude.hover_phase","width":"display.bar_width","height":"3 + 3 * claude.hover_phase","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"claude.model.fable.display * claude.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#444444FF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"claude-fable-segments-dark-pace","name":"dark Claude Fable pace tick","render":"((system.dark) && (!claude.dual_mode)) && display.fable_row","visibility":"(100) * claude.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"claude-provider","x":"round((display.bar_width - 1) * clamp(claude.model.fable.expected_display, 0, 100) / 100)","y":"34 - 3 * claude.hover_phase","width":"1","height":"5 + 3 * claude.hover_phase","background":{"type":"colour","colour":{"color":"#FFFFFFFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"claude-fable-value-dark","name":"dark Claude Fable value","render":"(((system.dark)) && (!claude.dual_mode)) && display.fable_row","visibility":"display.text_opacity * claude.hover.opacity","parent":"claude-provider","x":"display.origin.claude + display.bar_width + 4 + display.text_slide.claude","y":"25","width":"display.text_box.claude","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{claude.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"claude-fable-value-dark-pct","name":"dark Claude Fable value","render":"(((system.dark)) && (!claude.dual_mode) && (display.percent_opacity > 0.01)) && display.fable_row","visibility":"display.percent_opacity * claude.hover.opacity","parent":"claude-provider","x":"display.origin.claude","y":"25","width":"display.percent_box.claude","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{claude.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"claude-fable-segments-light","name":"light Claude Fable segments","render":"((1 - system.dark) && (!claude.dual_mode)) && display.fable_row","visibility":"100","parent":"claude-provider","y":"35 - 3 * claude.hover_phase","width":"display.bar_width","height":"3 + 3 * claude.hover_phase","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"claude.model.fable.display * claude.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#AAAAAAFF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"claude-fable-segments-light-pace","name":"light Claude Fable pace tick","render":"((1 - system.dark) && (!claude.dual_mode)) && display.fable_row","visibility":"(100) * claude.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"claude-provider","x":"round((display.bar_width - 1) * clamp(claude.model.fable.expected_display, 0, 100) / 100)","y":"34 - 3 * claude.hover_phase","width":"1","height":"5 + 3 * claude.hover_phase","background":{"type":"colour","colour":{"color":"#1A1A1AFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"claude-fable-value-light","name":"light Claude Fable value","render":"(((1 - system.dark)) && (!claude.dual_mode)) && display.fable_row","visibility":"display.text_opacity * claude.hover.opacity","parent":"claude-provider","x":"display.origin.claude + display.bar_width + 4 + display.text_slide.claude","y":"25","width":"display.text_box.claude","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{claude.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"claude-fable-value-light-pct","name":"light Claude Fable value","render":"(((1 - system.dark)) && (!claude.dual_mode) && (display.percent_opacity > 0.01)) && display.fable_row","visibility":"display.percent_opacity * claude.hover.opacity","parent":"claude-provider","x":"display.origin.claude","y":"25","width":"display.percent_box.claude","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{claude.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
         {
           "id": "fable-provider",
           "name": "Fable weekly meter",
-          "render": "providers.claude.enabled && display.fable_visible && display.show_fable",
+          "render": "display.fable_separate",
           "visibility": "100",
           "parent": "provider-row",
           "width": "display.row_width.fable",
@@ -4082,7 +4090,7 @@
           "parent": "claude-provider",
           "y": "27",
           "width": "display.bar_width",
-          "height": "9",
+          "height": "9 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "none"
           },
@@ -4113,7 +4121,7 @@
           "id": "claude-credits-value-dark",
           "name": "dark claude credit balance",
           "render": "((system.dark) && claude.credits.available) && (!claude.dual_mode)",
-          "visibility": "display.text_opacity",
+          "visibility": "display.text_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
@@ -4150,7 +4158,7 @@
           "parent": "claude-provider",
           "y": "27",
           "width": "display.bar_width",
-          "height": "9",
+          "height": "9 - display.fable_row * (3 + 3 * claude.hover_phase)",
           "background": {
             "type": "none"
           },
@@ -4181,7 +4189,7 @@
           "id": "claude-credits-value-light",
           "name": "light claude credit balance",
           "render": "((1 - system.dark) && claude.credits.available) && (!claude.dual_mode)",
-          "visibility": "display.text_opacity",
+          "visibility": "display.text_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude + display.bar_width + 4 + display.text_slide.claude",
           "y": "25",
@@ -8032,7 +8040,7 @@
           "id": "claude-weekly-value-dark-pct",
           "name": "dark Claude Code 7-day value compact percent",
           "render": "((system.dark) && !claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
-          "visibility": "display.percent_opacity",
+          "visibility": "display.percent_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude",
           "y": "25",
@@ -8065,7 +8073,7 @@
           "id": "claude-weekly-value-light-pct",
           "name": "light Claude Code 7-day value compact percent",
           "render": "((1 - system.dark) && !claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
-          "visibility": "display.percent_opacity",
+          "visibility": "display.percent_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude",
           "y": "25",
@@ -9022,7 +9030,7 @@
           "id": "claude-credits-value-dark-pct",
           "name": "dark claude credit balance compact percent",
           "render": "((system.dark) && claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
-          "visibility": "display.percent_opacity",
+          "visibility": "display.percent_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude",
           "y": "25",
@@ -9955,7 +9963,7 @@
           "id": "claude-credits-value-light-pct",
           "name": "light claude credit balance compact percent",
           "render": "((1 - system.dark) && claude.credits.available) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
-          "visibility": "display.percent_opacity",
+          "visibility": "display.percent_opacity * (1 - display.fable_row * claude.hover.opacity)",
           "parent": "claude-provider",
           "x": "display.origin.claude",
           "y": "25",

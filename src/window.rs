@@ -3971,15 +3971,16 @@ pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
         };
         if state.claude_hovered != hovered {
             state.claude_hovered = hovered;
-            if state.is_dual_mode_active(ProviderId::Claude) {
-                let target = if hovered { 1.0 } else { 0.0 };
-                state.claude_crossfade_animation = Some(hover_phase_animation(
-                    state.claude_crossfade_opacity,
-                    target,
-                    CLAUDE_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
+            // The single-pool Fable row also follows Claude's hover phase.
+            // Keep it current even while Fable is off, so toggling Fable over
+            // an already-hovered tile immediately reveals the correct row.
+            let target = if hovered { 1.0 } else { 0.0 };
+            state.claude_crossfade_animation = Some(hover_phase_animation(
+                state.claude_crossfade_opacity,
+                target,
+                CLAUDE_CROSSFADE_DURATION_MS,
+            ));
+            should_animate = true;
         }
     }
     if should_animate {
