@@ -911,7 +911,7 @@
           "visibility": "100",
           "parent": "fable-provider",
           "x": "0",
-          "y": "25",
+          "y": "7",
           "width": "display.marker_box.fable",
           "height": "13",
           "background": {
@@ -944,7 +944,7 @@
           "visibility": "100",
           "parent": "fable-provider",
           "x": "0",
-          "y": "25",
+          "y": "7",
           "width": "display.marker_box.fable",
           "height": "13",
           "background": {

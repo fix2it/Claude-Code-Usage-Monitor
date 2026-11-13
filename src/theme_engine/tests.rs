@@ -5527,6 +5527,8 @@ fn fable_marker_f_sits_beside_the_bar_and_column_width_follows_the_measured_text
             SceneContent::Text { template, .. } if object.id.contains("-marker-") => {
                 assert_eq!(template, "f");
                 assert_eq!(object.x.0, "0", "{}", object.id);
+                // On the bar row, like the Claude main marker (bar y 10).
+                assert_eq!(object.y.0, "7", "{}", object.id);
                 assert_eq!(object.width.0, "display.marker_box.fable", "{}", object.id);
                 markers += 1;
             }
