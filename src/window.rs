@@ -2199,10 +2199,12 @@ fn sync_surface_windows_with(mut create_desktop: impl FnMut() -> HWND) {
             state.is_snapped = false;
             state.is_switching_window_style = false;
             state.pending_mouse_click = None;
-            state.hovered_mouse_layer = None;
             set_window_title(replacement, state.language.strings());
         }
         diagnose::log_recovery(format!("recreated primary surface hwnd={replacement:?}"));
+        // The replacement may stay hidden and never be positioned; recheck
+        // hover (and run any pending leave action) against it anyway.
+        mouse::request_hover_revalidation(replacement);
     }
     let mirrors = lock_state()
         .as_ref()
@@ -2980,10 +2982,24 @@ fn render_layered_impl(trigger: RenderTrigger) {
         };
         let surface = &theme.surfaces[surface_index];
         let surface_runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
-        let surface_metrics = theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
+        let surface_metrics = if surface_index == 0 {
+            std::borrow::Cow::Borrowed(&metrics)
+        } else {
+            std::borrow::Cow::Owned(theme_engine::metrics_for_phase(
+                metrics.clone(),
+                surface_runtime,
+            ))
+        };
+        // Each rect is rebuilt only while it is `None`. A theme without a
+        // provider object keeps that rect `None` forever, so hover-only
+        // animation frames skip the lookup; full renders and view-mode
+        // frames (whose geometry changes) still rebuild missing rects.
         if surface_index == 0 {
             let mut state = lock_state();
-            if let Some(state) = state.as_mut() {
+            if let Some(state) = state
+                .as_mut()
+                .filter(|state| trigger == RenderTrigger::Full || state.mode_animation.is_some())
+            {
                 if state.antigravity_tile_rect.is_none() {
                     state.antigravity_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
@@ -3091,22 +3107,16 @@ fn render_layered_impl(trigger: RenderTrigger) {
             &surface_metrics,
         );
         let mut positioned = theme_for_surface(&theme, surface_index);
-        let (logical_width, logical_height) = theme_engine::resolve_surface_size_with_metrics(
-            &theme,
-            surface_index,
-            usage_data.as_ref(),
-            surface_runtime,
-            &surface_metrics,
-        );
+        let ((logical_width, logical_height), placement) =
+            theme_engine::resolve_surface_geometry_with_metrics(
+                &theme,
+                surface_index,
+                usage_data.as_ref(),
+                surface_runtime,
+                &surface_metrics,
+            );
         positioned.canvas.width = logical_width;
         positioned.canvas.height = logical_height;
-        let placement = theme_engine::resolve_surface_placement_with_metrics(
-            &theme,
-            surface_index,
-            usage_data.as_ref(),
-            surface_runtime,
-            &surface_metrics,
-        );
         positioned.placement.offset_x = placement.offset_x;
         positioned.placement.offset_y = placement.offset_y;
         let hosted = position_custom_theme(target_hwnd, &positioned, scale);
@@ -3136,20 +3146,19 @@ fn render_layered_impl(trigger: RenderTrigger) {
     }
 }
 fn theme_for_surface(theme: &ThemeDocument, surface_index: usize) -> ThemeDocument {
-    let mut result = theme.clone();
-    if let Some(surface) = theme.surfaces.get(surface_index) {
-        result.canvas.width_expression = Some(surface.width.clone());
-        result.canvas.height_expression = Some(surface.height.clone());
-        result.canvas.background = match &surface.background {
-            crate::theme_engine::LayerBackground::Colour { colour } => colour.clone(),
-            crate::theme_engine::LayerBackground::None
-            | crate::theme_engine::LayerBackground::Gradient { .. }
-            | crate::theme_engine::LayerBackground::Image { .. } => Default::default(),
-        };
-        result.placement = surface.placement.clone();
-        result.children = surface.children.clone();
+    // Positioning reads only canvas dimensions and placement, not the scene graph.
+    ThemeDocument {
+        schema_version: theme.schema_version,
+        id: String::new(),
+        name: String::new(),
+        canvas: theme.canvas.clone(),
+        placement: theme.surfaces.get(surface_index).map_or_else(
+            || theme.placement.clone(),
+            |surface| surface.placement.clone(),
+        ),
+        children: Vec::new(),
+        surfaces: Vec::new(),
     }
-    result
 }
 
 fn request_poll(hwnd: HWND) {
@@ -3936,11 +3945,21 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
         }
     }
     if should_render {
-        render_layered_animation();
+        if mode_finished {
+            render_layered();
+        } else {
+            render_layered_animation();
+        }
     }
     if mode_finished {
-        mouse::revalidate_mouse_hover(hwnd);
+        // The hoverable objects can change even when the window geometry
+        // does not, so recheck hover once the transition has settled.
+        mouse::request_hover_revalidation(hwnd);
     }
+}
+
+fn hover_phase_animation(start: f64, target: f64, duration_ms: u64) -> PhaseAnimation {
+    PhaseAnimation::hover(start, target, Duration::from_millis(duration_ms))
 }
 
 pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
@@ -3954,10 +3973,10 @@ pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
             state.claude_hovered = hovered;
             if state.is_dual_mode_active(ProviderId::Claude) {
                 let target = if hovered { 1.0 } else { 0.0 };
-                state.claude_crossfade_animation = Some(PhaseAnimation::hover(
+                state.claude_crossfade_animation = Some(hover_phase_animation(
                     state.claude_crossfade_opacity,
                     target,
-                    std::time::Duration::from_millis(CLAUDE_CROSSFADE_DURATION_MS),
+                    CLAUDE_CROSSFADE_DURATION_MS,
                 ));
                 should_animate = true;
             }
@@ -3965,7 +3984,6 @@ pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
     }
     if should_animate {
         ensure_crossfade_timer(hwnd);
-        render_layered_animation();
     }
 }
 
@@ -3981,10 +3999,10 @@ pub(super) fn set_codex_hover(hwnd: HWND, hovered: bool) {
             state.codex_hovered = hovered;
             if state.is_dual_mode_active(ProviderId::Codex) {
                 let target = if hovered { 1.0 } else { 0.0 };
-                state.codex_crossfade_animation = Some(PhaseAnimation::hover(
+                state.codex_crossfade_animation = Some(hover_phase_animation(
                     state.codex_crossfade_opacity,
                     target,
-                    std::time::Duration::from_millis(CODEX_CROSSFADE_DURATION_MS),
+                    CODEX_CROSSFADE_DURATION_MS,
                 ));
                 should_animate = true;
             }
@@ -3992,7 +4010,6 @@ pub(super) fn set_codex_hover(hwnd: HWND, hovered: bool) {
     }
     if should_animate {
         ensure_crossfade_timer(hwnd);
-        render_layered_animation();
     }
 }
 
@@ -4011,10 +4028,10 @@ pub(super) fn set_antigravity_hover(hwnd: HWND, hovered: bool) {
             state.antigravity_hovered = hovered;
             if any_pool {
                 let target = if hovered { 0.0 } else { 1.0 };
-                state.crossfade_animation = Some(PhaseAnimation::hover(
+                state.crossfade_animation = Some(hover_phase_animation(
                     state.crossfade_opacity,
                     target,
-                    std::time::Duration::from_millis(ANTIGRAVITY_CROSSFADE_DURATION_MS),
+                    ANTIGRAVITY_CROSSFADE_DURATION_MS,
                 ));
                 should_animate = true;
             }
@@ -4022,7 +4039,6 @@ pub(super) fn set_antigravity_hover(hwnd: HWND, hovered: bool) {
     }
     if should_animate {
         ensure_crossfade_timer(hwnd);
-        render_layered_animation();
     }
 }
 
@@ -4040,10 +4056,10 @@ pub(super) fn set_opencode_hover(hwnd: HWND, hovered: bool) {
             state.opencode_hovered = hovered;
             if state.providers.contains(ProviderId::OpenCode) {
                 let target = if hovered { 1.0 } else { 0.0 };
-                state.opencode_crossfade_animation = Some(PhaseAnimation::hover(
+                state.opencode_crossfade_animation = Some(hover_phase_animation(
                     state.opencode_crossfade_opacity,
                     target,
-                    std::time::Duration::from_millis(OPENCODE_CROSSFADE_DURATION_MS),
+                    OPENCODE_CROSSFADE_DURATION_MS,
                 ));
                 should_animate = true;
             }
@@ -4051,7 +4067,6 @@ pub(super) fn set_opencode_hover(hwnd: HWND, hovered: bool) {
     }
     if should_animate {
         ensure_crossfade_timer(hwnd);
-        render_layered_animation();
     }
 }
 
@@ -4075,10 +4090,10 @@ pub(super) fn set_qoder_hover(hwnd: HWND, hovered: bool) {
                 .is_some_and(|usage| usage.week.is_some());
             if state.providers.contains(ProviderId::Qoder) && (has_second_pool || !hovered) {
                 let target = if hovered { 1.0 } else { 0.0 };
-                state.qoder_crossfade_animation = Some(PhaseAnimation::hover(
+                state.qoder_crossfade_animation = Some(hover_phase_animation(
                     state.qoder_crossfade_opacity,
                     target,
-                    std::time::Duration::from_millis(QODER_CROSSFADE_DURATION_MS),
+                    QODER_CROSSFADE_DURATION_MS,
                 ));
                 should_animate = true;
             }
@@ -4086,7 +4101,6 @@ pub(super) fn set_qoder_hover(hwnd: HWND, hovered: bool) {
     }
     if should_animate {
         ensure_crossfade_timer(hwnd);
-        render_layered_animation();
     }
 }
 
@@ -5005,6 +5019,32 @@ mod phase_animation_tests {
         wheel_view_mode, AppState, Easing, PhaseAnimation,
     };
     use std::time::Duration;
+
+    #[test]
+    fn hover_setters_arm_200ms_animations_without_rendering() {
+        let source = include_str!("window.rs");
+        let setters = source
+            .split("pub(super) fn set_claude_hover")
+            .nth(1)
+            .unwrap()
+            .split("fn reload_external_settings")
+            .next()
+            .unwrap();
+        assert!(!setters.contains("render_layered_animation()"));
+        assert_eq!(setters.matches("ensure_crossfade_timer(hwnd)").count(), 5);
+        for duration in [
+            super::ANTIGRAVITY_CROSSFADE_DURATION_MS,
+            super::CLAUDE_CROSSFADE_DURATION_MS,
+            super::CODEX_CROSSFADE_DURATION_MS,
+            super::OPENCODE_CROSSFADE_DURATION_MS,
+            super::QODER_CROSSFADE_DURATION_MS,
+        ] {
+            for (start, target) in [(0.0, 1.0), (1.0, 0.0)] {
+                let animation = super::hover_phase_animation(start, target, duration);
+                assert_eq!(animation.duration, Duration::from_millis(200));
+            }
+        }
+    }
 
     #[test]
     fn crossfade_animation_interpolates_and_completes() {

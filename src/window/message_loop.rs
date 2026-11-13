@@ -167,7 +167,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         native_interop::WM_APP_ANIMATION_TICK => {
+            animation_timer::tick_dequeued();
             tick_animations(hwnd, false);
+            LRESULT(0)
+        }
+        native_interop::WM_APP_REVALIDATE_HOVER => {
+            super::mouse::run_requested_hover_revalidation();
             LRESULT(0)
         }
         native_interop::WM_APP_TRAY_REPOSITION => {
@@ -419,6 +424,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             SWP_NOACTIVATE | SWP_NOSIZE,
                         );
                     }
+                    super::mouse::request_hover_revalidation(hwnd);
                 }
             } else {
                 update_mouse_hover(hwnd, lparam);

@@ -743,14 +743,52 @@ pub fn resolve_surface_placement_with_metrics(
     runtime: ThemeRuntime,
     metrics: &DisplayMetrics,
 ) -> ResolvedPlacementValues {
+    let size =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
+    resolve_surface_placement_for_content_size(theme, surface_index, data, runtime, metrics, size)
+}
+
+/// Resolve size and placement together without evaluating the surface size twice.
+pub(crate) fn resolve_surface_geometry_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> ((u32, u32), ResolvedPlacementValues) {
+    let size =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
+    let placement = resolve_surface_placement_for_content_size(
+        theme,
+        surface_index,
+        data,
+        runtime,
+        metrics,
+        size,
+    );
+    (
+        (
+            size.0 + 2 * surface_horizontal_padding(theme, surface_index, runtime),
+            size.1,
+        ),
+        placement,
+    )
+}
+
+fn resolve_surface_placement_for_content_size(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+    (width, height): (u32, u32),
+) -> ResolvedPlacementValues {
     let Some(surface) = theme.surfaces.get(surface_index) else {
         return ResolvedPlacementValues {
             offset_x: theme.placement.offset_x,
             offset_y: theme.placement.offset_y,
         };
     };
-    let (width, height) =
-        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
     let canvas = Canvas {
         width,
         width_expression: Some(surface.width.clone()),

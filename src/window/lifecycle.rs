@@ -124,9 +124,10 @@ pub(super) unsafe extern "system" fn controller_wnd_proc(
             LRESULT(0)
         }
         WM_APP_SHELL_CHANGED => dispatch_to_surface(wparam.0 as u32, WPARAM(0), LPARAM(0)),
-        WM_TIMER | WM_COMMAND | native_interop::WM_APP_ANIMATION_TICK => {
-            dispatch_to_surface(msg, wparam, lparam)
-        }
+        WM_TIMER
+        | WM_COMMAND
+        | native_interop::WM_APP_ANIMATION_TICK
+        | native_interop::WM_APP_REVALIDATE_HOVER => dispatch_to_surface(msg, wparam, lparam),
         _ if msg == taskbar_created_message() => {
             let _ = PostMessageW(Some(hwnd), WM_APP_SHELL_READY, WPARAM(0), LPARAM(0));
             LRESULT(0)

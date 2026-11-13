@@ -49,6 +49,9 @@ pub const WM_APP_TRAY_REPOSITION: u32 = WM_APP + 15;
 /// Posted by the animation timer callback instead of relying on `WM_TIMER`,
 /// which Windows only generates when the message queue is empty.
 pub const WM_APP_ANIMATION_TICK: u32 = WM_APP + 19;
+/// Posted after a surface moved, resized or was recreated, so hover is
+/// rechecked outside any render or theme action.
+pub const WM_APP_REVALIDATE_HOVER: u32 = WM_APP + 20;
 
 pub fn is_taskbar_horizontal(rect: RECT) -> bool {
     (rect.right - rect.left) >= (rect.bottom - rect.top)

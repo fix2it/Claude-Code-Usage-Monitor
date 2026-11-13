@@ -139,6 +139,12 @@ pub(super) fn window_pos_flags(
         flags |= SWP_NOMOVE | SWP_NOSIZE;
     }
     cache.insert(key, geometry);
+    drop(cache);
+    if !flags.contains(SWP_NOMOVE) {
+        // A real move, resize or a recreated surface: Win32 sends no
+        // WM_MOUSELEAVE/WM_MOUSEMOVE for a stationary cursor.
+        super::mouse::request_hover_revalidation(hwnd);
+    }
     flags
 }
 

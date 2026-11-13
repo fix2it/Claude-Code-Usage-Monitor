@@ -12,7 +12,7 @@
 //! `SetTimer`/`WM_TIMER` path, which `wnd_proc` still handles.
 
 use super::*;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const TIME_PERIODIC: u32 = 0x0001;
 const TIME_CALLBACK_FUNCTION: u32 = 0x0000;
@@ -34,24 +34,41 @@ unsafe extern "system" {
 /// Zero means "not running". A single timer drives every animation slot, so
 /// one static id is enough for the whole application.
 static TIMER_ID: AtomicU32 = AtomicU32::new(0);
+static TIMER_RUNNING: AtomicBool = AtomicBool::new(false);
+static TICK_PENDING: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn on_tick(_id: u32, _msg: u32, user: usize, _dw1: usize, _dw2: usize) {
-    // Post to the controller, not to a surface HWND: surfaces are recreated
-    // when Explorer restarts, while the controller survives. The controller
-    // forwards the tick to the *current* surface via dispatch_to_surface.
-    let controller = controller_for(HWND(user as *mut core::ffi::c_void));
-    let _ = PostMessageW(
-        Some(controller),
-        native_interop::WM_APP_ANIMATION_TICK,
-        WPARAM(0),
-        LPARAM(0),
-    );
+    post_tick(HWND(user as *mut core::ffi::c_void));
+}
+
+fn post_tick(hwnd: HWND) {
+    if TICK_PENDING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // The controller survives surface recreation and dispatches to the current surface.
+    if unsafe {
+        PostMessageW(
+            Some(controller_for(hwnd)),
+            native_interop::WM_APP_ANIMATION_TICK,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    }
+    .is_err()
+    {
+        TICK_PENDING.store(false, Ordering::Release);
+    }
+}
+
+pub(super) fn tick_dequeued() {
+    TICK_PENDING.store(false, Ordering::Release);
 }
 
 pub(super) fn start(hwnd: HWND) {
-    if TIMER_ID.load(Ordering::Relaxed) != 0 {
+    if TIMER_RUNNING.swap(true, Ordering::Relaxed) {
         return;
     }
+    post_tick(hwnd);
     // A previous attempt may have fallen back to WM_TIMER. Retire it before
     // retrying the multimedia timer, otherwise a later success would leave
     // both sources ticking at 16 ms.
@@ -85,6 +102,7 @@ pub(super) fn start(hwnd: HWND) {
 }
 
 pub(super) fn stop(hwnd: HWND) {
+    TIMER_RUNNING.store(false, Ordering::Relaxed);
     let id = TIMER_ID.swap(0, Ordering::Relaxed);
     if id != 0 {
         unsafe {

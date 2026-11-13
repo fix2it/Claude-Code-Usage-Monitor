@@ -365,6 +365,267 @@ pub(super) fn revalidate_mouse_hover(hwnd: HWND) {
     }
 }
 
+thread_local! {
+    static REVALIDATING_HOVER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn hover_needs_revalidation(provider_hovered: bool, layer_hovered: bool) -> bool {
+    provider_hovered || layer_hovered
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HoverRevalidation<H> {
+    Nothing,
+    /// Recheck the hovered (or newly entered) surface in place.
+    Revalidate(H),
+    /// The cursor is no longer over the hovered surface. `old` is `None` when
+    /// that surface is gone (it can never get WM_MOUSELEAVE); `enter` is
+    /// another surface that now sits under the stationary cursor.
+    Move {
+        old: Option<H>,
+        enter: Option<H>,
+    },
+}
+
+/// Pure decision for `revalidate_active_hover`. `surfaces[i]` is the window of
+/// surface `i`, or `None` when that surface is gone.
+fn plan_hover_revalidation<H: Copy>(
+    active: bool,
+    hovered_index: Option<usize>,
+    surfaces: &[Option<H>],
+    cursor_over: impl Fn(H) -> bool,
+) -> HoverRevalidation<H> {
+    let mut under_cursor = surfaces
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|hwnd| cursor_over(*hwnd));
+    if active {
+        let old = surfaces.get(hovered_index.unwrap_or(0)).copied().flatten();
+        if let Some(old) = old {
+            if cursor_over(old) {
+                return HoverRevalidation::Revalidate(old);
+            }
+        }
+        return HoverRevalidation::Move {
+            old,
+            enter: under_cursor.next(),
+        };
+    }
+    // Nothing hovered yet: a surface that moved or was recreated under a
+    // stationary cursor must still start its hover.
+    under_cursor
+        .next()
+        .map_or(HoverRevalidation::Nothing, HoverRevalidation::Revalidate)
+}
+
+static HOVER_REVALIDATION_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Ask for a hover recheck after a surface moved, resized or was recreated.
+/// Win32 posts no WM_MOUSELEAVE/WM_MOUSEMOVE when the window moves under a
+/// stationary cursor. The recheck is posted, never run inline, so it cannot
+/// re-enter a render or a theme mouse action; repeated requests coalesce.
+pub(super) fn request_hover_revalidation(hwnd: HWND) {
+    use std::sync::atomic::Ordering;
+    if HOVER_REVALIDATION_PENDING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let posted = unsafe {
+        PostMessageW(
+            Some(controller_for(hwnd)),
+            native_interop::WM_APP_REVALIDATE_HOVER,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    };
+    if posted.is_err() {
+        HOVER_REVALIDATION_PENDING.store(false, Ordering::Release);
+    }
+}
+
+pub(super) fn run_requested_hover_revalidation() {
+    HOVER_REVALIDATION_PENDING.store(false, std::sync::atomic::Ordering::Release);
+    revalidate_active_hover();
+}
+
+/// Recheck hover against the settled geometry of every visible surface.
+fn revalidate_active_hover() {
+    // A theme action run below may render and move a surface; that only
+    // posts another request, handled after this pass returns.
+    if REVALIDATING_HOVER.with(|guard| guard.replace(true)) {
+        return;
+    }
+    revalidate_active_hover_once();
+    REVALIDATING_HOVER.with(|guard| guard.set(false));
+}
+
+fn revalidate_active_hover_once() {
+    let (active, hovered_index, surfaces, primary) = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        let provider_hovered = state.antigravity_hovered
+            || state.claude_hovered
+            || state.codex_hovered
+            || state.opencode_hovered
+            || state.qoder_hovered;
+        let active =
+            hover_needs_revalidation(provider_hovered, state.hovered_mouse_layer.is_some());
+        let count = (state.mirror_hwnds.len() + 1).max(state.desktop_hwnds.len());
+        let surfaces: Vec<Option<HWND>> = (0..count)
+            .map(|index| {
+                state
+                    .desktop_hwnds
+                    .get(index)
+                    .and_then(|hwnd| *hwnd)
+                    .or_else(|| {
+                        if index == 0 {
+                            Some(state.hwnd)
+                        } else {
+                            state.mirror_hwnds.get(index - 1).copied()
+                        }
+                    })
+                    .map(SendHwnd::to_hwnd)
+                    // A hidden surface must neither keep nor gain hover.
+                    .filter(|hwnd| unsafe {
+                        IsWindow(Some(*hwnd)).as_bool() && IsWindowVisible(*hwnd).as_bool()
+                    })
+            })
+            .collect();
+        let hovered_index = state.hovered_mouse_layer.as_ref().map(|(index, _)| *index);
+        // A tray-icon surface has no visible window; its own timer
+        // (`clear_tray_mouse_hover_if_left`) tracks the cursor.
+        let tray_hovered = hovered_index.is_some_and(|index| {
+            state.active_theme.as_ref().is_some_and(|theme| {
+                theme.surfaces.get(index).is_some_and(|surface| {
+                    surface
+                        .placement
+                        .nest
+                        .resolve(surface.placement.reference.region)
+                        == SurfaceNest::TrayIcon
+                })
+            })
+        });
+        if tray_hovered {
+            return;
+        }
+        (active, hovered_index, surfaces, state.hwnd.to_hwnd())
+    };
+    {
+        match plan_hover_revalidation(active, hovered_index, &surfaces, cursor_over_widget) {
+            HoverRevalidation::Nothing => {}
+            HoverRevalidation::Revalidate(hwnd) => revalidate_mouse_hover(hwnd),
+            HoverRevalidation::Move { old, enter } => {
+                if let Some(old) = old {
+                    clear_mouse_hover(old);
+                } else {
+                    clear_mouse_hover(primary);
+                    // `clear_mouse_hover` keeps a layer that belongs to another
+                    // surface; that surface is gone or hidden, so drop it here
+                    // and still run its leave action.
+                    let stale = lock_state()
+                        .as_mut()
+                        .and_then(|state| state.hovered_mouse_layer.take());
+                    if let Some((surface, object)) = stale {
+                        let _ = dispatch_mouse_event(surface, &object, MouseEventKind::MouseLeave);
+                    }
+                }
+                if let Some(enter) = enter {
+                    revalidate_mouse_hover(enter);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod hover_revalidation_tests {
+    use super::{hover_needs_revalidation, plan_hover_revalidation, HoverRevalidation};
+
+    #[test]
+    fn active_hover_requires_revalidation_after_geometry_changes() {
+        assert!(!hover_needs_revalidation(false, false));
+        assert!(hover_needs_revalidation(true, false));
+        assert!(hover_needs_revalidation(false, true));
+        // Every real move/resize/recreate goes through `window_pos_flags`;
+        // the drag path posts too. Rendering itself must not revalidate.
+        let positioning = include_str!("positioning.rs");
+        assert!(positioning.contains("super::mouse::request_hover_revalidation(hwnd)"));
+        let messages = include_str!("message_loop.rs");
+        assert!(messages.contains("super::mouse::request_hover_revalidation(hwnd)"));
+        assert!(messages.contains("super::mouse::run_requested_hover_revalidation()"));
+        let render = include_str!("../window.rs");
+        assert!(!render.contains("mouse::revalidate_active_hover"));
+        assert!(render.contains("mouse::request_hover_revalidation(replacement)"));
+    }
+
+    #[test]
+    fn moved_hovered_surface_is_rechecked() {
+        let surfaces = [Some(10), Some(11)];
+        assert_eq!(
+            plan_hover_revalidation(true, Some(1), &surfaces, |hwnd| hwnd == 11),
+            HoverRevalidation::Revalidate(11)
+        );
+        // Provider hover without a layer rechecks the primary surface.
+        assert_eq!(
+            plan_hover_revalidation(true, None, &surfaces, |hwnd| hwnd == 10),
+            HoverRevalidation::Revalidate(10)
+        );
+        // The hovered surface moved away from the cursor.
+        assert_eq!(
+            plan_hover_revalidation(true, Some(1), &surfaces, |_| false),
+            HoverRevalidation::Move {
+                old: Some(11),
+                enter: None
+            }
+        );
+    }
+
+    #[test]
+    fn removed_hovered_surface_clears_stale_hover() {
+        assert_eq!(
+            plan_hover_revalidation(true, Some(1), &[Some(10), None], |_| false),
+            HoverRevalidation::Move {
+                old: None,
+                enter: None
+            }
+        );
+        assert_eq!(
+            plan_hover_revalidation(true, Some(2), &[Some(10)], |_| true),
+            HoverRevalidation::Move {
+                old: None,
+                enter: Some(10)
+            }
+        );
+    }
+
+    #[test]
+    fn hover_moves_to_the_surface_now_under_the_cursor() {
+        assert_eq!(
+            plan_hover_revalidation(true, Some(0), &[Some(10), Some(11)], |hwnd| hwnd == 11),
+            HoverRevalidation::Move {
+                old: Some(10),
+                enter: Some(11)
+            }
+        );
+    }
+
+    #[test]
+    fn surface_moved_under_a_stationary_cursor_gains_hover() {
+        let surfaces = [Some(10), None, Some(12)];
+        assert_eq!(
+            plan_hover_revalidation(false, None, &surfaces, |hwnd| hwnd == 12),
+            HoverRevalidation::Revalidate(12)
+        );
+        assert_eq!(
+            plan_hover_revalidation(false, None, &surfaces, |_| false),
+            HoverRevalidation::Nothing
+        );
+    }
+}
+
 /// Theme object whose hover reveals the Antigravity Claude/GPT pool.
 pub(super) const ANTIGRAVITY_HOVER_OBJECT: &str = "antigravity-provider";
 pub(super) const CLAUDE_HOVER_OBJECT: &str = "claude-provider";
@@ -451,8 +712,7 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     super::set_opencode_hover(hwnd, opencode_hovered);
     super::set_qoder_hover(hwnd, qoder_hovered);
     // No tick here: the animation timer drives every frame. Ticking on mouse
-    // move used to produce a second full render right after `set_*_hover`
-    // already rendered the first frame, and its 15 ms throttle could swallow
+    // move could produce a second full render, and its throttle could swallow
     // real timer ticks.
     for _ in 0..4 {
         let target = mouse_target_at(hwnd, lparam);
