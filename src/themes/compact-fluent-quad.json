@@ -21,7 +21,7 @@
         "offset_x": 6,
         "offset_y": 0
       },
-      "width": "display.providers_width + providers.claude.enabled * claude.model.fable.available * display.show_fable * (6 + display.row_width.fable) + 4",
+      "width": "display.providers_width + providers.claude.enabled * display.fable_visible * display.show_fable * (6 + display.row_width.fable) + 4",
       "height": "46",
       "background": {
         "type": "none"
@@ -749,7 +749,7 @@
         {
           "id": "fable-provider",
           "name": "Fable weekly meter",
-          "render": "providers.claude.enabled && claude.model.fable.available && display.show_fable",
+          "render": "providers.claude.enabled && display.fable_visible && display.show_fable",
           "visibility": "100",
           "parent": "provider-row",
           "width": "display.row_width.fable",
@@ -766,10 +766,30 @@
             "type": "none"
           }
         },
+        {"id":"fable-dual-o-marker-dark","name":"dark Fable pool o marker","render":"(system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"0","y":"7","width":"display.marker_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"o","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"center","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-o-bar-dark","name":"dark Fable pool o bar","render":"(system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"display.origin.fable","y":"10","width":"display.bar_width","height":"9","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"accounts.claude.default.model.fable.display * accounts.claude.default.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#444444FF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"fable-dual-o-bar-dark-pace","name":"dark Fable pool o bar pace tick","render":"(system.dark) && (claude.dual_mode)","visibility":"(100) * accounts.claude.default.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_width - 1) * clamp(accounts.claude.default.model.fable.expected_display, 0, 100) / 100)","y":"(10) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#FFFFFFFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"fable-dual-o-value-dark","name":"dark Fable pool o value","render":"(system.dark) && (claude.dual_mode)","visibility":"display.text_opacity","parent":"fable-provider","x":"display.origin.fable + display.bar_width + 4 + display.text_slide.fable","y":"8","width":"display.text_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.default.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-o-value-dark-pct","name":"dark Fable pool o value compact percent","render":"(system.dark) && (claude.dual_mode) && (display.percent_opacity > 0.01)","visibility":"display.percent_opacity","parent":"fable-provider","x":"display.origin.fable","y":"8","width":"display.percent_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.default.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-o-marker-light","name":"light Fable pool o marker","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"0","y":"7","width":"display.marker_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"o","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"center","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"fable-dual-o-bar-light","name":"light Fable pool o bar","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"display.origin.fable","y":"10","width":"display.bar_width","height":"9","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"accounts.claude.default.model.fable.display * accounts.claude.default.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#AAAAAAFF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"fable-dual-o-bar-light-pace","name":"light Fable pool o bar pace tick","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"(100) * accounts.claude.default.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_width - 1) * clamp(accounts.claude.default.model.fable.expected_display, 0, 100) / 100)","y":"(10) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#1A1A1AFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"fable-dual-o-value-light","name":"light Fable pool o value","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"display.text_opacity","parent":"fable-provider","x":"display.origin.fable + display.bar_width + 4 + display.text_slide.fable","y":"8","width":"display.text_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.default.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"fable-dual-o-value-light-pct","name":"light Fable pool o value compact percent","render":"(1 - system.dark) && (claude.dual_mode) && (display.percent_opacity > 0.01)","visibility":"display.percent_opacity","parent":"fable-provider","x":"display.origin.fable","y":"8","width":"display.percent_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.default.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"fable-dual-x-marker-dark","name":"dark Fable pool x marker","render":"(system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"0","y":"24","width":"display.marker_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"x","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"center","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-x-bar-dark","name":"dark Fable pool x bar","render":"(system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"display.origin.fable","y":"27","width":"display.bar_width","height":"9","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"accounts.claude.claude_x.model.fable.display * accounts.claude.claude_x.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#444444FF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"fable-dual-x-bar-dark-pace","name":"dark Fable pool x bar pace tick","render":"(system.dark) && (claude.dual_mode)","visibility":"(100) * accounts.claude.claude_x.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.model.fable.expected_display, 0, 100) / 100)","y":"(27) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#FFFFFFFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"fable-dual-x-value-dark","name":"dark Fable pool x value","render":"(system.dark) && (claude.dual_mode)","visibility":"display.text_opacity","parent":"fable-provider","x":"display.origin.fable + display.bar_width + 4 + display.text_slide.fable","y":"25","width":"display.text_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.claude_x.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-x-value-dark-pct","name":"dark Fable pool x value compact percent","render":"(system.dark) && (claude.dual_mode) && (display.percent_opacity > 0.01)","visibility":"display.percent_opacity","parent":"fable-provider","x":"display.origin.fable","y":"25","width":"display.percent_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.claude_x.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#B5A8E0FF","opacity":"1"}}},
+        {"id":"fable-dual-x-marker-light","name":"light Fable pool x marker","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"0","y":"24","width":"display.marker_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"x","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"center","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"fable-dual-x-bar-light","name":"light Fable pool x bar","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"100","parent":"fable-provider","x":"display.origin.fable","y":"27","width":"display.bar_width","height":"9","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"progress","value":"accounts.claude.claude_x.model.fable.display * accounts.claude.claude_x.model.fable.available","direction":"left_to_right","fill":{"color":"#7C6BB0FF","opacity":"1"},"track":{"color":"#AAAAAAFF","opacity":"1"},"corner_radius":"1.5","segments":10,"segments_expression":"min(5, ceil(10 / max(1, display.widget_count)))","segment_gap":"1"}},
+        {"id":"fable-dual-x-bar-light-pace","name":"light Fable pool x bar pace tick","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"(100) * accounts.claude.claude_x.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_width - 1) * clamp(accounts.claude.claude_x.model.fable.expected_display, 0, 100) / 100)","y":"(27) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#1A1A1AFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
+        {"id":"fable-dual-x-value-light","name":"light Fable pool x value","render":"(1 - system.dark) && (claude.dual_mode)","visibility":"display.text_opacity","parent":"fable-provider","x":"display.origin.fable + display.bar_width + 4 + display.text_slide.fable","y":"25","width":"display.text_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.claude_x.model.fable.display:usage_line}","font_family":"Segoe UI","font_size":"12","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
+        {"id":"fable-dual-x-value-light-pct","name":"light Fable pool x value compact percent","render":"(1 - system.dark) && (claude.dual_mode) && (display.percent_opacity > 0.01)","visibility":"display.percent_opacity","parent":"fable-provider","x":"display.origin.fable","y":"25","width":"display.percent_box.fable","height":"13","background":{"type":"none"},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"text","template":"{accounts.claude.claude_x.model.fable.display:usage_badge}","font_family":"Segoe UI","font_size":"11","weight":"medium","rendering":"clear_type","contrast":"1","align":"left","color":{"color":"#5B4B8AFF","opacity":"1"}}},
         {
           "id": "fable-weekly-segments-dark",
           "name": "dark Fable weekly segments",
-          "render": "system.dark",
+          "render": "(system.dark) && (!claude.dual_mode)",
           "visibility": "100",
           "parent": "fable-provider",
           "x": "display.origin.fable",
@@ -786,7 +806,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "claude.model.fable.display",
+            "value": "claude.model.fable.display * claude.model.fable.available",
             "direction": "left_to_right",
             "fill": {
               "color": "#7C6BB0FF",
@@ -802,10 +822,11 @@
             "segment_gap": "1"
           }
         },
+        {"id":"fable-weekly-segments-dark-pace","name":"dark Fable weekly pace tick","render":"(system.dark) && (!claude.dual_mode)","visibility":"(100) * claude.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_full_width * (1 - display.mode_bar_progress) - 1) * clamp(claude.model.fable.expected_display, 0, 100) / 100)","y":"(10) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#FFFFFFFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
         {
           "id": "fable-weekly-value-dark",
           "name": "dark Fable weekly value",
-          "render": "system.dark",
+          "render": "(system.dark) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
           "x": "display.origin.fable",
@@ -838,7 +859,7 @@
         {
           "id": "fable-weekly-segments-light",
           "name": "light Fable weekly segments",
-          "render": "1 - system.dark",
+          "render": "(1 - system.dark) && (!claude.dual_mode)",
           "visibility": "100",
           "parent": "fable-provider",
           "x": "display.origin.fable",
@@ -855,7 +876,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "claude.model.fable.display",
+            "value": "claude.model.fable.display * claude.model.fable.available",
             "direction": "left_to_right",
             "fill": {
               "color": "#7C6BB0FF",
@@ -871,10 +892,11 @@
             "segment_gap": "1"
           }
         },
+        {"id":"fable-weekly-segments-light-pace","name":"light Fable weekly pace tick","render":"(1 - system.dark) && (!claude.dual_mode)","visibility":"(100) * claude.model.fable.expected_available * display.show_pace * (1 - display.mode_bar_progress)","parent":"fable-provider","x":"display.origin.fable + round((display.bar_full_width * (1 - display.mode_bar_progress) - 1) * clamp(claude.model.fable.expected_display, 0, 100) / 100)","y":"(10) - 1","width":"1","height":"(9) + 2","background":{"type":"colour","colour":{"color":"#1A1A1AFF","opacity":"0.9"}},"border":null,"corner_radius":"0","layout":"freeform","align":"start","gap":"0","content":{"type":"none"}},
         {
           "id": "fable-weekly-value-light",
           "name": "light Fable weekly value",
-          "render": "1 - system.dark",
+          "render": "(1 - system.dark) && (!claude.dual_mode)",
           "visibility": "display.text_opacity",
           "parent": "fable-provider",
           "x": "display.origin.fable",
@@ -907,7 +929,7 @@
         {
           "id": "fable-weekly-marker-dark",
           "name": "dark Fable marker f",
-          "render": "system.dark",
+          "render": "(system.dark) && (!claude.dual_mode)",
           "visibility": "100",
           "parent": "fable-provider",
           "x": "0",
@@ -940,7 +962,7 @@
         {
           "id": "fable-weekly-marker-light",
           "name": "light Fable marker f",
-          "render": "1 - system.dark",
+          "render": "(1 - system.dark) && (!claude.dual_mode)",
           "visibility": "100",
           "parent": "fable-provider",
           "x": "0",
@@ -8075,7 +8097,7 @@
         {
           "id": "fable-weekly-value-dark-pct",
           "name": "dark Fable weekly value compact percent",
-          "render": "(system.dark) && (display.percent_opacity > 0.01)",
+          "render": "(system.dark) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "fable-provider",
           "y": "25",
@@ -8108,7 +8130,7 @@
         {
           "id": "fable-weekly-value-light-pct",
           "name": "light Fable weekly value compact percent",
-          "render": "(1 - system.dark) && (display.percent_opacity > 0.01)",
+          "render": "(1 - system.dark) && (!claude.dual_mode) && (display.percent_opacity > 0.01)",
           "visibility": "display.percent_opacity",
           "parent": "fable-provider",
           "y": "25",

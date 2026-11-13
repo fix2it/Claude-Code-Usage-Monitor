@@ -954,6 +954,7 @@ fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
                             };
                             assert_eq!(format_template(template, &context), expected);
                         }
+                        SceneContent::None if object.id.ends_with("-pace") => {}
                         _ => panic!("unexpected Fable content"),
                     }
                 }
@@ -2213,6 +2214,11 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
                 .with_countdown(countdown),
         );
         for object in &theme.surfaces[0].children {
+            // The second Claude pool has no profile in this data set, so its
+            // two-pool Fable row legitimately reads "no data".
+            if object.id.starts_with("fable-dual-x-") {
+                continue;
+            }
             match &object.content {
                 SceneContent::Progress { value, .. } => {
                     assert_eq!(
@@ -3726,6 +3732,7 @@ fn compact_fable_column_is_opt_in() {
     // Simulate live data: Claude enabled AND a Fable quota present.
     context.insert("providers.claude.enabled", 1.0);
     context.insert("claude.model.fable.available", 1.0);
+    context.insert("display.fable_visible", 1.0);
     for show_fable in [0.0, 1.0] {
         context.insert("display.show_fable", show_fable);
         assert_eq!(evaluate(render, &context).unwrap(), show_fable, "{render}");
@@ -3748,7 +3755,8 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         .enumerate()
         .filter(|(_, object)| object.id.ends_with("-pace"))
         .collect::<Vec<_>>();
-    assert_eq!(ticks.len(), 76);
+    // Includes one tick per two-pool Fable row and colour scheme.
+    assert_eq!(ticks.len(), 82);
     for (index, tick) in ticks {
         let gauge = &children[index - 1];
         assert_eq!(tick.id, format!("{}-pace", gauge.id));
@@ -4002,7 +4010,8 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         .iter()
         .filter(|o| o.id.contains("-marker-"))
         .collect::<Vec<_>>();
-    assert_eq!(markers.len(), 26);
+    // 26 before the two-pool Fable rows added an o and an x marker per scheme.
+    assert_eq!(markers.len(), 30);
     for marker in &markers {
         let key = marker.id.split('-').next().unwrap();
         assert_eq!(marker.x.0, "0");
@@ -4083,7 +4092,7 @@ fn compact_pace_ticks_follow_morphing_gauges_at_every_hover_phase() {
         .enumerate()
         .filter(|(_, object)| object.id.ends_with("-pace"))
         .collect::<Vec<_>>();
-    assert_eq!(ticks.len(), 76);
+    assert_eq!(ticks.len(), 82);
     let mut context = DataContext::from_usage(None, &Canvas::default());
     for opacity in [
         "antigravity.gemini.opacity",
@@ -4556,7 +4565,8 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
             other => panic!("{} is not text: {other:?}", twin.id),
         }
     }
-    assert_eq!(twins, 68);
+    // 68 before the two-pool Fable rows added four value labels with twins.
+    assert_eq!(twins, 72);
 
     // A dual-mode row: mode controls appearance, hover controls the value.
     let normal = by_id("claude-main-text-dark-normal-pct");
@@ -5522,6 +5532,8 @@ fn fable_marker_f_sits_beside_the_bar_and_column_width_follows_the_measured_text
         .children
         .iter()
         .filter(|object| object.parent.as_deref() == Some("fable-provider"))
+        // The two-pool rows (o/x markers) have their own layout and tests.
+        .filter(|object| !object.id.starts_with("fable-dual-"))
     {
         match &object.content {
             SceneContent::Text { template, .. } if object.id.contains("-marker-") => {
@@ -5628,10 +5640,12 @@ fn widget_count_counts_the_fable_column_and_caps_cubes_at_five() {
             );
         }
     }
-    // No Fable data, Claude off, or setting off: the column is not a widget.
+    // Fable on: the column counts even before data (skeleton). Claude off or
+    // the setting off: it is not a widget.
     let claude = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
         .with_show_fable(true);
-    assert_eq!(widget_count(None, claude), 1);
+    assert_eq!(widget_count(None, claude), 2);
+    assert_eq!(widget_count(None, claude.with_show_fable(false)), 1);
     let codex = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
         .with_show_fable(true);
     assert_eq!(widget_count(Some(&usage), codex), 1);
@@ -5709,4 +5723,385 @@ fn fable_width_delta_is_not_larger_than_another_provider_delta() {
             }
         }
     }
+}
+
+// --- Two-pool Fable (stage 2c) -------------------------------------------
+
+fn pool_fable_usage(percentage: Option<f64>) -> crate::models::UsageData {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    let reset = std::time::SystemTime::now() + std::time::Duration::from_secs(84 * 3600);
+    UsageData {
+        limits: percentage
+            .map(|percentage| UsageLimit {
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage,
+                    resets_at: Some(reset),
+                },
+                ..Default::default()
+            })
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    }
+}
+
+/// Both Claude pools as accounts; `None` means the pool reports no Fable.
+fn dual_fable_data(default: Option<f64>, x: Option<f64>) -> AppUsageData {
+    use crate::models::AccountUsage;
+
+    let account = |id: &str, usage: crate::models::UsageData, selected: bool| AccountUsage {
+        provider: ProviderId::Claude,
+        profile: crate::accounts::AccountProfile {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            ..Default::default()
+        },
+        source_signature: String::new(),
+        source_path: None,
+        usage: Some(usage),
+        error: None,
+        selected,
+    };
+    let main = pool_fable_usage(default);
+    let mut data = AppUsageData::default();
+    data.insert(ProviderId::Claude, main.clone());
+    data.accounts = vec![
+        account("default", main, true),
+        account("claude_x", pool_fable_usage(x), false),
+    ];
+    data
+}
+
+#[test]
+fn fable_skeleton_is_drawn_before_data_whenever_fable_is_on() {
+    // Owner rule (2026-11-14): Fable on + Claude on = Fable rows drawn, with
+    // the grey bar track as the skeleton until data arrives, for one or two
+    // pools, whatever the poll state.
+    let theme = compact_theme();
+    let single = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true);
+    let dual = dual_fable_runtime();
+    let cases = [
+        (single, vec!["fable-weekly-segments-dark"]),
+        (dual, vec!["fable-dual-o-bar-dark", "fable-dual-x-bar-dark"]),
+    ];
+    for (runtime, bars) in cases {
+        for (poll_ok, has_error) in [(false, false), (true, false), (false, true)] {
+            let runtime = runtime.with_poll_state(poll_ok, has_error);
+            for data in [None, Some(dual_fable_data(None, None))] {
+                assert!(fable_visible(data.as_ref(), runtime));
+                let context = dual_context(data.as_ref(), runtime);
+                assert_eq!(context.get("display.fable_visible"), Some(1.0));
+                for bar in &bars {
+                    let render = evaluate(&object(&theme, bar).render.0, &context).unwrap();
+                    assert_ne!(render, 0.0, "{bar} skeleton not drawn");
+                    assert_eq!(bar_value(&theme, bar, &context), 0.0);
+                }
+            }
+        }
+        // Fable off: no column at all.
+        let off = runtime.with_show_fable(false);
+        assert!(!fable_visible(None, off));
+        assert_eq!(
+            dual_context(None, off).get("display.fable_visible"),
+            Some(0.0)
+        );
+    }
+}
+
+#[test]
+fn single_pool_fable_bar_matches_the_two_pool_rows_on_skeleton_and_pace() {
+    let theme = compact_theme();
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true)
+        .with_show_pace(true);
+    for countdown in [false, true] {
+        let runtime = runtime.with_countdown(countdown);
+        // No data: grey skeleton, never a full bar, no pace tick.
+        let context = dual_context(None, runtime);
+        for bar in ["fable-weekly-segments-dark", "fable-weekly-segments-light"] {
+            assert_eq!(bar_value(&theme, bar, &context), 0.0, "{bar} {countdown}");
+        }
+        for tick in [
+            "fable-weekly-segments-dark-pace",
+            "fable-weekly-segments-light-pace",
+        ] {
+            let visible = evaluate(&object(&theme, tick).visibility.0, &context).unwrap();
+            assert_eq!(visible, 0.0, "{tick} {countdown}");
+        }
+        // With a weekly Fable cap: the pace tick shows, as on the pool rows.
+        let mut data = AppUsageData::default();
+        data.insert(ProviderId::Claude, pool_fable_usage(Some(43.0)));
+        let context = dual_context(Some(&data), runtime);
+        assert_eq!(
+            context.get("claude.model.fable.expected_available"),
+            Some(1.0)
+        );
+        let visible = evaluate(
+            &object(&theme, "fable-weekly-segments-dark-pace")
+                .visibility
+                .0,
+            &context,
+        )
+        .unwrap();
+        assert!(visible > 0.0, "pace tick hidden, countdown {countdown}");
+    }
+}
+
+fn dual_fable_runtime() -> ThemeRuntime {
+    ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true)
+        .with_claude_state(false, true, true, 0.0)
+}
+
+fn compact_theme() -> ThemeDocument {
+    serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap()
+}
+
+fn dual_context(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> DataContext {
+    let mut context = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
+    context.insert("system.dark", 1.0);
+    context
+}
+
+fn object<'a>(theme: &'a ThemeDocument, id: &str) -> &'a SceneObject {
+    theme.surfaces[0]
+        .children
+        .iter()
+        .find(|object| object.id == id)
+        .unwrap_or_else(|| panic!("missing {id}"))
+}
+
+fn bar_value(theme: &ThemeDocument, id: &str, context: &DataContext) -> f64 {
+    let SceneContent::Progress { value, .. } = &object(theme, id).content else {
+        panic!("{id} is not a bar");
+    };
+    evaluate(&value.0, context).unwrap()
+}
+
+fn row_text(theme: &ThemeDocument, id: &str, context: &DataContext) -> String {
+    let SceneContent::Text { template, .. } = &object(theme, id).content else {
+        panic!("{id} is not text");
+    };
+    format_template(template, context)
+}
+
+#[test]
+fn dual_fable_rows_show_each_pools_own_value() {
+    let theme = compact_theme();
+    assert!(theme.validate().is_empty(), "{:?}", theme.validate());
+    let data = dual_fable_data(Some(43.0), Some(81.0));
+    let runtime = dual_fable_runtime();
+    let context = dual_context(Some(&data), runtime);
+    assert_eq!(context.get("display.fable_visible"), Some(1.0));
+    for (tag, percentage) in [("o", 43.0), ("x", 81.0)] {
+        let bar = format!("fable-dual-{tag}-bar-dark");
+        assert!(evaluate(&object(&theme, &bar).render.0, &context).unwrap() != 0.0);
+        assert_eq!(bar_value(&theme, &bar, &context), percentage);
+        let text = row_text(&theme, &format!("fable-dual-{tag}-value-dark"), &context);
+        assert!(text.starts_with(&format!("{percentage}%")), "{tag}: {text}");
+        assert_eq!(
+            row_text(&theme, &format!("fable-dual-{tag}-marker-dark"), &context),
+            tag
+        );
+    }
+    // The single-pool nodes stay out of the two-pool column.
+    for id in [
+        "fable-weekly-segments-dark",
+        "fable-weekly-value-dark",
+        "fable-weekly-marker-dark",
+    ] {
+        assert_eq!(
+            evaluate(&object(&theme, id).render.0, &context).unwrap(),
+            0.0
+        );
+    }
+    // Fable is one widget however many pools it lists.
+    assert_eq!(widget_count(Some(&data), runtime), 2);
+    assert_eq!(
+        display_metrics(&theme, Some(&data), runtime).widget_count,
+        2
+    );
+    for count in 1..=5 {
+        assert!(compact_bar_cubes(count) <= 5.0);
+    }
+}
+
+#[test]
+fn dual_fable_pool_without_fable_shows_no_data_never_the_other_value() {
+    let theme = compact_theme();
+    let runtime = dual_fable_runtime();
+    for (default, x, empty, filled) in [(Some(43.0), None, "x", "o"), (None, Some(81.0), "o", "x")]
+    {
+        let data = dual_fable_data(default, x);
+        for countdown in [false, true] {
+            let runtime = runtime.with_countdown(countdown);
+            let context = dual_context(Some(&data), runtime);
+            assert_eq!(context.get("display.fable_visible"), Some(1.0));
+            let empty_bar = format!("fable-dual-{empty}-bar-dark");
+            let empty_text = format!("fable-dual-{empty}-value-dark");
+            assert_eq!(row_text(&theme, &empty_text, &context), "--");
+            assert_eq!(bar_value(&theme, &empty_bar, &context), 0.0);
+            let filled_text =
+                row_text(&theme, &format!("fable-dual-{filled}-value-dark"), &context);
+            assert!(filled_text.starts_with(if filled == "o" { "43" } else { "81" }) || countdown);
+            assert_ne!(filled_text, "--");
+        }
+    }
+    // Neither pool reports Fable: both rows stay as skeletons, one widget.
+    let none = dual_fable_data(None, None);
+    assert!(fable_visible(Some(&none), runtime));
+    assert_eq!(widget_count(Some(&none), runtime), 2);
+}
+
+#[test]
+fn dual_fable_reserves_its_column_while_loading_and_keeps_the_width() {
+    let theme = compact_theme();
+    let loading = dual_fable_runtime().with_poll_state(false, false);
+    let loaded = dual_fable_runtime();
+    let data = dual_fable_data(Some(43.0), Some(81.0));
+
+    // Loading, no data yet: grey placeholders for both rows.
+    let context = dual_context(None, loading);
+    assert_eq!(context.get("display.fable_visible"), Some(1.0));
+    for tag in ["o", "x"] {
+        assert_eq!(
+            row_text(&theme, &format!("fable-dual-{tag}-value-dark"), &context),
+            "--"
+        );
+        assert_eq!(
+            bar_value(&theme, &format!("fable-dual-{tag}-bar-dark"), &context),
+            0.0
+        );
+    }
+    let index = theme.surfaces[0]
+        .children
+        .iter()
+        .position(|object| object.id == "fable-provider")
+        .unwrap();
+    assert!(resolve_object_bounds_with_runtime(&theme, 0, index, None, loading).is_some());
+    assert_eq!(widget_count(None, loading), 2);
+
+    // The Fable share of the root width: root minus the providers' own width.
+    // The Claude column's own placeholder-to-data change is not Fable's.
+    let fable_share = |usage: Option<&AppUsageData>, runtime: ThemeRuntime| {
+        let root = resolve_surface_size(&theme, 0, usage, runtime).0 as f64;
+        let metrics = display_metrics(&theme, usage, runtime);
+        (root - metrics.providers_width, metrics.fable.row_width)
+    };
+    let partial = dual_fable_data(Some(43.0), None);
+    for phase in [0.0, 1.0, 2.0] {
+        let before = fable_share(None, loading.with_mode_phase(phase));
+        for usage in [&data, &partial] {
+            let after = fable_share(Some(usage), loaded.with_mode_phase(phase));
+            assert_eq!(before, after, "phase {phase}");
+        }
+    }
+    // A failed first poll keeps the skeleton; so does a single pool.
+    let failed = dual_fable_runtime().with_poll_state(false, true);
+    assert!(fable_visible(None, failed));
+    let single = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true)
+        .with_poll_state(false, false);
+    assert!(fable_visible(None, single));
+}
+
+#[test]
+fn dual_fable_rows_carry_pace_bindings_per_profile() {
+    let theme = compact_theme();
+    let data = dual_fable_data(Some(43.0), Some(81.0));
+    let runtime = dual_fable_runtime();
+    for countdown in [false, true] {
+        let runtime = runtime.with_countdown(countdown);
+        let mut context = dual_context(Some(&data), runtime);
+        for (tag, profile) in [("o", "default"), ("x", "claude_x")] {
+            let base = format!("accounts.claude.{profile}.model.fable");
+            assert_eq!(
+                context.get(&format!("{base}.expected_available")),
+                Some(1.0)
+            );
+            let expected = context.get(&format!("{base}.expected")).unwrap();
+            // 84 h left of a 168 h week: half of it has passed.
+            assert!((expected - 50.0).abs() < 1.0, "{expected}");
+            let shown = context.get(&format!("{base}.expected_display")).unwrap();
+            assert_eq!(
+                shown,
+                if countdown {
+                    100.0 - expected
+                } else {
+                    expected
+                }
+            );
+            for scheme in ["dark", "light"] {
+                let gauge = object(&theme, &format!("fable-dual-{tag}-bar-{scheme}"));
+                let tick = object(&theme, &format!("fable-dual-{tag}-bar-{scheme}-pace"));
+                assert!(tick
+                    .visibility
+                    .0
+                    .contains(&format!("{base}.expected_available")));
+                assert!(tick.x.0.contains(&format!("{base}.expected_display")));
+                assert_eq!(tick.render.0, gauge.render.0);
+            }
+            context.insert("system.dark", 1.0);
+            let tick = object(&theme, &format!("fable-dual-{tag}-bar-dark-pace"));
+            assert_eq!(evaluate(&tick.visibility.0, &context).unwrap(), 100.0);
+        }
+    }
+    // A pool without Fable has no tick; a hidden pace setting hides both.
+    let partial = dual_fable_data(Some(43.0), None);
+    let context = dual_context(Some(&partial), runtime);
+    assert_eq!(
+        context.get("accounts.claude.claude_x.model.fable.expected_available"),
+        Some(0.0)
+    );
+    let hidden = dual_context(Some(&data), runtime.with_show_pace(false));
+    for tag in ["o", "x"] {
+        let tick = object(&theme, &format!("fable-dual-{tag}-bar-dark-pace"));
+        assert_eq!(evaluate(&tick.visibility.0, &hidden).unwrap(), 0.0);
+    }
+}
+
+#[test]
+fn single_pool_fable_is_unchanged_by_the_two_pool_rows() {
+    let theme = compact_theme();
+    let usage = fable_usage();
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+        .with_show_fable(true);
+    let context = dual_context(Some(&usage), runtime);
+    assert_eq!(context.get("claude.dual_mode"), Some(0.0));
+    for object in &theme.surfaces[0].children {
+        if object.id.starts_with("fable-dual-") {
+            assert_eq!(
+                evaluate(&object.render.0, &context).unwrap(),
+                0.0,
+                "{}",
+                object.id
+            );
+        }
+    }
+    for id in [
+        "fable-weekly-segments-dark",
+        "fable-weekly-value-dark",
+        "fable-weekly-marker-dark",
+    ] {
+        assert!(
+            evaluate(&object(&theme, id).render.0, &context).unwrap() != 0.0,
+            "{id}"
+        );
+    }
+    // The column stays the stacked marker + bar layout: origin plus one bar.
+    let metrics = display_metrics(&theme, Some(&usage), runtime);
+    assert_eq!(metrics.widget_count, 2);
+    assert_eq!(metrics.fable.row_width, metrics.fable.origin + 54.0);
+    // A single pool also keeps its skeleton before data arrives.
+    assert!(fable_visible(None, runtime.with_poll_state(false, false)));
+    assert_eq!(widget_count(None, runtime), 2);
 }

@@ -1507,13 +1507,20 @@ fn compact_bar_full_width(widget_count: usize) -> f64 {
 /// Derived from the same limits the theme's `claude.model.fable.available`
 /// binding reads, so no extra metrics pass is needed.
 pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> usize {
-    let fable = runtime.show_fable
-        && runtime.provider_enabled(ProviderId::Claude)
-        && theme_limits::model_limit_available(
-            data.and_then(|data| data.get(ProviderId::Claude)),
-            "fable",
-        );
-    runtime.provider_count() + fable as usize
+    runtime.provider_count() + fable_visible(data, runtime) as usize
+}
+
+/// Both Claude pools are on: the Fable column then shows one row per pool.
+fn claude_dual(runtime: ThemeRuntime) -> bool {
+    runtime.claude_main_enabled && runtime.claude_x_enabled
+}
+
+/// Whether the Fable column is drawn.
+pub(crate) fn fable_visible(_data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
+    // Owner rule (2026-11-14): Fable on and Claude on means the Fable rows are
+    // always drawn. A pool without data shows the grey bar track (skeleton),
+    // whatever the number of pools, the poll state or the account list.
+    runtime.show_fable && runtime.provider_enabled(ProviderId::Claude)
 }
 
 /// Geometry and visibility for one widget row at a given mode phase. Pure:
@@ -1620,13 +1627,15 @@ impl DisplayMetrics {
             widget_count,
             fable: ProviderMetrics::default(),
         };
+        let dual = claude_dual(runtime);
         metrics.fable = fable_column(
             bar,
-            0.0,
+            if dual { COMPACT_TEXT_WIDTH } else { 0.0 },
             COMPACT_PERCENT_WIDTH,
             COMPACT_MARKER_WIDTH,
             COMPACT_ORIGIN_LEGACY,
             phases,
+            dual,
         );
         for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
             let text_box = if *key == "cursor" {
@@ -1710,7 +1719,19 @@ fn fable_column(
     marker_box: f64,
     origin: f64,
     phases: ModePhases,
+    dual: bool,
 ) -> ProviderMetrics {
+    if dual {
+        // Two pool rows, each with its text beside the bar like a provider.
+        return ProviderMetrics {
+            text_box,
+            percent_box,
+            marker_box,
+            origin,
+            text_slide: -text_box * phases.text_collapse,
+            row_width: compact_row_width(bar_full_width, text_box, percent_box, origin, phases),
+        };
+    }
     let stacked_text = bar_full_width.max(text_box) - bar_full_width - COMPACT_ROW_GAP;
     ProviderMetrics {
         text_box,
@@ -1731,6 +1752,13 @@ pub fn compact_providers_width(rows: impl IntoIterator<Item = f64>, count: usize
 
 /// Slot after the eight providers: the Fable column's text measurement.
 const FABLE_METRICS_INDEX: usize = DISPLAY_PROVIDER_KEYS.len();
+
+/// Widest usage line a two-pool Fable row is expected to show.
+const FABLE_DUAL_SAMPLE: &str = "100% · 6d 23h";
+
+/// Widest percent badge of a two-pool Fable row (the collapsed-bar mode), so
+/// the badge box does not change between the loading and the loaded state.
+const FABLE_DUAL_PERCENT_SAMPLE: &str = "100%";
 
 fn display_provider_key(provider_id: &str) -> Option<&'static str> {
     DISPLAY_PROVIDER_KEYS
@@ -1990,6 +2018,32 @@ pub(crate) fn display_metrics(
                 fingerprint.push_str("0;");
                 continue;
             }
+            if provider_index == FABLE_METRICS_INDEX
+                && kind != MeasuredLineKind::Marker
+                && object.id.starts_with("fable-dual-")
+            {
+                // The two-pool column reserves the widest realistic line, so
+                // its width is the same while loading and once data arrives.
+                let sample_text = match kind {
+                    MeasuredLineKind::Percent => FABLE_DUAL_PERCENT_SAMPLE,
+                    _ => FABLE_DUAL_SAMPLE,
+                };
+                let sample_size = evaluate(&font_size.0, context).unwrap_or(13.0);
+                let sample_family = if context.force_segoe_ui {
+                    crate::widget_font::segoe_ui_family(weight.gdi_weight()).to_string()
+                } else {
+                    font_family.clone()
+                };
+                fingerprint.push_str(&format!("sample:{sample_family}:{sample_size};"));
+                lines.push(MeasuredLine {
+                    provider_index,
+                    kind,
+                    text: sample_text.into(),
+                    family: sample_family,
+                    font_size: sample_size,
+                    weight: weight.gdi_weight(),
+                });
+            }
             let text = format_template(template, context);
             if kind != MeasuredLineKind::Marker && template_has_placeholder_usage(template, context)
             {
@@ -2065,11 +2119,12 @@ pub(crate) fn display_metrics(
         marker_column(marker_advance[FABLE_METRICS_INDEX], legacy.fable);
     metrics.fable = fable_column(
         bar,
-        text_advance[FABLE_METRICS_INDEX].map_or(0.0, |advance| advance + 2.0),
+        text_advance[FABLE_METRICS_INDEX].map_or(legacy.fable.text_box, |advance| advance + 2.0),
         percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0),
         fable_marker_box,
         fable_origin,
         phases,
+        claude_dual,
     );
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
         let fallback = legacy.providers[index];
@@ -2132,6 +2187,7 @@ pub(crate) fn metrics_for_phase(
         metrics.fable.marker_box,
         metrics.fable.origin,
         phases,
+        claude_dual(runtime),
     );
     metrics.providers_width = compact_providers_width(
         DISPLAY_PROVIDER_KEYS
@@ -2362,6 +2418,10 @@ impl DataContext {
         context.insert("display.countdown", runtime.countdown as u8 as f64);
         context.insert("display.show_pace", runtime.show_pace as u8 as f64);
         context.insert("display.show_fable", runtime.show_fable as u8 as f64);
+        context.insert(
+            "display.fable_visible",
+            fable_visible(data, runtime) as u8 as f64,
+        );
         insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
         context.insert(
             "antigravity.gemini.enabled",

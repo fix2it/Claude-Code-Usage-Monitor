@@ -1,29 +1,6 @@
 use super::*;
 use crate::models::{limit_slug, UsageData, UsageLimit};
 
-/// Whether `<provider>.model.<model>.available` would be 1: the same model
-/// shortcut rule as `insert_limits` (one weekly cap for the model, no
-/// ambiguity), without building a context.
-pub(super) fn model_limit_available(usage: Option<&UsageData>, model: &str) -> bool {
-    let mut matching = usage
-        .map(|usage| usage.limits.as_slice())
-        .unwrap_or_default()
-        .iter()
-        .filter(|limit| {
-            matches!(
-                limit.kind.as_str(),
-                "weekly_scoped" | "seven_day_opus" | "seven_day_sonnet"
-            ) && limit
-                .model
-                .as_deref()
-                .is_some_and(|name| limit_slug(name) == model)
-        });
-    match (matching.next(), matching.next()) {
-        (Some(limit), None) => limit.usage.available,
-        _ => false,
-    }
-}
-
 impl DataContext {
     pub(super) fn insert_limits(&mut self, name: &str, usage: Option<&UsageData>, countdown: bool) {
         let limits = usage
@@ -89,6 +66,31 @@ impl DataContext {
         ] {
             self.insert_string(&format!("{base}.{field}"), value);
         }
+        // Pace: the share of the window an even rate would have spent by now.
+        // Only weekly caps have a known length; any other kind has no tick.
+        let expected = (limit.kind.starts_with("weekly") || limit.kind.starts_with("seven_day"))
+            .then(|| {
+                limit
+                    .usage
+                    .available
+                    .then(|| limit.usage.resets_at.and_then(|at| expected_used(at, WEEK)))
+                    .flatten()
+            })
+            .flatten();
+        self.insert(
+            &format!("{base}.expected_available"),
+            expected.is_some() as u8 as f64,
+        );
+        let expected = expected.unwrap_or(0.0);
+        self.insert(&format!("{base}.expected"), expected);
+        self.insert(
+            &format!("{base}.expected_display"),
+            if countdown {
+                100.0 - expected
+            } else {
+                expected
+            },
+        );
         self.insert_string(
             &format!("{base}.scope"),
             limit
@@ -162,9 +164,10 @@ impl DataContext {
         let (_, field) = Self::limit_field(name)?;
         match field {
             "available" | "percentage" | "is_active" | "reset.unix" | "reset.seconds"
-            | "reset.minutes" | "reset.hours" | "reset.days" => Some(0.0),
+            | "reset.minutes" | "reset.hours" | "reset.days" | "expected_available"
+            | "expected" => Some(0.0),
             "remaining" => Some(100.0),
-            "display" => Some(
+            "display" | "expected_display" => Some(
                 if self.values.get("display.countdown").copied().unwrap_or(0.0) != 0.0 {
                     100.0
                 } else {
