@@ -244,8 +244,8 @@ pub(super) fn show_context_menu_document(
 }
 
 pub(super) fn context_menu_data_context(origin: Option<&(usize, String)>) -> DataContext {
-    let state = lock_state();
-    let Some(state) = state.as_ref() else {
+    let mut state = lock_state();
+    let Some(state) = state.as_mut() else {
         return DataContext::from_usage(None, &Canvas::default());
     };
     let mut runtime = theme_runtime_from_state(state);
@@ -254,11 +254,18 @@ pub(super) fn context_menu_data_context(origin: Option<&(usize, String)>) -> Dat
         let surface_index = origin.map_or(0, |(surface_index, _)| *surface_index);
         if theme.surfaces.get(surface_index).is_some() {
             runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
-            let (width, height) = theme_engine::resolve_surface_content_size(
+            let primary_runtime =
+                theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+            let metrics = theme_engine::metrics_for_phase(
+                prepared_metrics(state, &theme, primary_runtime),
+                runtime,
+            );
+            let (width, height) = theme_engine::resolve_surface_content_size_with_metrics(
                 &theme,
                 surface_index,
                 state.data.as_ref(),
                 runtime,
+                &metrics,
             );
             canvas.width = width;
             canvas.height = height;
@@ -400,11 +407,16 @@ pub(super) fn context_menu_action_flags(
                         surface_index,
                         theme_runtime_from_state(state),
                     );
-                    theme_engine::surface_should_render(
+                    let metrics = state.prepared_metrics.as_ref().map_or_else(
+                        || theme_engine::display_metrics(&effective, state.data.as_ref(), runtime),
+                        |metrics| theme_engine::metrics_for_phase(metrics.clone(), runtime),
+                    );
+                    theme_engine::surface_should_render_with_metrics(
                         &effective,
                         surface_index,
                         state.data.as_ref(),
                         runtime,
+                        &metrics,
                     )
                 })
             })
@@ -429,12 +441,13 @@ pub(super) fn context_menu_action_flags(
                 // STATE is already locked here. Match the action's first-surface
                 // fallback without calling the helper that locks STATE again.
                 let origin_surface = origin.map_or(0, |(surface_index, _)| *surface_index);
-                toggle_layer_render_state(
+                toggle_layer_render_state_with_metrics(
                     &effective,
                     origin_surface,
                     target,
                     state.data.as_ref(),
                     theme_runtime_from_state(state),
+                    state.prepared_metrics.as_ref(),
                 )
             })
             .unwrap_or(false),
@@ -468,17 +481,33 @@ pub(super) fn toggle_layer_render_state(
     data: Option<&AppUsageData>,
     base_runtime: ThemeRuntime,
 ) -> Option<bool> {
+    toggle_layer_render_state_with_metrics(theme, origin_surface, target, data, base_runtime, None)
+}
+
+fn toggle_layer_render_state_with_metrics(
+    theme: &ThemeDocument,
+    origin_surface: usize,
+    target: &str,
+    data: Option<&AppUsageData>,
+    base_runtime: ThemeRuntime,
+    cached: Option<&theme_engine::DisplayMetrics>,
+) -> Option<bool> {
+    let metrics = cached
+        .cloned()
+        .unwrap_or_else(|| theme_engine::display_metrics(theme, data, base_runtime));
     if let Some(surface_index) = theme
         .surfaces
         .iter()
         .position(|surface| surface.id.eq_ignore_ascii_case(target))
     {
         let runtime = theme_runtime_for_surface(theme, surface_index, base_runtime);
-        return Some(theme_engine::surface_should_render(
+        let metrics = theme_engine::metrics_for_phase(metrics, runtime);
+        return Some(theme_engine::surface_should_render_with_metrics(
             theme,
             surface_index,
             data,
             runtime,
+            &metrics,
         ));
     }
     let object_index = theme
@@ -488,13 +517,15 @@ pub(super) fn toggle_layer_render_state(
         .iter()
         .position(|object| object.id.eq_ignore_ascii_case(target))?;
     let runtime = theme_runtime_for_surface(theme, origin_surface, base_runtime);
+    let metrics = theme_engine::metrics_for_phase(metrics, runtime);
     Some(
-        theme_engine::resolve_object_bounds_with_runtime(
+        theme_engine::resolve_object_bounds_with_metrics(
             theme,
             origin_surface,
             object_index,
             data,
             runtime,
+            &metrics,
         )
         .is_some(),
     )

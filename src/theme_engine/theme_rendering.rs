@@ -89,6 +89,18 @@ pub fn render_theme_surface_with_runtime_at_scale(
     runtime: ThemeRuntime,
     scale: f64,
 ) -> RenderedTheme {
+    let metrics = display_metrics(theme, data, runtime);
+    render_theme_surface_with_metrics_at_scale(theme, surface_index, data, runtime, scale, &metrics)
+}
+
+pub fn render_theme_surface_with_metrics_at_scale(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    scale: f64,
+    metrics: &DisplayMetrics,
+) -> RenderedTheme {
     let Some(surface) = theme.surfaces.get(surface_index) else {
         return RenderedTheme {
             width: 1,
@@ -99,8 +111,7 @@ pub fn render_theme_surface_with_runtime_at_scale(
     };
     let scale = normalized_render_scale(scale);
     let mut warnings = Vec::new();
-    let metrics = display_metrics(theme, data, runtime);
-    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (logical_width, logical_height) =
         resolve_object_size_with_context(surface, &size_context, &mut warnings);
     let padding = surface_horizontal_padding(theme, surface_index, runtime);
@@ -116,7 +127,7 @@ pub fn render_theme_surface_with_runtime_at_scale(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = context_with_metrics(data, &resolved_canvas, runtime, &metrics);
+    let context = context_with_metrics(data, &resolved_canvas, runtime, metrics);
     let mut pixels = vec![0u32; width as usize * height as usize];
     if runtime.surface_nest == SurfaceNest::Floating
         && matches!(surface.background, LayerBackground::None)
@@ -196,7 +207,7 @@ pub fn render_theme_surface_with_runtime_at_scale(
         &surface.children,
         data,
         runtime,
-        &metrics,
+        metrics,
     );
     warnings.extend(layer_warnings);
     for mut object in resolved {
@@ -388,6 +399,7 @@ pub(super) fn resolve_objects_for_with_metrics<'a>(
 /// lets visual decoration sit above a larger deliberate hit area.
 /// Returns the rendered bounding box `(x, y, width, height)` of `object_id` on the given surface
 /// in canvas logical coordinates (including horizontal surface padding), or `None` if not rendered.
+#[cfg(test)]
 pub fn object_bounds(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -395,12 +407,23 @@ pub fn object_bounds(
     runtime: ThemeRuntime,
     object_id: &str,
 ) -> Option<(f64, f64, f64, f64)> {
+    let metrics = display_metrics(theme, data, runtime);
+    object_bounds_with_metrics(theme, surface_index, data, runtime, object_id, &metrics)
+}
+
+pub fn object_bounds_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    object_id: &str,
+    metrics: &DisplayMetrics,
+) -> Option<(f64, f64, f64, f64)> {
     let surface = theme.surfaces.get(surface_index)?;
-    if !surface_should_render(theme, surface_index, data, runtime) {
+    if !surface_should_render_with_metrics(theme, surface_index, data, runtime, metrics) {
         return None;
     }
-    let metrics = display_metrics(theme, data, runtime);
-    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut Vec::new());
     let padding = surface_horizontal_padding(theme, surface_index, runtime) as f64;
     let canvas = Canvas {
@@ -416,7 +439,7 @@ pub fn object_bounds(
         &surface.children,
         data,
         runtime,
-        &metrics,
+        metrics,
     );
     resolved
         .into_iter()
@@ -432,12 +455,24 @@ pub fn hit_test_mouse_event(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> Option<String> {
+    let metrics = display_metrics(theme, data, runtime);
+    hit_test_mouse_event_with_metrics(theme, surface_index, x, y, data, runtime, &metrics)
+}
+
+pub fn hit_test_mouse_event_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    x: f64,
+    y: f64,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> Option<String> {
     let surface = theme.surfaces.get(surface_index)?;
-    if !surface_should_render(theme, surface_index, data, runtime) {
+    if !surface_should_render_with_metrics(theme, surface_index, data, runtime, metrics) {
         return None;
     }
-    let metrics = display_metrics(theme, data, runtime);
-    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut Vec::new());
     let padding = surface_horizontal_padding(theme, surface_index, runtime) as f64;
     let x = x - padding;
@@ -454,7 +489,7 @@ pub fn hit_test_mouse_event(
         &surface.children,
         data,
         runtime,
-        &metrics,
+        metrics,
     );
     for object in resolved.into_iter().rev() {
         if object.opacity <= 0.0
@@ -485,7 +520,7 @@ pub fn hit_test_mouse_event(
         }
     }
 
-    let root_is_visible = context_with_metrics(data, &canvas, runtime, &metrics);
+    let root_is_visible = context_with_metrics(data, &canvas, runtime, metrics);
     let root_is_visible = evaluate(&surface.visibility.0, &root_is_visible)
         .is_ok_and(|value| value.is_finite() && value > 0.0);
     if root_is_visible
@@ -502,7 +537,7 @@ pub fn hit_test_mouse_event(
                 height: height as f64,
                 rotation: evaluate(
                     &surface.rotation.0,
-                    &context_with_metrics(data, &canvas, runtime, &metrics),
+                    &context_with_metrics(data, &canvas, runtime, metrics),
                 )
                 .unwrap_or(0.0),
             },
@@ -523,13 +558,24 @@ pub fn resolve_object_bounds_with_runtime(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> Option<(f64, f64, f64, f64)> {
+    let metrics = display_metrics(theme, data, runtime);
+    resolve_object_bounds_with_metrics(theme, surface_index, object_index, data, runtime, &metrics)
+}
+
+pub(crate) fn resolve_object_bounds_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    object_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> Option<(f64, f64, f64, f64)> {
     let surface = theme.surfaces.get(surface_index)?;
     if object_index >= surface.children.len() {
         return None;
     }
     let mut warnings = Vec::new();
-    let metrics = display_metrics(theme, data, runtime);
-    let size_context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+    let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut warnings);
     let canvas = Canvas {
         width,
@@ -538,7 +584,7 @@ pub fn resolve_object_bounds_with_runtime(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = context_with_metrics(data, &canvas, runtime, &metrics);
+    let context = context_with_metrics(data, &canvas, runtime, metrics);
     let mut cache = vec![None; surface.children.len()];
     let geometry = resolve_geometry(
         object_index,
@@ -564,7 +610,19 @@ pub fn resolve_surface_size(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> (u32, u32) {
-    let (width, height) = resolve_surface_content_size(theme, surface_index, data, runtime);
+    let metrics = display_metrics(theme, data, runtime);
+    resolve_surface_size_with_metrics(theme, surface_index, data, runtime, &metrics)
+}
+
+pub fn resolve_surface_size_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> (u32, u32) {
+    let (width, height) =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
     (
         width + 2 * surface_horizontal_padding(theme, surface_index, runtime),
         height,
@@ -578,12 +636,22 @@ pub fn resolve_surface_content_size(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> (u32, u32) {
+    let metrics = display_metrics(theme, data, runtime);
+    resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, &metrics)
+}
+
+pub fn resolve_surface_content_size_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> (u32, u32) {
     theme
         .surfaces
         .get(surface_index)
         .map(|surface| {
-            let metrics = display_metrics(theme, data, runtime);
-            let context = context_with_metrics(data, &Canvas::default(), runtime, &metrics);
+            let context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
             resolve_object_size_with_context(surface, &context, &mut Vec::new())
         })
         .unwrap_or((theme.canvas.width.max(1), theme.canvas.height.max(1)))
@@ -667,13 +735,25 @@ pub fn resolve_surface_placement(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> ResolvedPlacementValues {
+    let metrics = display_metrics(theme, data, runtime);
+    resolve_surface_placement_with_metrics(theme, surface_index, data, runtime, &metrics)
+}
+
+pub fn resolve_surface_placement_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> ResolvedPlacementValues {
     let Some(surface) = theme.surfaces.get(surface_index) else {
         return ResolvedPlacementValues {
             offset_x: theme.placement.offset_x,
             offset_y: theme.placement.offset_y,
         };
     };
-    let (width, height) = resolve_surface_content_size(theme, surface_index, data, runtime);
+    let (width, height) =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
     let canvas = Canvas {
         width,
         width_expression: Some(surface.width.clone()),
@@ -681,7 +761,7 @@ pub fn resolve_surface_placement(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    let context = context_with_metrics(data, &canvas, runtime, metrics);
     let number = |expression: &Option<Expression>, fallback: i32| {
         expression
             .as_ref()
@@ -708,10 +788,22 @@ pub fn surface_should_render(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> bool {
+    let metrics = display_metrics(theme, data, runtime);
+    surface_should_render_with_metrics(theme, surface_index, data, runtime, &metrics)
+}
+
+pub fn surface_should_render_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> bool {
     let Some(surface) = theme.surfaces.get(surface_index) else {
         return surface_index == 0;
     };
-    let (width, height) = resolve_surface_content_size(theme, surface_index, data, runtime);
+    let (width, height) =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
     let canvas = Canvas {
         width,
         width_expression: Some(surface.width.clone()),
@@ -719,7 +811,7 @@ pub fn surface_should_render(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+    let context = context_with_metrics(data, &canvas, runtime, metrics);
     evaluate(&surface.render.0, &context).is_ok_and(|value| value.is_finite() && value != 0.0)
 }
 

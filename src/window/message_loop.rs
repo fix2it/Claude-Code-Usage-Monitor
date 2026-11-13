@@ -76,6 +76,10 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         WM_ERASEBKGND => LRESULT(1),
         WM_DISPLAYCHANGE | WM_DPICHANGED_MSG | WM_SETTINGCHANGE => {
+            if let Some(state) = lock_state().as_mut() {
+                invalidate_metrics(state);
+                invalidate_hover_tile_rects(state);
+            }
             if msg == WM_DPICHANGED_MSG {
                 CURRENT_DPI.store((wparam.0 & 0xFFFF) as u32, Ordering::Relaxed);
             }
@@ -95,11 +99,17 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     request_scheduled_poll(hwnd);
                 }
                 TIMER_COUNTDOWN => {
+                    if let Some(state) = lock_state().as_mut() {
+                        invalidate_metrics(state);
+                    }
                     render_layered();
                     sync_tray_icon(hwnd);
                     schedule_countdown_timer();
                 }
                 TIMER_CLOCK => {
+                    if let Some(state) = lock_state().as_mut() {
+                        invalidate_metrics(state);
+                    }
                     render_layered();
                     let refresh_tray = lock_state()
                         .as_ref()
@@ -167,6 +177,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         WM_APP_USAGE_UPDATED => {
             if let Some(state) = lock_state().as_mut() {
+                invalidate_metrics(state);
                 state.antigravity_tile_rect = None;
                 state.claude_tile_rect = None;
                 state.codex_tile_rect = None;
@@ -818,6 +829,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
                             s.show_pace = !s.show_pace;
+                            invalidate_metrics(s);
                         }
                     }
                     save_state_settings();
@@ -894,6 +906,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                     s.providers.set(ProviderId::Antigravity, true);
                                     should_reposition = true;
                                 }
+                                invalidate_metrics(s);
                                 let any_pool = (s.show_antigravity_gemini
                                     || s.show_antigravity_external)
                                     && s.providers.contains(ProviderId::Antigravity);
@@ -1013,6 +1026,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                     should_reposition = true;
                                 }
                                 s.claude_tile_rect = None;
+                                invalidate_metrics(s);
                             }
                         }
                     }
@@ -1112,6 +1126,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                     s.providers.set(ProviderId::Codex, true);
                                     should_reposition = true;
                                 }
+                                invalidate_metrics(s);
                                 s.codex_tile_rect = None;
                                 s.opencode_tile_rect = None;
                                 s.qoder_tile_rect = None;
@@ -1133,6 +1148,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             let provider = ProviderId::from_native_menu_command_id(id)
                                 .expect("provider menu command was matched above");
                             let changed = s.providers.toggle(provider);
+                            invalidate_metrics(s);
                             // Tile widths depend on the provider count.
                             s.antigravity_tile_rect = None;
                             s.claude_tile_rect = None;

@@ -1333,6 +1333,7 @@ pub struct DataContext {
     values: HashMap<String, f64>,
     strings: HashMap<String, String>,
     force_segoe_ui: bool,
+    display_metrics: Option<DisplayMetrics>,
 }
 
 /// Runtime environment used by theme expressions and layout. Provider state is
@@ -1955,6 +1956,8 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
                 } else {
                     (0.0, 0.0, 1.0, 0.0, 0.0)
                 };
+                variant.claude_hovered = hover;
+                variant.codex_hovered = hover;
                 variant.claude_crossfade_opacity = claude;
                 variant.codex_crossfade_opacity = codex;
                 variant.crossfade_opacity = antigravity;
@@ -1979,9 +1982,8 @@ fn display_metrics_cache_key(
 ) -> String {
     let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
     let mut key = format!(
-        "{}|{:.6}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         theme.id,
-        runtime.mode_phase,
         runtime.countdown,
         runtime.use_windows_default_font,
         runtime.provider_count(),
@@ -2032,6 +2034,8 @@ pub(crate) fn display_metrics(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
 ) -> DisplayMetrics {
+    #[cfg(test)]
+    METRICS_COMPUTATION_COUNT.with(|count| count.set(count.get() + 1));
     let Some(surface) = theme.surfaces.first() else {
         return DisplayMetrics::legacy(runtime);
     };
@@ -2113,17 +2117,28 @@ pub(crate) fn display_metrics(
     }
     let key = display_metrics_cache_key(theme, runtime, data, surface, &fingerprint);
     if let Some(metrics) = cached_display_metrics(&key) {
-        return metrics;
+        return metrics_for_phase(metrics, runtime);
     }
 
     let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
     let mut text_advance = [None::<f64>; 8];
     let mut percent_advance = [None::<f64>; 8];
     let mut marker_advance = [None::<f64>; 8];
+    let mut advances = HashMap::new();
     for line in &lines {
-        let Some(advance) =
-            text_measure::measure_text(&line.text, &line.family, line.font_size, line.weight)
-        else {
+        let advance = *advances
+            .entry((
+                &line.text,
+                &line.family,
+                line.font_size.to_bits(),
+                line.weight,
+            ))
+            .or_insert_with(|| {
+                #[cfg(test)]
+                MEASUREMENT_COUNT.with(|count| count.set(count.get() + 1));
+                text_measure::measure_text(&line.text, &line.family, line.font_size, line.weight)
+            });
+        let Some(advance) = advance else {
             continue;
         };
         let slot = match line.kind {
@@ -2177,6 +2192,36 @@ pub(crate) fn display_metrics(
         runtime.provider_count(),
     );
     store_display_metrics(key, &metrics);
+    metrics_for_phase(metrics, runtime)
+}
+
+pub(crate) fn metrics_for_phase(
+    mut metrics: DisplayMetrics,
+    runtime: ThemeRuntime,
+) -> DisplayMetrics {
+    let phases = decompose_mode_phase(runtime.mode_phase);
+    let bar = compact_bar_full_width(runtime.provider_count());
+    for provider in &mut metrics.providers {
+        provider.text_slide = -provider.text_box * phases.text_collapse;
+        provider.row_width = compact_row_width(
+            bar,
+            provider.text_box,
+            provider.percent_box,
+            provider.origin,
+            phases,
+        );
+    }
+    metrics.providers_width = compact_providers_width(
+        DISPLAY_PROVIDER_KEYS
+            .iter()
+            .enumerate()
+            .filter_map(|(index, key)| {
+                runtime
+                    .provider_enabled(display_provider_id(key))
+                    .then_some(metrics.providers[index].row_width)
+            }),
+        runtime.provider_count(),
+    );
     metrics
 }
 
@@ -2193,16 +2238,33 @@ fn marker_column(advance: Option<f64>, fallback: ProviderMetrics) -> (f64, f64) 
 }
 
 fn insert_display_metrics(context: &mut DataContext, metrics: &DisplayMetrics) {
-    for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
-        let provider = metrics.providers[index];
-        context.insert(&format!("display.text_box.{key}"), provider.text_box);
-        context.insert(&format!("display.percent_box.{key}"), provider.percent_box);
-        context.insert(&format!("display.marker_box.{key}"), provider.marker_box);
-        context.insert(&format!("display.origin.{key}"), provider.origin);
-        context.insert(&format!("display.text_slide.{key}"), provider.text_slide);
-        context.insert(&format!("display.row_width.{key}"), provider.row_width);
+    context.display_metrics = Some(metrics.clone());
+}
+
+fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
+    if name.eq_ignore_ascii_case("display.providers_width") {
+        return Some(metrics.providers_width);
     }
-    context.insert("display.providers_width", metrics.providers_width);
+    let (prefix, key) = name.rsplit_once('.')?;
+    let index = DISPLAY_PROVIDER_KEYS
+        .iter()
+        .position(|candidate| key.eq_ignore_ascii_case(candidate))?;
+    let provider = metrics.providers[index];
+    if prefix.eq_ignore_ascii_case("display.text_box") {
+        Some(provider.text_box)
+    } else if prefix.eq_ignore_ascii_case("display.percent_box") {
+        Some(provider.percent_box)
+    } else if prefix.eq_ignore_ascii_case("display.marker_box") {
+        Some(provider.marker_box)
+    } else if prefix.eq_ignore_ascii_case("display.origin") {
+        Some(provider.origin)
+    } else if prefix.eq_ignore_ascii_case("display.text_slide") {
+        Some(provider.text_slide)
+    } else if prefix.eq_ignore_ascii_case("display.row_width") {
+        Some(provider.row_width)
+    } else {
+        None
+    }
 }
 
 /// Insert every binding derived from the animation state. Called once per
@@ -2269,6 +2331,29 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime) 
 }
 
 impl DataContext {
+    /// Evaluate a surface render expression only when it does not require its
+    /// resolved size. Unknown values leave the decision to the normal renderer.
+    pub fn surface_render_without_size(
+        expression: &Expression,
+        data: Option<&AppUsageData>,
+        canvas: &Canvas,
+        runtime: ThemeRuntime,
+    ) -> Option<bool> {
+        let mut context = Self::from_usage_with_runtime(data, canvas, runtime);
+        context.display_metrics = None;
+        for name in [
+            "canvas.width",
+            "canvas.height",
+            "parent.width",
+            "parent.height",
+        ] {
+            context.values.remove(name);
+        }
+        evaluate(&expression.0, &context)
+            .ok()
+            .map(|value| value.is_finite() && value != 0.0)
+    }
+
     pub fn from_usage(data: Option<&AppUsageData>, canvas: &Canvas) -> Self {
         Self::from_usage_with_runtime(data, canvas, ThemeRuntime::default())
     }
@@ -2888,6 +2973,7 @@ impl DataContext {
     /// separately because the fractional Unix timestamp changes every frame.
     pub(crate) fn same_catalogue_data(&self, other: &Self) -> bool {
         self.strings == other.strings
+            && self.display_metrics == other.display_metrics
             && self.values.len() == other.values.len()
             && self.values.iter().all(|(name, value)| {
                 other.values.get(name).is_some_and(|other| {
@@ -2897,6 +2983,16 @@ impl DataContext {
     }
 
     pub fn get(&self, name: &str) -> Option<f64> {
+        if let Some(value) = self.values.get(name).copied() {
+            return Some(value);
+        }
+        if let Some(value) = self
+            .display_metrics
+            .as_ref()
+            .and_then(|metrics| display_metric(metrics, name))
+        {
+            return Some(value);
+        }
         let name = name.to_ascii_lowercase();
         self.values
             .get(&name)
@@ -3186,12 +3282,18 @@ fn mouse_action_object_context(
     object_id: &str,
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
+    cached: Option<&DisplayMetrics>,
 ) -> Result<DataContext, String> {
     let surface = theme
         .surfaces
         .get(surface_index)
         .ok_or_else(|| format!("Surface {surface_index} does not exist"))?;
-    let (width, height) = resolve_surface_content_size(theme, surface_index, data, runtime);
+    let metrics = cached.map_or_else(
+        || display_metrics(theme, data, runtime),
+        |metrics| metrics_for_phase(metrics.clone(), runtime),
+    );
+    let (width, height) =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, &metrics);
     let canvas = Canvas {
         width,
         width_expression: Some(surface.width.clone()),
@@ -3199,7 +3301,6 @@ fn mouse_action_object_context(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let metrics = display_metrics(theme, data, runtime);
     let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
     insert_display_metrics(&mut context, &metrics);
     if surface.id.eq_ignore_ascii_case(object_id) {
@@ -3234,6 +3335,7 @@ impl MouseActionExecutionContext<'_> {
         property: MouseActionProperty,
         amount: &Expression,
         direction: f64,
+        cached: Option<&DisplayMetrics>,
         overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
     ) -> Result<(), String> {
         let effective = apply_mouse_action_overrides(self.theme, overrides);
@@ -3256,6 +3358,7 @@ impl MouseActionExecutionContext<'_> {
             &object_id,
             self.data,
             self.runtime,
+            cached,
         )?;
         let current = evaluate(&mouse_property_expression(object, property).0, &context)?;
         let amount = evaluate(&amount.0, &context)?;
@@ -3287,6 +3390,28 @@ pub fn execute_mouse_actions(
     data: Option<&AppUsageData>,
     runtime: ThemeRuntime,
     overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+) -> Result<Vec<MouseActionEffect>, String> {
+    execute_mouse_actions_with_metrics(
+        theme,
+        surface_index,
+        self_id,
+        source,
+        data,
+        runtime,
+        overrides,
+        None,
+    )
+}
+
+pub(crate) fn execute_mouse_actions_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    self_id: &str,
+    source: &str,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+    mut cached: Option<&DisplayMetrics>,
 ) -> Result<Vec<MouseActionEffect>, String> {
     let actions = parse_mouse_actions(source)?;
     let execution = MouseActionExecutionContext {
@@ -3331,6 +3456,7 @@ pub fn execute_mouse_actions(
                     },
                     value,
                 );
+                cached = None;
             }
             MouseAction::Reset { target, property } => {
                 let (target_surface_index, object) =
@@ -3340,25 +3466,41 @@ pub fn execute_mouse_actions(
                     object_id: object.id.clone(),
                     property,
                 });
+                cached = None;
             }
             MouseAction::Increase {
                 target,
                 property,
                 amount,
-            } => execution.adjust_property(&target, property, &amount, 1.0, overrides)?,
+            } => {
+                execution.adjust_property(&target, property, &amount, 1.0, cached, overrides)?;
+                cached = None;
+            }
             MouseAction::Decrease {
                 target,
                 property,
                 amount,
-            } => execution.adjust_property(&target, property, &amount, -1.0, overrides)?,
+            } => {
+                execution.adjust_property(&target, property, &amount, -1.0, cached, overrides)?;
+                cached = None;
+            }
             MouseAction::Toggle { target, property } => {
                 let effective = apply_mouse_action_overrides(theme, overrides);
                 let (target_surface_index, object) =
                     mouse_action_target(&effective, surface_index, self_id, &target)?;
                 let surface = &effective.surfaces[target_surface_index];
                 let object_id = object.id.clone();
-                let (width, height) =
-                    resolve_surface_content_size(&effective, target_surface_index, data, runtime);
+                let metrics = cached.map_or_else(
+                    || display_metrics(&effective, data, runtime),
+                    |metrics| metrics_for_phase(metrics.clone(), runtime),
+                );
+                let (width, height) = resolve_surface_content_size_with_metrics(
+                    &effective,
+                    target_surface_index,
+                    data,
+                    runtime,
+                    &metrics,
+                );
                 let canvas = Canvas {
                     width,
                     width_expression: Some(surface.width.clone()),
@@ -3367,7 +3509,7 @@ pub fn execute_mouse_actions(
                     background: surface.background.canvas_paint(),
                 };
                 let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
-                insert_display_metrics(&mut context, &display_metrics(&effective, data, runtime));
+                insert_display_metrics(&mut context, &metrics);
                 let current = evaluate(&mouse_property_expression(object, property).0, &context)
                     .unwrap_or(0.0);
                 overrides.insert(
@@ -3378,6 +3520,7 @@ pub fn execute_mouse_actions(
                     },
                     Expression(if current == 0.0 { "1" } else { "0" }.into()),
                 );
+                cached = None;
             }
         }
     }
@@ -4030,8 +4173,133 @@ fn safe_file_stem(id: &str) -> String {
 mod tests;
 
 #[cfg(test)]
+thread_local! {
+    pub(crate) static METRICS_COMPUTATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static MEASUREMENT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod adaptive_metrics_tests {
     use super::*;
+
+    #[test]
+    fn placement_and_render_use_supplied_metrics() {
+        let mut theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let runtime = ThemeRuntime::default();
+        let mut metrics = DisplayMetrics::legacy(runtime);
+        metrics.providers_width = 1234.0;
+        theme.surfaces[0].placement.offset_x_expression =
+            Some(Expression("display.providers_width".into()));
+        theme.surfaces[0].render = Expression("display.providers_width == 1234".into());
+        assert_eq!(
+            resolve_surface_placement_with_metrics(&theme, 0, None, runtime, &metrics).offset_x,
+            1234
+        );
+        assert!(surface_should_render_with_metrics(
+            &theme, 0, None, runtime, &metrics
+        ));
+        metrics.providers_width = 1235.0;
+        assert!(!surface_should_render_with_metrics(
+            &theme, 0, None, runtime, &metrics
+        ));
+    }
+
+    #[test]
+    fn precheck_defers_adaptive_bindings() {
+        let runtime = ThemeRuntime::default();
+        let canvas = Canvas::default();
+        for expression in ["display.providers_width > 0", "display.text_box.claude > 0"] {
+            assert_eq!(
+                DataContext::surface_render_without_size(
+                    &Expression(expression.into()),
+                    None,
+                    &canvas,
+                    runtime
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            DataContext::surface_render_without_size(
+                &Expression("false".into()),
+                None,
+                &canvas,
+                runtime
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn render_and_hit_test_compute_metrics_once() {
+        let theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Cursor]));
+        METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+        render_theme_surface_with_runtime(&theme, 0, None, runtime);
+        assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+        METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+        let metrics = display_metrics(&theme, None, runtime);
+        surface_should_render_with_metrics(&theme, 0, None, runtime, &metrics);
+        resolve_surface_size_with_metrics(&theme, 0, None, runtime, &metrics);
+        resolve_surface_placement_with_metrics(&theme, 0, None, runtime, &metrics);
+        object_bounds_with_metrics(&theme, 0, None, runtime, "cursor-provider", &metrics);
+        render_theme_surface_with_metrics_at_scale(&theme, 0, None, runtime, 1.0, &metrics);
+        assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+        METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+        hit_test_mouse_event(&theme, 0, 1.0, 1.0, None, runtime);
+        assert_eq!(METRICS_COMPUTATION_COUNT.with(|count| count.get()), 1);
+    }
+
+    #[test]
+    fn animation_phase_reuses_measurements() {
+        let theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let mut runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Cursor]));
+        runtime.language = LanguageId::English;
+        render_theme_surface_with_runtime(&theme, 0, None, runtime);
+        let before = MEASUREMENT_COUNT.with(|count| count.get());
+        hit_test_mouse_event(&theme, 0, 1.0, 1.0, None, runtime);
+        render_theme_surface_with_runtime(&theme, 0, None, runtime);
+        assert_eq!(MEASUREMENT_COUNT.with(|count| count.get()), before);
+        runtime.mode_phase = 0.5;
+        display_metrics(&theme, None, runtime);
+        assert_eq!(MEASUREMENT_COUNT.with(|count| count.get()), before);
+    }
+
+    #[test]
+    fn hover_dependent_text_is_measured_for_both_states() {
+        let mut theme: ThemeDocument =
+            serde_json::from_str(include_str!("themes/compact-fluent-quad.json")).unwrap();
+        let child = theme.surfaces[0]
+            .children
+            .iter_mut()
+            .find(|object| {
+                object.id.starts_with("claude-")
+                    && matches!(object.content, SceneContent::Text { .. })
+            })
+            .unwrap();
+        child.render = Expression("claude.hovered && codex.hovered".into());
+        if let SceneContent::Text { template, .. } = &mut child.content {
+            *template = "A very long hover dependent label {claude.hovered} {codex.hovered}".into();
+        }
+        let mut runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]));
+        let normal = display_metrics(&theme, None, runtime)
+            .provider("claude")
+            .unwrap()
+            .text_box;
+        runtime.claude_hovered = true;
+        runtime.codex_hovered = true;
+        let hovered = display_metrics(&theme, None, runtime)
+            .provider("claude")
+            .unwrap()
+            .text_box;
+        assert_eq!(normal, hovered);
+        assert!(normal > 100.0, "hover text was not measured: {normal}");
+    }
 
     #[test]
     fn row_width_and_no_data_baselines() {

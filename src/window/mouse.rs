@@ -26,20 +26,24 @@ pub(super) fn mouse_client_point(lparam: LPARAM) -> (f64, f64) {
 }
 
 pub(super) fn mouse_target_at(hwnd: HWND, lparam: LPARAM) -> Option<(usize, String)> {
-    let state = lock_state();
-    let state = state.as_ref()?;
+    let mut state = lock_state();
+    let state = state.as_mut()?;
     let surface_index = surface_index_for_window(state, hwnd)?;
     let theme = effective_theme_from_state(state)?;
     let scale = theme_surface_scale(&theme, surface_index).max(0.01);
     let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
+    let primary_runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let metrics =
+        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary_runtime), runtime);
     let (x, y) = mouse_client_point(lparam);
-    let object_id = theme_engine::hit_test_mouse_event(
+    let object_id = theme_engine::hit_test_mouse_event_with_metrics(
         &theme,
         surface_index,
         x / scale,
         y / scale,
         state.data.as_ref(),
         runtime,
+        &metrics,
     )?;
     Some((surface_index, object_id))
 }
@@ -96,7 +100,8 @@ pub(super) fn execute_mouse_action_source(
         let data = state.data.clone();
         let runtime =
             theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
-        theme_engine::execute_mouse_actions(
+        let metrics = state.prepared_metrics.clone();
+        let result = theme_engine::execute_mouse_actions_with_metrics(
             &theme,
             surface_index,
             object_id,
@@ -104,7 +109,10 @@ pub(super) fn execute_mouse_action_source(
             data.as_ref(),
             runtime,
             &mut state.mouse_action_overrides,
-        )
+            metrics.as_ref(),
+        );
+        invalidate_metrics(state);
+        result
     };
     match result {
         Ok(effects) => {

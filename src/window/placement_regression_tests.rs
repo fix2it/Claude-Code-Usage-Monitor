@@ -40,6 +40,7 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         mode_animation: None,
         accounts: Default::default(),
         data: None,
+        prepared_metrics: None,
         poll_interval_ms: POLL_15_MIN,
         retry_count: 0,
         force_notify_auth_error: false,
@@ -1108,4 +1109,148 @@ fn collision_fixture(
         occupied,
         reserved: tray.into_iter().collect(),
     }
+}
+
+#[test]
+fn prepared_metrics_are_reused_and_invalidated() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    let runtime = theme_runtime_from_state(&state);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    prepared_metrics(&mut state, &theme, runtime);
+    prepared_metrics(&mut state, &theme, runtime.with_mode_phase(0.5));
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        1
+    );
+    // The usage update message and polling updates use this same invalidation.
+    state.data = Some(AppUsageData::default());
+    invalidate_metrics(&mut state);
+    prepared_metrics(&mut state, &theme, runtime);
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        2
+    );
+    set_view_mode(&mut state, 2, 1);
+    let runtime = theme_runtime_from_state(&state);
+    prepared_metrics(&mut state, &theme, runtime);
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        3
+    );
+}
+
+#[test]
+fn floating_visibility_watchdog_reuses_warm_snapshot() {
+    let theme = ThemeDocument::starter();
+    let mut state = state_for(theme.clone(), placement("floating"));
+    let runtime = theme_runtime_from_state(&state);
+    prepared_metrics(&mut state, &theme, runtime);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    let metrics = prepared_metrics(&mut state, &theme, runtime);
+    positioning::watchdog_surface_should_render(&theme, 0, state.data.as_ref(), runtime, &metrics);
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        0
+    );
+}
+
+#[test]
+fn ejected_watchdog_geometry_reuses_warm_snapshot() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    state.auto_ejected = true;
+    let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(&state));
+    prepared_metrics(&mut state, &theme, runtime);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    restored_dock_geometry(&state, &theme, runtime, 1.0);
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        0
+    );
+    invalidate_metrics(&mut state);
+    restored_dock_geometry(&state, &theme, runtime, 1.0);
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        1
+    );
+}
+
+#[test]
+fn tray_precheck_defers_adaptive_binding_until_metrics_are_available() {
+    let mut theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    theme
+        .surfaces
+        .iter_mut()
+        .find(|surface| surface.id == "shared-tray-icon")
+        .unwrap()
+        .render = theme_engine::Expression("display.providers_width > 0".into());
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    let runtime = theme_runtime_from_state(&state);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    assert!(tray_metrics(&mut state, &theme, runtime).is_some());
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        1
+    );
+}
+
+#[test]
+fn disabled_tray_sync_reuses_warm_snapshot() {
+    let mut theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    assert!(theme.surfaces.iter().any(|surface| surface
+        .placement
+        .nest
+        .resolve(surface.placement.reference.region)
+        == SurfaceNest::TrayIcon));
+    // The bundled theme enables the shared application icon by default.
+    // Model turning it off with a runtime setting expression.
+    theme
+        .surfaces
+        .iter_mut()
+        .find(|surface| surface.id == "shared-tray-icon")
+        .unwrap()
+        .render = theme_engine::Expression("display.show_fable".into());
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    let runtime = theme_runtime_from_state(&state);
+    prepared_metrics(&mut state, &theme, runtime);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    assert!(tray_metrics(&mut state, &theme, runtime).is_none());
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        0
+    );
+    invalidate_metrics(&mut state);
+    assert!(tray_metrics(&mut state, &theme, runtime).is_none());
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        0
+    );
+    state.show_fable = true;
+    let runtime = theme_runtime_from_state(&state);
+    assert!(tray_metrics(&mut state, &theme, runtime).is_some());
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        1
+    );
+}
+
+#[test]
+fn enabled_tray_surfaces_share_retained_metrics() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    let runtime = theme_runtime_from_state(&state);
+    prepared_metrics(&mut state, &theme, runtime);
+    crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.set(0));
+    assert!(tray_metrics(&mut state, &theme, runtime).is_some());
+    assert!(tray_metrics(&mut state, &theme, runtime).is_some());
+    assert_eq!(
+        crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
+        0
+    );
 }

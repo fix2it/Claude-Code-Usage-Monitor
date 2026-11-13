@@ -131,6 +131,7 @@ struct AppState {
     accounts: crate::accounts::AccountSettings,
 
     data: Option<AppUsageData>,
+    prepared_metrics: Option<theme_engine::DisplayMetrics>,
 
     poll_interval_ms: u32,
     retry_count: u32,
@@ -1010,7 +1011,13 @@ fn apply_floating_position(
     positioning::override_primary_placement(theme, placement.clone());
     let scale = monitor_scale(display);
     let runtime = theme_runtime_for_surface(theme, 0, theme_runtime_from_state(state));
-    let frame = positioning::widget_frame(theme, state.data.as_ref(), runtime, scale);
+    let frame = positioning::widget_frame_with_cached_metrics(
+        theme,
+        state.data.as_ref(),
+        runtime,
+        scale,
+        state.prepared_metrics.as_ref(),
+    );
     let offset = positioning::clamped_floating_offset(point, display.rect, &frame, scale);
     placement.offset_x = offset.x;
     placement.offset_y = offset.y;
@@ -1046,8 +1053,7 @@ fn restored_dock_rect(state: &AppState, taskbar: HWND, taskbar_rect: RECT) -> Op
     }
     let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
     let scale = monitor_scale(*display);
-    let frame = positioning::widget_frame(&theme, state.data.as_ref(), runtime, scale);
-    let offsets = theme_engine::resolve_surface_placement(&theme, 0, state.data.as_ref(), runtime);
+    let (frame, offsets) = restored_dock_geometry(state, &theme, runtime, scale);
     let mut placement = surface.placement.clone();
     placement.offset_x = offsets.offset_x;
     placement.offset_y = offsets.offset_y;
@@ -1062,6 +1068,36 @@ fn restored_dock_rect(state: &AppState, taskbar: HWND, taskbar_rect: RECT) -> Op
         Some(taskbar_rect),
         tray,
     ))
+}
+
+fn restored_dock_geometry(
+    state: &AppState,
+    theme: &ThemeDocument,
+    runtime: ThemeRuntime,
+    scale: f64,
+) -> (
+    positioning::WidgetFrame,
+    theme_engine::ResolvedPlacementValues,
+) {
+    let metrics = state.prepared_metrics.as_ref().map_or_else(
+        || theme_engine::display_metrics(theme, state.data.as_ref(), runtime),
+        |metrics| theme_engine::metrics_for_phase(metrics.clone(), runtime),
+    );
+    let frame = positioning::widget_frame_with_cached_metrics(
+        theme,
+        state.data.as_ref(),
+        runtime,
+        scale,
+        Some(&metrics),
+    );
+    let offsets = theme_engine::resolve_surface_placement_with_metrics(
+        theme,
+        0,
+        state.data.as_ref(),
+        runtime,
+        &metrics,
+    );
+    (frame, offsets)
 }
 
 fn theme_has_floating_surface(theme: &ThemeDocument) -> bool {
@@ -1428,13 +1464,16 @@ fn sync_tray_icon(hwnd: HWND) {
     widget_tooltip::refresh();
     let usage_tooltip = tray_usage_summary_from_state();
     let themed = {
-        let state = lock_state();
-        state.as_ref().and_then(|state| {
-            effective_theme_from_state(state)
-                .map(|theme| (theme, state.data.clone(), theme_runtime_from_state(state)))
+        let mut state = lock_state();
+        state.as_mut().and_then(|state| {
+            effective_theme_from_state(state).map(|theme| {
+                let runtime = theme_runtime_from_state(state);
+                let metrics = tray_metrics(state, &theme, runtime);
+                (theme, state.data.clone(), runtime, metrics)
+            })
         })
     };
-    if let Some((theme, data, runtime)) = themed {
+    if let Some((theme, data, runtime, metrics)) = themed {
         let has_tray_surfaces = theme.surfaces.iter().any(|surface| {
             surface
                 .placement
@@ -1448,28 +1487,38 @@ fn sync_tray_icon(hwnd: HWND) {
                 .iter()
                 .enumerate()
                 .filter(|(surface_index, surface)| {
+                    if !tray_surface_candidate(surface) {
+                        return false;
+                    }
+                    let Some(metrics) = metrics.as_ref() else {
+                        return false;
+                    };
                     let surface_runtime =
                         theme_runtime_for_surface(&theme, *surface_index, runtime);
-                    surface
-                        .placement
-                        .nest
-                        .resolve(surface.placement.reference.region)
-                        == SurfaceNest::TrayIcon
-                        && theme_engine::surface_should_render(
-                            &theme,
-                            *surface_index,
-                            data.as_ref(),
-                            surface_runtime,
-                        )
+                    let surface_metrics =
+                        theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
+                    theme_engine::surface_should_render_with_metrics(
+                        &theme,
+                        *surface_index,
+                        data.as_ref(),
+                        surface_runtime,
+                        &surface_metrics,
+                    )
                 })
                 .filter_map(|(surface_index, surface)| {
                     let surface_runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
-                    let (logical_width, logical_height) = theme_engine::resolve_surface_size(
-                        &theme,
-                        surface_index,
-                        data.as_ref(),
+                    let surface_metrics = theme_engine::metrics_for_phase(
+                        metrics.as_ref().unwrap().clone(),
                         surface_runtime,
                     );
+                    let (logical_width, logical_height) =
+                        theme_engine::resolve_surface_size_with_metrics(
+                            &theme,
+                            surface_index,
+                            data.as_ref(),
+                            surface_runtime,
+                            &surface_metrics,
+                        );
                     let max_dimension = logical_width.max(logical_height) as f64;
                     let scale =
                         theme_surface_scale(&theme, surface_index).min(if max_dimension > 0.0 {
@@ -1484,12 +1533,13 @@ fn sync_tray_icon(hwnd: HWND) {
                         ));
                         return None;
                     }
-                    let rendered = theme_engine::render_theme_surface_with_runtime_at_scale(
+                    let rendered = theme_engine::render_theme_surface_with_metrics_at_scale(
                         &theme,
                         surface_index,
                         data.as_ref(),
                         surface_runtime,
                         scale,
+                        &surface_metrics,
                     );
                     Some(tray_icon::ThemedTrayIcon {
                         surface_index,
@@ -1507,6 +1557,42 @@ fn sync_tray_icon(hwnd: HWND) {
         }
     }
     tray_icon::sync(hwnd, &tray_icon_tooltip_from_state());
+}
+
+// Literal zero is disabled independently of data, surface size, and runtime.
+fn tray_surface_candidate(surface: &theme_engine::SceneObject) -> bool {
+    surface
+        .placement
+        .nest
+        .resolve(surface.placement.reference.region)
+        == SurfaceNest::TrayIcon
+        && !surface
+            .render
+            .0
+            .trim()
+            .parse::<f64>()
+            .is_ok_and(|value| value == 0.0)
+}
+
+fn tray_metrics(
+    state: &mut AppState,
+    theme: &ThemeDocument,
+    runtime: theme_engine::ThemeRuntime,
+) -> Option<theme_engine::DisplayMetrics> {
+    theme
+        .surfaces
+        .iter()
+        .enumerate()
+        .any(|(index, surface)| {
+            tray_surface_candidate(surface)
+                && theme_engine::DataContext::surface_render_without_size(
+                    &surface.render,
+                    state.data.as_ref(),
+                    &theme.canvas,
+                    theme_runtime_for_surface(theme, index, runtime),
+                ) != Some(false)
+        })
+        .then(|| prepared_metrics(state, theme, theme_runtime_for_surface(theme, 0, runtime)))
 }
 
 fn theme_tray_uses_current_time(theme: &ThemeDocument) -> bool {
@@ -1637,6 +1723,7 @@ fn show_update_prompt(hwnd: HWND, strings: Strings, update: &AvailableUpdate) ->
 }
 
 fn apply_language_to_state(state: &mut AppState, language_override: Option<LanguageId>) {
+    invalidate_metrics(state);
     state.language_override = language_override;
     state.language = localization::resolve_language(language_override);
     set_window_title(state.hwnd.to_hwnd(), state.language.strings());
@@ -1988,7 +2075,13 @@ fn widget_frame_for_state(state: &AppState, nest: Option<SurfaceNest>) -> positi
                 }
             }
             let scale = theme_surface_scale(theme, 0);
-            positioning::widget_frame(theme, state.data.as_ref(), runtime, scale)
+            positioning::widget_frame_with_cached_metrics(
+                theme,
+                state.data.as_ref(),
+                runtime,
+                scale,
+                state.prepared_metrics.as_ref(),
+            )
         },
     )
 }
@@ -2033,6 +2126,7 @@ fn replace_active_theme(state: &mut AppState, loaded: ThemeDocument, path: Optio
         clear_auto_ejection(state);
     }
     state.active_theme = Some(loaded);
+    invalidate_metrics(state);
     state.antigravity_tile_rect = None;
     state.claude_tile_rect = None;
     state.codex_tile_rect = None;
@@ -2732,6 +2826,7 @@ pub fn run() {
                 mode_animation: None,
                 accounts: settings.accounts.clone(),
                 data: None,
+                prepared_metrics: None,
                 poll_interval_ms: settings.poll_interval_ms,
                 retry_count: 0,
                 force_notify_auth_error: false,
@@ -2887,16 +2982,21 @@ fn render_layered_impl(trigger: RenderTrigger) {
     if trigger == RenderTrigger::Full {
         sync_surface_windows();
     }
-    let (hwnd_val, active_theme, usage_data, runtime, mirror_hwnds, desktop_hwnds) = {
-        let state = lock_state();
-        let Some(state) = state.as_ref() else {
+    let (hwnd_val, theme, usage_data, runtime, metrics, mirror_hwnds, desktop_hwnds) = {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
             return;
         };
+        let theme = effective_theme_from_state(state).unwrap_or_else(ThemeDocument::starter);
+        let runtime = theme_runtime_from_state(state);
+        let metrics =
+            prepared_metrics(state, &theme, theme_runtime_for_surface(&theme, 0, runtime));
         (
             state.hwnd,
-            effective_theme_from_state(state),
+            theme,
             state.data.clone(),
-            theme_runtime_from_state(state),
+            runtime,
+            metrics,
             state.mirror_hwnds.clone(),
             state.desktop_hwnds.clone(),
         )
@@ -2904,7 +3004,6 @@ fn render_layered_impl(trigger: RenderTrigger) {
 
     // Theme rendering is the widget renderer. Startup and theme changes always
     // install Classic in memory when a selected theme cannot be loaded.
-    let theme = active_theme.unwrap_or_else(ThemeDocument::starter);
     let hwnd = hwnd_val.to_hwnd();
     if trigger == RenderTrigger::Full {
         set_window_state_timer(hwnd, theme_has_floating_surface(&theme));
@@ -2920,52 +3019,58 @@ fn render_layered_impl(trigger: RenderTrigger) {
         };
         let surface = &theme.surfaces[surface_index];
         let surface_runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
+        let surface_metrics = theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
         if surface_index == 0 {
             let mut state = lock_state();
             if let Some(state) = state.as_mut() {
                 if state.antigravity_tile_rect.is_none() {
-                    state.antigravity_tile_rect = theme_engine::object_bounds(
+                    state.antigravity_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::ANTIGRAVITY_HOVER_OBJECT,
+                        &surface_metrics,
                     );
                 }
                 if state.claude_tile_rect.is_none() {
-                    state.claude_tile_rect = theme_engine::object_bounds(
+                    state.claude_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::CLAUDE_HOVER_OBJECT,
+                        &surface_metrics,
                     );
                 }
                 if state.codex_tile_rect.is_none() {
-                    state.codex_tile_rect = theme_engine::object_bounds(
+                    state.codex_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::CODEX_HOVER_OBJECT,
+                        &surface_metrics,
                     );
                 }
                 if state.opencode_tile_rect.is_none() {
-                    state.opencode_tile_rect = theme_engine::object_bounds(
+                    state.opencode_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::OPENCODE_HOVER_OBJECT,
+                        &surface_metrics,
                     );
                 }
                 if state.qoder_tile_rect.is_none() {
-                    state.qoder_tile_rect = theme_engine::object_bounds(
+                    state.qoder_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::QODER_HOVER_OBJECT,
+                        &surface_metrics,
                     );
                 }
             }
@@ -2996,11 +3101,12 @@ fn render_layered_impl(trigger: RenderTrigger) {
             }
             continue;
         }
-        if !theme_engine::surface_should_render(
+        if !theme_engine::surface_should_render_with_metrics(
             &theme,
             surface_index,
             usage_data.as_ref(),
             surface_runtime,
+            &surface_metrics,
         ) {
             unsafe {
                 let _ = ShowWindow(target_hwnd, SW_HIDE);
@@ -3015,27 +3121,30 @@ fn render_layered_impl(trigger: RenderTrigger) {
             continue;
         }
         let scale = theme_surface_scale(&theme, surface_index);
-        let rendered = theme_engine::render_theme_surface_with_runtime_at_scale(
+        let rendered = theme_engine::render_theme_surface_with_metrics_at_scale(
             &theme,
             surface_index,
             usage_data.as_ref(),
             surface_runtime,
             scale,
+            &surface_metrics,
         );
         let mut positioned = theme_for_surface(&theme, surface_index);
-        let (logical_width, logical_height) = theme_engine::resolve_surface_size(
+        let (logical_width, logical_height) = theme_engine::resolve_surface_size_with_metrics(
             &theme,
             surface_index,
             usage_data.as_ref(),
             surface_runtime,
+            &surface_metrics,
         );
         positioned.canvas.width = logical_width;
         positioned.canvas.height = logical_height;
-        let placement = theme_engine::resolve_surface_placement(
+        let placement = theme_engine::resolve_surface_placement_with_metrics(
             &theme,
             surface_index,
             usage_data.as_ref(),
             surface_runtime,
+            &surface_metrics,
         );
         positioned.placement.offset_x = placement.offset_x;
         positioned.placement.offset_y = placement.offset_y;
@@ -3253,6 +3362,7 @@ fn do_poll_once(hwnd: HWND) {
                     &accounts,
                 );
                 state.data = Some(data.clone());
+                invalidate_metrics(state);
                 state.last_poll_ok = true;
                 state.last_poll_failure = None;
                 data
@@ -3308,6 +3418,7 @@ fn do_poll_once(hwnd: HWND) {
                     poller::retry_delay_ms(0, poll_started),
                 );
                 s.data = Some(data);
+                invalidate_metrics(s);
                 s.last_poll_ok = true;
                 s.last_poll_failure = None;
 
@@ -3411,6 +3522,7 @@ fn do_poll_once(hwnd: HWND) {
                             s.data = Some(carried);
                         }
                     }
+                    invalidate_metrics(s);
                     s.last_poll_ok = false;
                     s.last_poll_failure = Some(failure);
                     match auth_watch {
@@ -3737,9 +3849,23 @@ pub(super) fn mode_phase_animation(current: f64, mode: u8) -> PhaseAnimation {
     )
 }
 
-/// Drop the four cached provider hit-test rects. They are stored in logical
-/// canvas coordinates, so any change to the widget width (view mode, provider
-/// set, Fable column) makes them stale; the next render rebuilds them.
+fn invalidate_metrics(state: &mut AppState) {
+    state.prepared_metrics = None;
+    invalidate_hover_tile_rects(state);
+}
+
+fn prepared_metrics(
+    state: &mut AppState,
+    theme: &ThemeDocument,
+    runtime: ThemeRuntime,
+) -> theme_engine::DisplayMetrics {
+    let metrics = state
+        .prepared_metrics
+        .get_or_insert_with(|| theme_engine::display_metrics(theme, state.data.as_ref(), runtime));
+    theme_engine::metrics_for_phase(metrics.clone(), runtime)
+}
+
+/// Drop cached provider hit-test rects when widget geometry changes.
 fn invalidate_hover_tile_rects(state: &mut AppState) {
     state.antigravity_tile_rect = None;
     state.claude_tile_rect = None;
@@ -3754,12 +3880,19 @@ fn invalidate_hover_tile_rects(state: &mut AppState) {
 /// disabling it shifts the provider hit-test rects.
 fn toggle_show_fable(state: &mut AppState) {
     state.show_fable = !state.show_fable;
+    invalidate_metrics(state);
     invalidate_hover_tile_rects(state);
 }
 
-/// Install a new view mode into the single global state, persist it and drive
-/// it with the shared animation timer. Every surface reads the same state, so
-/// one input switches all active widgets at the same phase.
+fn set_view_mode(state: &mut AppState, mode: u8, direction: i8) {
+    state.view_mode = mode;
+    invalidate_metrics(state);
+    state.mode_direction = direction;
+    state.mode_animation = Some(mode_phase_animation(state.mode_phase, mode));
+    invalidate_hover_tile_rects(state);
+}
+
+/// Install and animate a view mode across all widget surfaces.
 pub(super) fn apply_view_mode(hwnd: HWND, mode: u8, direction: i8) {
     {
         let mut state = lock_state();
@@ -3767,10 +3900,7 @@ pub(super) fn apply_view_mode(hwnd: HWND, mode: u8, direction: i8) {
             return;
         };
         let mode = mode.clamp(1, 3);
-        state.view_mode = mode;
-        state.mode_direction = direction;
-        state.mode_animation = Some(mode_phase_animation(state.mode_phase, mode));
-        invalidate_hover_tile_rects(state);
+        set_view_mode(state, mode, direction);
     }
     // The first real WM_MOUSEMOVE after the transition must not be swallowed
     // by the 8 ms duplicate-move coalescer.
@@ -4062,6 +4192,7 @@ fn reload_external_settings(hwnd: HWND) {
             state.qoder_crossfade_animation = None;
         }
         state.stop_crossfade_timer_if_idle(hwnd);
+        invalidate_metrics(state);
         state.antigravity_tile_rect = None;
         state.claude_tile_rect = None;
         state.codex_tile_rect = None;

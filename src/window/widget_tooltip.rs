@@ -71,8 +71,8 @@ pub(super) fn reset_countdown(reset: SystemTime, now: SystemTime, strings: &Stri
 }
 
 fn content(owner: HWND) -> Option<(String, bool, HWND)> {
-    let state = lock_state();
-    let state = state.as_ref()?;
+    let mut state = lock_state();
+    let state = state.as_mut()?;
     if state.dragging || state.pending_drag {
         return None;
     }
@@ -80,9 +80,19 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
     let theme = effective_theme_from_state(state)?;
     let surface = theme.surfaces.get(surface_index)?;
     let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
-    if surface.tooltip != Some(theme_engine::SurfaceTooltip::UsageSummary)
-        || !theme_engine::surface_should_render(&theme, surface_index, state.data.as_ref(), runtime)
-    {
+    if surface.tooltip != Some(theme_engine::SurfaceTooltip::UsageSummary) {
+        return None;
+    }
+    let primary_runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let metrics =
+        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary_runtime), runtime);
+    if !theme_engine::surface_should_render_with_metrics(
+        &theme,
+        surface_index,
+        state.data.as_ref(),
+        runtime,
+        &metrics,
+    ) {
         return None;
     }
     let errors = tray_error_lines(

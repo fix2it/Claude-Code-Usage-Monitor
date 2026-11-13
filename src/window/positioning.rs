@@ -278,13 +278,19 @@ pub(super) fn position_at_taskbar() {
     }
     refresh_dpi();
     let custom_position = {
-        let state = lock_state();
-        state.as_ref().and_then(|s| {
+        let mut state = lock_state();
+        state.as_mut().and_then(|s| {
             if s.custom_theme_enabled {
                 effective_theme_from_state(s).map(|mut theme| {
                     let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(s));
-                    let (width, height) =
-                        theme_engine::resolve_surface_size(&theme, 0, s.data.as_ref(), runtime);
+                    let metrics = prepared_metrics(s, &theme, runtime);
+                    let (width, height) = theme_engine::resolve_surface_size_with_metrics(
+                        &theme,
+                        0,
+                        s.data.as_ref(),
+                        runtime,
+                        &metrics,
+                    );
                     theme.canvas.width = width;
                     theme.canvas.height = height;
                     let scale = theme_surface_scale(&theme, 0);
@@ -634,9 +640,9 @@ pub(super) fn position_custom_theme_internal(
 }
 
 pub(super) fn sync_theme_window_visibility() {
-    let (theme, data, runtime, windows) = {
-        let state = lock_state();
-        let Some(state) = state.as_ref() else {
+    let (theme, data, runtime, metrics, windows) = {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
             return;
         };
         if !state.custom_theme_enabled {
@@ -645,10 +651,14 @@ pub(super) fn sync_theme_window_visibility() {
         let Some(theme) = effective_theme_from_state(state) else {
             return;
         };
+        let runtime = theme_runtime_from_state(state);
+        let metrics =
+            prepared_metrics(state, &theme, theme_runtime_for_surface(&theme, 0, runtime));
         (
             theme,
             state.data.clone(),
-            theme_runtime_from_state(state),
+            runtime,
+            metrics,
             std::iter::once(state.hwnd)
                 .chain(state.mirror_hwnds.iter().copied())
                 .collect::<Vec<_>>(),
@@ -675,11 +685,12 @@ pub(super) fn sync_theme_window_visibility() {
             let has_display =
                 surface_index == 0 || surface.placement.reference.display < display_count;
             let should_show = has_display
-                && theme_engine::surface_should_render(
+                && watchdog_surface_should_render(
                     &theme,
                     surface_index,
                     data.as_ref(),
                     surface_runtime,
+                    &metrics,
                 )
                 && !foreground_is_fullscreen_on_display(surface.placement.reference.display);
             if should_show == IsWindowVisible(hwnd).as_bool() {
@@ -706,6 +717,17 @@ pub(super) fn sync_theme_window_visibility() {
             );
         }
     }
+}
+
+pub(super) fn watchdog_surface_should_render(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &theme_engine::DisplayMetrics,
+) -> bool {
+    let metrics = theme_engine::metrics_for_phase(metrics.clone(), runtime);
+    theme_engine::surface_should_render_with_metrics(theme, surface_index, data, runtime, &metrics)
 }
 
 pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool {
@@ -1006,8 +1028,22 @@ pub(super) fn widget_frame(
     runtime: ThemeRuntime,
     scale: f64,
 ) -> WidgetFrame {
-    let (content_width, height) =
-        theme_engine::resolve_surface_content_size(theme, 0, data, runtime);
+    widget_frame_with_cached_metrics(theme, data, runtime, scale, None)
+}
+
+pub(super) fn widget_frame_with_cached_metrics(
+    theme: &ThemeDocument,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    scale: f64,
+    cached: Option<&theme_engine::DisplayMetrics>,
+) -> WidgetFrame {
+    let (content_width, height) = if let Some(metrics) = cached {
+        let metrics = theme_engine::metrics_for_phase(metrics.clone(), runtime);
+        theme_engine::resolve_surface_content_size_with_metrics(theme, 0, data, runtime, &metrics)
+    } else {
+        theme_engine::resolve_surface_content_size(theme, 0, data, runtime)
+    };
     let inset = theme_engine::surface_horizontal_padding(theme, 0, runtime);
     WidgetFrame {
         width: scaled_theme_dimension(content_width + 2 * inset, scale),

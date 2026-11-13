@@ -1511,7 +1511,7 @@ fn floating_card_inset_preserves_content_layout_clipping_and_mouse_targets() {
         hit_test_mouse_event(&theme, 0, 60.0, 10.0, None, floating),
         None
     );
-    let context = mouse_action_object_context(&theme, 0, "edge", None, floating).unwrap();
+    let context = mouse_action_object_context(&theme, 0, "edge", None, floating, None).unwrap();
     assert_eq!(context.get("canvas.width"), Some(40.0));
     for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
         let rendered = render_theme_surface_with_runtime_at_scale(&theme, 0, None, floating, scale);
