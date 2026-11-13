@@ -527,6 +527,92 @@ mod tests {
     }
 
     #[test]
+    fn usage_cache_pins_json_keys_of_claude_profiles_with_fable() {
+        let usage = |percentage: f64| UsageData {
+            limits: vec![UsageLimit {
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                model_id: None,
+                scope: Some(serde_json::json!({"model":{"display_name":"Fable"}})),
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage,
+                    resets_at: None,
+                },
+            }],
+            ..Default::default()
+        };
+        let mut data = AppUsageData::default();
+        for (id, percentage) in [("default", 43.0), ("claude_x", 81.0)] {
+            data.accounts.push(AccountUsage {
+                provider: ProviderId::Claude,
+                profile: crate::accounts::AccountProfile {
+                    id: id.into(),
+                    name: id.into(),
+                    ..Default::default()
+                },
+                source_signature: String::new(),
+                source_path: None,
+                usage: Some(usage(percentage)),
+                error: None,
+                selected: id == "default",
+            });
+        }
+        let json = serde_json::to_value(&data).unwrap();
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(keys(&json), ["accounts"]);
+        let accounts = json["accounts"].as_array().unwrap();
+        assert_eq!(accounts.len(), 2);
+        for (account, id, percentage) in [
+            (&accounts[0], "default", 43.0),
+            (&accounts[1], "claude_x", 81.0),
+        ] {
+            assert_eq!(
+                keys(account),
+                [
+                    "error",
+                    "profile",
+                    "provider",
+                    "selected",
+                    "source_path",
+                    "source_signature",
+                    "usage"
+                ]
+            );
+            assert_eq!(account["provider"], "claude");
+            assert_eq!(account["profile"]["id"], id);
+            let limit = &account["usage"]["limits"][0];
+            assert_eq!(
+                keys(limit),
+                [
+                    "is_active",
+                    "key",
+                    "kind",
+                    "label",
+                    "model",
+                    "model_id",
+                    "scope",
+                    "usage"
+                ]
+            );
+            assert_eq!(limit["key"], "weekly_scoped_fable");
+            assert_eq!(limit["kind"], "weekly_scoped");
+            assert_eq!(limit["model"], "Fable");
+            assert_eq!(limit["usage"]["percentage"], percentage);
+            assert_eq!(limit["usage"]["available"], true);
+        }
+        let restored: AppUsageData = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.accounts, data.accounts);
+    }
+
+    #[test]
     fn default_claude_cache_keeps_poll_results_until_source_changes() {
         let provider = ProviderId::Claude;
         let path = crate::accounts::default_credential_path(provider).unwrap();

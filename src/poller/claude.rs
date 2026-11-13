@@ -1402,6 +1402,38 @@ mod tests {
     }
 
     #[test]
+    fn fable_parses_separately_for_each_claude_profile() {
+        let payload = |fable: u32| {
+            format!(
+                r#"{{"five_hour":{{"utilization":10}},"seven_day":{{"utilization":26}},"limits":[{{"kind":"weekly_scoped","percent":{fable},"resets_at":"2030-01-01T00:00:00Z","scope":{{"model":{{"display_name":"Fable"}}}},"is_active":true}}]}}"#
+            )
+        };
+        // Each profile polls its own payload; the parse keeps no shared state.
+        let default = usage_from_json(&payload(43));
+        let claude_x = usage_from_json(&payload(81));
+        for (usage, percentage) in [(&default, 43.0), (&claude_x, 81.0)] {
+            let fable: Vec<_> = usage
+                .limits
+                .iter()
+                .filter(|limit| limit.kind == "weekly_scoped")
+                .collect();
+            assert_eq!(fable.len(), 1);
+            assert_eq!(fable[0].key, "weekly_scoped_fable");
+            assert_eq!(fable[0].model.as_deref(), Some("Fable"));
+            assert_eq!(fable[0].usage.percentage, percentage);
+            assert!(fable[0].usage.available && fable[0].usage.resets_at.is_some());
+        }
+        // A profile whose payload has no Fable limit gets none.
+        let without = usage_from_json(
+            r#"{"five_hour":{"utilization":10},"limits":[{"kind":"weekly_all","percent":5}]}"#,
+        );
+        assert!(without
+            .limits
+            .iter()
+            .all(|limit| limit.model.as_deref() != Some("Fable")));
+    }
+
+    #[test]
     fn reported_windows_without_resets_remain_available_at_zero_usage() {
         for percentage in [0.0, 42.0] {
             let data = usage_from_json(&format!(

@@ -306,6 +306,166 @@ mod tests {
         }
     }
 
+    fn fable_usage(percentage: Option<f64>) -> UsageData {
+        let mut limits = vec![UsageLimit {
+            key: "weekly_all".into(),
+            kind: "weekly_all".into(),
+            label: "weekly all".into(),
+            usage: UsageSection {
+                available: true,
+                percentage: 7.0,
+                resets_at: None,
+            },
+            ..Default::default()
+        }];
+        if let Some(percentage) = percentage {
+            let mut fable = limit();
+            fable.usage.percentage = percentage;
+            limits.push(fable);
+        }
+        UsageData {
+            limits,
+            ..Default::default()
+        }
+    }
+
+    fn claude_account(id: &str, usage: UsageData, selected: bool) -> AccountUsage {
+        AccountUsage {
+            provider: ProviderId::Claude,
+            profile: crate::accounts::AccountProfile {
+                id: id.into(),
+                name: id.into(),
+                enabled: true,
+                ..Default::default()
+            },
+            source_signature: String::new(),
+            source_path: None,
+            usage: Some(usage),
+            error: None,
+            selected,
+        }
+    }
+
+    /// Mirrors what the poller leaves behind: the selected account's usage is
+    /// also the legacy `claude` provider entry.
+    fn claude_profiles(accounts: Vec<AccountUsage>) -> AppUsageData {
+        let mut data = AppUsageData::default();
+        if let Some(selected) = accounts.iter().find(|account| account.selected) {
+            data.insert(ProviderId::Claude, selected.usage.clone().unwrap());
+        }
+        data.accounts = accounts;
+        data
+    }
+
+    fn fable_bindings<'a>(context: &'a DataContext, profile: &str) -> Vec<&'a str> {
+        let prefix = format!("accounts.claude.{profile}.model.fable.");
+        context
+            .limit_variables()
+            .into_iter()
+            .filter(|key| key.starts_with(&prefix))
+            .collect()
+    }
+
+    #[test]
+    fn both_claude_profiles_expose_their_own_fable_bindings() {
+        let data = claude_profiles(vec![
+            claude_account("default", fable_usage(Some(43.0)), true),
+            claude_account("claude_x", fable_usage(Some(81.0)), false),
+        ]);
+        let context = DataContext::from_usage(Some(&data), &Canvas::default());
+        for (profile, percentage) in [("default", 43.0), ("claude_x", 81.0)] {
+            assert!(
+                !fable_bindings(&context, profile).is_empty(),
+                "{profile} bindings"
+            );
+            let base = format!("accounts.claude.{profile}.model.fable");
+            assert_eq!(context.get(&format!("{base}.percentage")), Some(percentage));
+            assert_eq!(context.get(&format!("{base}.available")), Some(1.0));
+            assert_eq!(
+                context.get(&format!("{base}.remaining")),
+                Some(100.0 - percentage)
+            );
+            assert_eq!(context.get_string(&format!("{base}.label")), Some("Fable"));
+        }
+    }
+
+    #[test]
+    fn single_claude_profile_has_no_claude_x_fable_bindings() {
+        let data = claude_profiles(vec![claude_account(
+            "default",
+            fable_usage(Some(43.0)),
+            true,
+        )]);
+        let context = DataContext::from_usage(Some(&data), &Canvas::default());
+        assert!(!fable_bindings(&context, "default").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.default.model.fable.percentage"),
+            Some(43.0)
+        );
+        assert!(fable_bindings(&context, "claude_x").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.claude_x.model.fable.available"),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn only_claude_x_profile_leaves_the_default_profile_without_fable_bindings() {
+        let data = claude_profiles(vec![claude_account(
+            "claude_x",
+            fable_usage(Some(81.0)),
+            true,
+        )]);
+        let context = DataContext::from_usage(Some(&data), &Canvas::default());
+        assert!(!fable_bindings(&context, "claude_x").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.claude_x.model.fable.percentage"),
+            Some(81.0)
+        );
+        assert!(fable_bindings(&context, "default").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.default.model.fable.percentage"),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn legacy_entry_without_claude_accounts_still_feeds_the_default_fallback() {
+        let data = AppUsageData::from_iter([(ProviderId::Claude, fable_usage(Some(43.0)))]);
+        let context = DataContext::from_usage(Some(&data), &Canvas::default());
+        assert!(!fable_bindings(&context, "default").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.default.model.fable.percentage"),
+            Some(43.0)
+        );
+    }
+
+    #[test]
+    fn profile_without_fable_does_not_borrow_the_default_profile_value() {
+        let data = claude_profiles(vec![
+            claude_account("default", fable_usage(Some(43.0)), true),
+            claude_account("claude_x", fable_usage(None), false),
+        ]);
+        let context = DataContext::from_usage(Some(&data), &Canvas::default());
+        assert!(fable_bindings(&context, "claude_x").is_empty());
+        assert_eq!(
+            context.get("accounts.claude.claude_x.model.fable.percentage"),
+            Some(0.0)
+        );
+        assert_eq!(
+            context.get("accounts.claude.claude_x.model.fable.available"),
+            Some(0.0)
+        );
+        assert_eq!(
+            context.get("accounts.claude.claude_x.limits.count"),
+            Some(1.0)
+        );
+        assert_eq!(
+            context.get("accounts.claude.default.model.fable.percentage"),
+            Some(43.0)
+        );
+    }
+
     #[test]
     fn ambiguous_and_absent_quotas_never_choose_an_arbitrary_model_or_active_cap() {
         let first = limit();

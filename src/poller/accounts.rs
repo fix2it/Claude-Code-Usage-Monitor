@@ -338,6 +338,68 @@ mod tests {
     }
 
     #[test]
+    fn each_claude_profile_keeps_its_own_fable_limit_through_polling_and_theme_bindings() {
+        let fable = |percentage: f64| UsageData {
+            limits: vec![crate::models::UsageLimit {
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage,
+                    resets_at: None,
+                },
+                ..Default::default()
+            }],
+            ..usage(10.0)
+        };
+        let mut settings = settings();
+        settings.claude.profiles = ["default", "claude_x"]
+            .into_iter()
+            .map(|id| AccountProfile {
+                id: id.into(),
+                name: id.into(),
+                config_dir: format!("C:\\account-tests\\fable-{id}"),
+                ..Default::default()
+            })
+            .collect();
+        settings.claude.selected = "default".into();
+        let data = poll_accounts_with(ProviderSet::default(), &settings, |_, path| {
+            let path = path.unwrap().to_string_lossy().into_owned();
+            Ok(fable(if path.contains("claude_x") {
+                81.0
+            } else {
+                43.0
+            }))
+        })
+        .unwrap();
+        for (id, expected) in [("default", 43.0), ("claude_x", 81.0)] {
+            let account = data
+                .accounts
+                .iter()
+                .find(|account| account.provider == ProviderId::Claude && account.profile.id == id)
+                .unwrap();
+            let limits = &account.usage.as_ref().unwrap().limits;
+            assert_eq!(limits.len(), 1);
+            assert_eq!(limits[0].usage.percentage, expected);
+        }
+        let context = crate::theme_engine::DataContext::from_usage(
+            Some(&data),
+            &crate::theme_engine::Canvas::default(),
+        );
+        assert_eq!(
+            context.get("accounts.claude.default.model.fable.percentage"),
+            Some(43.0)
+        );
+        assert_eq!(
+            context.get("accounts.claude.claude_x.model.fable.percentage"),
+            Some(81.0)
+        );
+    }
+
+    #[test]
     fn ready_accounts_are_published_while_another_provider_is_waiting() {
         let mut settings = settings();
         settings.claude.profiles.truncate(1);

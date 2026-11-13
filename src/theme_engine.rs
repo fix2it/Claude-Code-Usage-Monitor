@@ -2452,10 +2452,23 @@ impl DataContext {
                 .iter()
                 .any(|a| a.provider == ProviderId::Claude && a.profile.id == "default")
             {
-                let claude_usage = data.get(ProviderId::Claude);
+                // Without any Claude account the legacy entry is the default
+                // profile. Otherwise it may belong to another profile, so the
+                // fallback keeps its windows but never borrows its limits.
+                let has_claude_account = data
+                    .accounts
+                    .iter()
+                    .any(|a| a.provider == ProviderId::Claude);
+                let claude_usage = data.get(ProviderId::Claude).map(|usage| {
+                    let mut usage = usage.clone();
+                    if has_claude_account {
+                        usage.limits.clear();
+                    }
+                    usage
+                });
                 context.insert_provider(
                     "accounts.claude.default",
-                    claude_usage,
+                    claude_usage.as_ref(),
                     false,
                     runtime.countdown,
                 );
@@ -2465,10 +2478,17 @@ impl DataContext {
                 .iter()
                 .any(|a| a.provider == ProviderId::Claude && a.profile.id == "claude_x")
             {
-                let claude_usage = data.get(ProviderId::Claude);
+                // A missing second profile keeps the legacy fallback for its
+                // windows, but never borrows the default profile's limits.
+                let claude_usage =
+                    data.get(ProviderId::Claude)
+                        .map(|usage| crate::models::UsageData {
+                            limits: Vec::new(),
+                            ..usage.clone()
+                        });
                 context.insert_provider(
                     "accounts.claude.claude_x",
-                    claude_usage,
+                    claude_usage.as_ref(),
                     false,
                     runtime.countdown,
                 );
