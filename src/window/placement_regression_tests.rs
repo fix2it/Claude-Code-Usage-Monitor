@@ -443,8 +443,13 @@ fn dock_override_replaces_authored_anchors_and_expressions_without_editing_the_t
     assert_eq!(p.vertical, VerticalAnchor::Bottom);
     assert_eq!(p.offset_y, 0);
     assert!(p.offset_x_expression.is_none() && p.offset_y_expression.is_none());
-    let resolved =
-        theme_engine::resolve_surface_placement(&effective, 0, None, ThemeRuntime::default());
+    let resolved = theme_engine::resolve_surface_placement_with_metrics(
+        &effective,
+        0,
+        None,
+        ThemeRuntime::default(),
+        &theme_engine::display_metrics(&effective, None, ThemeRuntime::default()),
+    );
     assert_eq!((resolved.offset_x, resolved.offset_y), (p.offset_x, 0));
     assert_eq!(effective.placement, *p);
     assert_eq!(
@@ -472,8 +477,13 @@ fn floating_and_ejected_positions_clear_offset_expressions() {
         let p = &effective.surfaces[0].placement;
         assert_eq!(p.nest, SurfaceNest::Floating);
         assert!(p.offset_x_expression.is_none() && p.offset_y_expression.is_none());
-        let resolved =
-            theme_engine::resolve_surface_placement(&effective, 0, None, ThemeRuntime::default());
+        let resolved = theme_engine::resolve_surface_placement_with_metrics(
+            &effective,
+            0,
+            None,
+            ThemeRuntime::default(),
+            &theme_engine::display_metrics(&effective, None, ThemeRuntime::default()),
+        );
         assert_eq!(
             (resolved.offset_x, resolved.offset_y),
             (p.offset_x, p.offset_y)

@@ -2,35 +2,12 @@ use eframe::egui;
 
 use crate::ui::components::icon::glyph_text;
 use crate::ui::theme::{muted, section_border, section_surface, setting_separator_color};
-use crate::ui::tokens::{
-    CONTROL_HEIGHT, INSPECTOR_CONTROL_MAX_WIDTH, INSPECTOR_LABEL_WIDTH, INSPECTOR_RIGHT_GUTTER,
-};
 
 /// Rendered size of a leading brand mark on a setting row. Slightly larger than
 /// the 16px title so the logo reads as artwork rather than as another glyph.
 const SETTING_MARK_SIZE: f32 = 24.0;
 /// Gap between a leading mark and the title it introduces.
 const SETTING_MARK_GAP: f32 = 12.0;
-
-pub(crate) fn studio_region(
-    ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
-    body: impl FnOnce(&mut egui::Ui),
-) {
-    egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: 7,
-            right: 7,
-            top: 7,
-            bottom: 0,
-        })
-        .show(ui, |ui| {
-            ui.set_width((width - 14.0).max(1.0));
-            ui.set_min_height((height - 7.0).max(1.0));
-            body(ui);
-        });
-}
 
 pub(crate) fn settings_scroll_area<R>(
     ui: &mut egui::Ui,
@@ -161,38 +138,4 @@ pub(crate) fn setting_separator(ui: &mut egui::Ui) {
         rect.center().y,
         egui::Stroke::new(1.0, setting_separator_color()),
     );
-}
-
-pub(crate) fn inspector_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(INSPECTOR_LABEL_WIDTH, CONTROL_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.label(egui::RichText::new(label).color(muted()));
-            },
-        );
-        let available_width = ui.available_width().max(1.0);
-        let control_width = control_width(available_width - INSPECTOR_RIGHT_GUTTER);
-        ui.allocate_ui_with_layout(
-            egui::vec2(available_width, CONTROL_HEIGHT),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                ui.add_space(INSPECTOR_RIGHT_GUTTER);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(control_width, CONTROL_HEIGHT),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    body,
-                );
-            },
-        );
-    });
-}
-
-pub(crate) fn available_control_width(ui: &egui::Ui) -> f32 {
-    control_width(ui.available_width())
-}
-
-pub(crate) fn control_width(available_width: f32) -> f32 {
-    available_width.clamp(1.0, INSPECTOR_CONTROL_MAX_WIDTH)
 }

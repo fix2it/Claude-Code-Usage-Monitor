@@ -469,45 +469,6 @@ fn logical_host_dimension(physical: i32, scale: f64) -> u32 {
         .clamp(1.0, u32::MAX as f64) as u32
 }
 
-// The studio runs in a separate process without the monitor's layout cache.
-pub(crate) fn query_theme_runtime_for_surface(
-    theme: &ThemeDocument,
-    surface_index: usize,
-    runtime: ThemeRuntime,
-) -> ThemeRuntime {
-    let Some(surface) = theme.surfaces.get(surface_index) else {
-        return runtime;
-    };
-    let displays = native_interop::find_monitors();
-    let Some(display) = displays
-        .get(surface.placement.reference.display)
-        .copied()
-        .or_else(|| displays.first().copied())
-    else {
-        return runtime;
-    };
-    let nest = surface
-        .placement
-        .nest
-        .resolve(surface.placement.reference.region);
-    let host_rect = if matches!(nest, SurfaceNest::Taskbar | SurfaceNest::TrayIcon) {
-        native_interop::taskbar_for_monitor(
-            &native_interop::find_taskbars(),
-            &displays,
-            display.handle,
-        )
-        .map(|taskbar| taskbar.rect)
-        .unwrap_or(display.rect)
-    } else {
-        display.rect
-    };
-    let scale = monitor_scale(display);
-    runtime.with_host_dimensions(
-        logical_host_dimension(host_rect.right - host_rect.left, scale),
-        logical_host_dimension(host_rect.bottom - host_rect.top, scale),
-    )
-}
-
 fn scaled_theme_dimension(logical: u32, scale: f64) -> i32 {
     (logical as f64 * scale).round().clamp(1.0, 8192.0) as i32
 }
@@ -2653,18 +2614,18 @@ pub fn run() {
         }
 
         let mut settings = load_settings();
-        let classic_theme_path = theme_engine::ensure_starter_theme().ok();
+        let starter_theme_path = theme_engine::ensure_starter_theme().ok();
         let mut configured_theme_path = settings.active_theme_path.as_deref().map(PathBuf::from);
         let mut configured_theme = configured_theme_path
             .as_deref()
-            .and_then(|path| theme_engine::load_theme(path).ok())
+            .and_then(theme_engine::load_selected_theme)
             .filter(|theme| !theme.is_obsolete_studio_starter());
         let legacy_placement = settings.legacy_placement();
         let legacy_visibility = settings.legacy_widget_visibility();
         if legacy_placement.is_some() || legacy_visibility.is_some() {
             if configured_theme
                 .as_ref()
-                .is_some_and(|theme| !theme.is_builtin_classic())
+                .is_some_and(|theme| !theme.is_builtin())
             {
                 // A user-selected writable theme already owns its presentation.
                 // Consume the obsolete settings without replacing that theme.
@@ -2709,7 +2670,7 @@ pub fn run() {
         let (active_theme_path, active_theme) = configured_theme
             .map(|theme| (configured_theme_path, Some(theme)))
             .unwrap_or_else(|| {
-                let path = classic_theme_path;
+                let path = starter_theme_path;
                 let theme = path
                     .as_deref()
                     .and_then(|path| theme_engine::load_theme(path).ok())

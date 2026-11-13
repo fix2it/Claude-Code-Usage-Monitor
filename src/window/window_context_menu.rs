@@ -474,16 +474,6 @@ pub(super) fn context_menu_action_flags(
 /// carry a check mark. The target is a surface id, or a layer inside the
 /// surface the menu was opened from, which is what the action itself toggles.
 /// An unknown id has no state to report.
-pub(super) fn toggle_layer_render_state(
-    theme: &ThemeDocument,
-    origin_surface: usize,
-    target: &str,
-    data: Option<&AppUsageData>,
-    base_runtime: ThemeRuntime,
-) -> Option<bool> {
-    toggle_layer_render_state_with_metrics(theme, origin_surface, target, data, base_runtime, None)
-}
-
 fn toggle_layer_render_state_with_metrics(
     theme: &ThemeDocument,
     origin_surface: usize,
@@ -819,24 +809,31 @@ mod tests {
 
         // A surface id keeps reporting the surface, as it always did.
         assert_eq!(
-            toggle_layer_render_state(&theme, 0, &surface_id, None, runtime),
+            toggle_layer_render_state_with_metrics(&theme, 0, &surface_id, None, runtime, None),
             Some(true)
         );
         // A layer id used to report nothing, leaving the row unchecked even
         // while the layer was drawing.
         assert_eq!(
-            toggle_layer_render_state(&theme, 0, &layer_id, None, runtime),
+            toggle_layer_render_state_with_metrics(&theme, 0, &layer_id, None, runtime, None),
             Some(true)
         );
         theme.surfaces[0].children[0].render = 0.0.into();
         theme.prepare_runtime();
         assert_eq!(
-            toggle_layer_render_state(&theme, 0, &layer_id, None, runtime),
+            toggle_layer_render_state_with_metrics(&theme, 0, &layer_id, None, runtime, None),
             Some(false)
         );
         // An id that matches nothing has no state to report.
         assert_eq!(
-            toggle_layer_render_state(&theme, 0, "no-such-object", None, runtime),
+            toggle_layer_render_state_with_metrics(
+                &theme,
+                0,
+                "no-such-object",
+                None,
+                runtime,
+                None
+            ),
             None
         );
     }
@@ -854,7 +851,14 @@ mod tests {
         let second_index = theme.surfaces.len() - 1;
         theme.prepare_runtime();
         assert_eq!(
-            toggle_layer_render_state(&theme, second_index, &layer_id, None, runtime),
+            toggle_layer_render_state_with_metrics(
+                &theme,
+                second_index,
+                &layer_id,
+                None,
+                runtime,
+                None
+            ),
             Some(false)
         );
         let mut overrides = HashMap::new();
@@ -870,11 +874,18 @@ mod tests {
         .unwrap();
         let effective = theme_engine::apply_mouse_action_overrides(&theme, &overrides);
         assert_eq!(
-            toggle_layer_render_state(&effective, 0, &layer_id.to_uppercase(), None, runtime),
+            toggle_layer_render_state_with_metrics(
+                &effective,
+                0,
+                &layer_id.to_uppercase(),
+                None,
+                runtime,
+                None
+            ),
             Some(false)
         );
         assert_eq!(
-            toggle_layer_render_state(&theme, 0, &layer_id, None, runtime),
+            toggle_layer_render_state_with_metrics(&theme, 0, &layer_id, None, runtime, None),
             Some(true)
         );
     }

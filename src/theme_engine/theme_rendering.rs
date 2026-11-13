@@ -71,6 +71,7 @@ pub fn render_theme(theme: &ThemeDocument, data: Option<&AppUsageData>) -> Rende
     render_theme_surface_with_runtime(theme, 0, data, ThemeRuntime::default())
 }
 
+#[cfg(test)]
 pub fn render_theme_surface_with_runtime(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -82,6 +83,7 @@ pub fn render_theme_surface_with_runtime(
 
 /// Rasterize a theme surface at a physical-pixel scale while keeping theme
 /// expressions and object geometry in their 96-DPI logical coordinate space.
+#[cfg(test)]
 pub fn render_theme_surface_with_runtime_at_scale(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -106,6 +108,7 @@ pub fn render_theme_surface_with_metrics_at_scale(
             width: 1,
             height: 1,
             pixels: vec![0],
+            #[cfg(test)]
             warnings: vec![format!("Root object {surface_index} does not exist")],
         };
     };
@@ -256,6 +259,7 @@ pub fn render_theme_surface_with_metrics_at_scale(
         width,
         height,
         pixels,
+        #[cfg(test)]
         warnings,
     }
 }
@@ -447,6 +451,7 @@ pub fn object_bounds_with_metrics(
         .map(|object| (object.x + padding, object.y, object.width, object.height))
 }
 
+#[cfg(test)]
 pub fn hit_test_mouse_event(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -551,6 +556,7 @@ pub fn hit_test_mouse_event_with_metrics(
 
 /// Resolve one SceneObject into canvas coordinates, including every parent object's
 /// position and anchor. Theme Studio uses this for accurate selection handles.
+#[cfg(test)]
 pub fn resolve_object_bounds_with_runtime(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -604,6 +610,7 @@ pub(crate) fn resolve_object_bounds_with_metrics(
     ))
 }
 
+#[cfg(test)]
 pub fn resolve_surface_size(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -729,16 +736,6 @@ pub struct ResolvedPlacementValues {
     pub offset_y: i32,
 }
 
-pub fn resolve_surface_placement(
-    theme: &ThemeDocument,
-    surface_index: usize,
-    data: Option<&AppUsageData>,
-    runtime: ThemeRuntime,
-) -> ResolvedPlacementValues {
-    let metrics = display_metrics(theme, data, runtime);
-    resolve_surface_placement_with_metrics(theme, surface_index, data, runtime, &metrics)
-}
-
 pub fn resolve_surface_placement_with_metrics(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -782,6 +779,7 @@ pub fn resolve_surface_placement_with_metrics(
     }
 }
 
+#[cfg(test)]
 pub fn surface_should_render(
     theme: &ThemeDocument,
     surface_index: usize,

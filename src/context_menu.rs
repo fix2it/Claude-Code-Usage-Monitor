@@ -1,5 +1,3 @@
-//! Reusable, versioned native context-menu documents edited by Theme Studio.
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -144,6 +142,7 @@ impl ContextMenuItem {
         }
     }
 
+    #[cfg(test)]
     pub fn text(id: &str, label: &str) -> Self {
         Self {
             id: id.into(),
@@ -164,6 +163,7 @@ impl ContextMenuItem {
 }
 
 impl ContextMenuDocument {
+    #[cfg(test)]
     pub fn blank(name: &str) -> Self {
         let id = unique_document_id(name);
         Self {
@@ -630,27 +630,6 @@ fn canonical_context_menu_reference(reference: &str) -> &str {
     }
 }
 
-pub fn save_context_menu(document: &ContextMenuDocument) -> Result<PathBuf, String> {
-    let mut document = document.clone();
-    document.schema_version = CONTEXT_MENU_SCHEMA_VERSION;
-    remove_legacy_context_menu_actions(&mut document.items);
-    if document.is_builtin() {
-        return Err(format!(
-            "{} is read-only; duplicate it to make changes",
-            document.name
-        ));
-    }
-    let errors = document.validate();
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
-    }
-    let directory = context_menus_directory();
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let path = directory.join(format!("{}.json", safe_file_stem(&document.id)));
-    crate::app_settings::write_json_atomic(&path, &document)?;
-    Ok(path)
-}
-
 fn remove_legacy_context_menu_actions(items: &mut Vec<ContextMenuItem>) {
     for item in items.iter_mut() {
         if let ContextMenuItemKind::Submenu { items } = &mut item.kind {
@@ -666,20 +645,7 @@ fn remove_legacy_context_menu_actions(items: &mut Vec<ContextMenuItem>) {
     });
 }
 
-pub fn delete_context_menu(path: &Path) -> Result<(), String> {
-    let directory =
-        std::fs::canonicalize(context_menus_directory()).map_err(|error| error.to_string())?;
-    let path = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
-    if path.parent() != Some(directory.as_path()) {
-        return Err("Context menu path is outside the managed library".into());
-    }
-    let document = load_context_menu(&path)?;
-    if document.is_builtin() {
-        return Err("Built-in context menus cannot be deleted".into());
-    }
-    std::fs::remove_file(path).map_err(|error| error.to_string())
-}
-
+#[cfg(test)]
 pub fn unique_document_id(name: &str) -> String {
     let base = safe_file_stem(name);
     let base = if base.is_empty() {
@@ -704,6 +670,7 @@ pub fn unique_document_id(name: &str) -> String {
         .unwrap_or_else(|| format!("{base}-copy"))
 }
 
+#[cfg(test)]
 fn safe_file_stem(value: &str) -> String {
     let mut result = String::new();
     let mut separator = false;

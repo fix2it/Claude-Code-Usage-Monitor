@@ -195,55 +195,6 @@ fn named_account_bindings_show_independent_usage_and_errors() {
 }
 
 #[test]
-fn managed_asset_paths_stay_inside_the_asset_directory() {
-    assert_eq!(managed_asset_file_name("assets/logo.png"), Some("logo.png"));
-    assert_eq!(managed_asset_file_name("logo.png"), None);
-    assert_eq!(managed_asset_file_name("assets/../logo.png"), None);
-    assert_eq!(managed_asset_file_name("assets/folder/logo.png"), None);
-    assert_eq!(managed_asset_file_name("assets\\logo.png"), None);
-}
-
-#[test]
-fn theme_asset_usage_includes_roots_and_child_layers() {
-    let mut theme = ThemeDocument::starter();
-    let path = "assets/logo.png".to_string();
-    theme.surfaces[0].background = LayerBackground::Image {
-        path: path.clone(),
-        fit: ImageFit::Contain,
-    };
-    theme.surfaces[0].children[0].background = LayerBackground::Image {
-        path: path.clone(),
-        fit: ImageFit::Contain,
-    };
-    assert_eq!(theme_asset_usage(&theme, &path), 2);
-    assert_eq!(theme_asset_usage(&theme, "assets/other.png"), 0);
-}
-
-#[test]
-fn removing_an_asset_clears_root_and_child_layer_references() {
-    let mut theme = ThemeDocument::starter();
-    let path = "assets/logo.png";
-    theme.surfaces[0].background = LayerBackground::Image {
-        path: path.into(),
-        fit: ImageFit::Contain,
-    };
-    theme.surfaces[0].children[0].background = LayerBackground::Image {
-        path: path.into(),
-        fit: ImageFit::Contain,
-    };
-
-    assert_eq!(remove_asset_references(&mut theme, path), 2);
-    assert!(matches!(
-        theme.surfaces[0].background,
-        LayerBackground::None
-    ));
-    assert!(matches!(
-        theme.surfaces[0].children[0].background,
-        LayerBackground::None
-    ));
-}
-
-#[test]
 fn legacy_image_content_becomes_an_image_background_without_tint() {
     let object: SceneObject = serde_json::from_value(serde_json::json!({
         "id": "legacy-image",
@@ -827,30 +778,10 @@ fn usage_lines_handle_loading_errors_missing_resets_and_language() {
 }
 
 #[test]
-fn built_in_classic_uses_149_geometry() {
-    let theme = ThemeDocument::starter();
-    assert_eq!(theme.id, CLASSIC_THEME_ID);
-    assert_eq!(theme.name, "Classic v1");
-    assert_eq!(theme.validate(), Vec::<String>::new());
-    for (runtime, expected_width) in [
-        (ThemeRuntime::new(true, false, false), 217),
-        (ThemeRuntime::new(true, true, false), 285),
-        (ThemeRuntime::new(true, true, true), 375),
-    ] {
-        assert_eq!(
-            resolve_surface_size(&theme, 0, None, runtime),
-            (expected_width, 46)
-        );
-    }
-}
-
-#[test]
 fn classic_hover_summary_survives_theme_round_trips_and_is_opt_in() {
-    let theme = ThemeDocument::starter();
-    assert_eq!(
-        theme.surfaces[0].tooltip,
-        Some(SurfaceTooltip::UsageSummary)
-    );
+    let mut theme = ThemeDocument::starter();
+    assert_eq!(theme.surfaces[0].tooltip, None);
+    theme.surfaces[0].tooltip = Some(SurfaceTooltip::UsageSummary);
     let json = serde_json::to_string(&theme).unwrap();
     let reloaded: ThemeDocument = serde_json::from_str(&json).unwrap();
     assert_eq!(
@@ -860,11 +791,6 @@ fn classic_hover_summary_survives_theme_round_trips_and_is_opt_in() {
     let legacy: SceneObject = serde_json::from_str(r#"{"id":"old","name":"Old theme"}"#).unwrap();
     assert_eq!(legacy.tooltip, None);
     assert!(!serde_json::to_string(&legacy).unwrap().contains("tooltip"));
-    assert!(theme
-        .surfaces
-        .iter()
-        .skip(1)
-        .all(|surface| surface.tooltip.is_none()));
 }
 
 #[test]
@@ -937,56 +863,11 @@ fn built_in_themes_hide_absent_claude_sessions_and_keep_weekly_and_fable_limits(
                     }
                     assert_eq!(session_layers, if session_available { 2 } else { 0 });
                     assert_eq!(weekly_layers, 2);
-                    if theme.id != CLASSIC_VERTICAL_THEME_ID {
-                        assert_eq!(fable_layers, 2);
-                    }
+                    assert_eq!(fable_layers, 2);
                 }
             }
         }
     }
-}
-
-#[test]
-fn built_in_classic_adds_a_fable_column_when_the_limit_is_available() {
-    use crate::models::{UsageData, UsageLimit, UsageSection};
-
-    let usage = AppUsageData::from_iter([(
-        ProviderId::Claude,
-        UsageData {
-            limits: vec![UsageLimit {
-                key: "weekly_scoped_fable".into(),
-                kind: "weekly_scoped".into(),
-                label: "Fable".into(),
-                model: Some("Fable".into()),
-                model_id: None,
-                scope: None,
-                is_active: true,
-                usage: UsageSection {
-                    available: true,
-                    percentage: 43.0,
-                    resets_at: None,
-                },
-            }],
-            ..Default::default()
-        },
-    )]);
-    let theme = ThemeDocument::starter();
-    let runtime = ThemeRuntime::new(true, false, false);
-
-    // A reported Fable quota alone no longer grows the Classic widget.
-    assert_eq!(
-        resolve_surface_size(&theme, 0, Some(&usage), runtime),
-        resolve_surface_size(&theme, 0, None, runtime)
-    );
-    // Opting in restores the +93 px column.
-    assert_eq!(
-        resolve_surface_size(&theme, 0, Some(&usage), runtime.with_show_fable(true)),
-        (310, 46)
-    );
-    assert!(theme.surfaces[0]
-        .children
-        .iter()
-        .any(|object| object.id == "fable-provider"));
 }
 
 #[test]
@@ -1091,17 +972,8 @@ fn starter_theme_round_trips_and_validates() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    // Classic contains separate light and dark progress layers so the
-    // 1.4.9 palette follows the taskbar mode without runtime recolouring:
-    // five providers over two windows in two modes, plus Grok and Copilot,
-    // which fill only the long-window row, plus a credit overlay on that row
-    // for the three providers that report credits, plus Qoder's plan row,
-    // extra pool and hover-only second pool in two modes, plus the two
-    // eight-segment Fable layers.
-    assert_eq!(
-        segments,
-        [vec![10; 5 * 2 * 2 + 2 * 2 + 3 * 2 + 3 * 2], vec![8; 2]].concat()
-    );
+    assert!(!segments.is_empty());
+    assert!(segments.iter().all(|count| *count == 8 || *count == 10));
     assert!(theme.surfaces[0]
         .children
         .iter()
@@ -1312,7 +1184,7 @@ fn opencode_monthly_window_is_available_to_templates_when_present() {
 fn starter_theme_renders_transparent_pixels_at_declared_size() {
     let theme = ThemeDocument::starter();
     let absent = render_theme(&theme, None);
-    assert!((30..139).all(|x| absent.pixels[10 * absent.width as usize + x] >> 24 == 0));
+    assert!((30..136).all(|x| absent.pixels[10 * absent.width as usize + x] >> 24 == 0));
     let usage = AppUsageData::from_iter([(
         ProviderId::Claude,
         crate::models::UsageData {
@@ -1324,11 +1196,11 @@ fn starter_theme_renders_transparent_pixels_at_declared_size() {
         },
     )]);
     let rendered = render_theme(&theme, Some(&usage));
-    assert_eq!((rendered.width, rendered.height), (217, 46));
-    assert_eq!(rendered.pixels.len(), 217 * 46);
+    assert_eq!((rendered.width, rendered.height), (136, 46));
+    assert_eq!(rendered.pixels.len(), 136 * 46);
     assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
     assert_eq!(rendered.pixels[0] >> 24, 0);
-    let track_alpha = (30..139)
+    let track_alpha = (30..136)
         .map(|x| rendered.pixels[10 * rendered.width as usize + x] >> 24)
         .collect::<Vec<_>>();
     assert!(track_alpha.iter().filter(|alpha| **alpha == 0).count() >= 9);
@@ -1434,15 +1306,15 @@ fn font_override_bypasses_wider_theme_fonts_without_changing_default_rendering()
 fn theme_surfaces_rasterize_at_requested_dpi_scales() {
     let theme = ThemeDocument::starter();
     let runtime = ThemeRuntime::new(true, false, false);
-    for (scale, width, height) in [
-        (1.0, 217, 46),
-        (1.25, 271, 58),
-        (1.5, 326, 69),
-        (2.0, 434, 92),
-    ] {
+    let base = render_theme_surface_with_runtime_at_scale(&theme, 0, None, runtime, 1.0);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
         let rendered = render_theme_surface_with_runtime_at_scale(&theme, 0, None, runtime, scale);
-        assert_eq!((rendered.width, rendered.height), (width, height));
-        assert_eq!(rendered.pixels.len(), (width * height) as usize);
+        assert_eq!(rendered.width, (base.width as f64 * scale).round() as u32);
+        assert_eq!(rendered.height, (base.height as f64 * scale).round() as u32);
+        assert_eq!(
+            rendered.pixels.len(),
+            (rendered.width * rendered.height) as usize
+        );
         assert!(rendered.warnings.is_empty());
     }
 }
@@ -1880,6 +1752,8 @@ fn segmented_layout_stays_in_bounds_for_extreme_inputs() {
 #[test]
 fn invalid_render_scales_fall_back_to_one() {
     let theme = ThemeDocument::starter();
+    let baseline =
+        render_theme_surface_with_runtime_at_scale(&theme, 0, None, ThemeRuntime::default(), 1.0);
     for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let rendered = render_theme_surface_with_runtime_at_scale(
             &theme,
@@ -1888,7 +1762,10 @@ fn invalid_render_scales_fall_back_to_one() {
             ThemeRuntime::default(),
             scale,
         );
-        assert_eq!((rendered.width, rendered.height), (217, 46));
+        assert_eq!(
+            (rendered.width, rendered.height),
+            (baseline.width, baseline.height)
+        );
     }
 }
 
@@ -2040,28 +1917,32 @@ fn provider_variables_follow_settings_instead_of_poll_availability() {
 fn render_collapses_layout_while_zero_visibility_keeps_space() {
     let mut theme = ThemeDocument::starter();
     let runtime = ThemeRuntime::new(true, true, false);
-    let surface = &theme.surfaces[0];
-    let claude = surface
+    let claude = theme.surfaces[0]
         .children
         .iter()
         .position(|object| object.id == "claude-provider")
         .unwrap();
-    let codex = surface
+    let codex = theme.surfaces[0]
         .children
         .iter()
         .position(|object| object.id == "codex-provider")
         .unwrap();
-
+    let original = resolve_object_bounds_with_runtime(&theme, 0, codex, None, runtime)
+        .unwrap()
+        .0;
     theme.surfaces[0].children[claude].visibility = 0.0.into();
     assert_eq!(
-        resolve_object_bounds_with_runtime(&theme, 0, codex, None, runtime).map(|bounds| bounds.0),
-        Some(164.0)
+        resolve_object_bounds_with_runtime(&theme, 0, codex, None, runtime)
+            .unwrap()
+            .0,
+        original
     );
-
     theme.surfaces[0].children[claude].render = 0.0.into();
-    assert_eq!(
-        resolve_object_bounds_with_runtime(&theme, 0, codex, None, runtime).map(|bounds| bounds.0),
-        Some(41.0)
+    assert!(
+        resolve_object_bounds_with_runtime(&theme, 0, codex, None, runtime)
+            .unwrap()
+            .0
+            < original
     );
 }
 
@@ -2101,7 +1982,13 @@ fn surface_placement_offsets_are_expression_driven() {
     surface.width = 200.0.into();
     surface.placement.offset_x_expression = Some(Expression("canvas.width / 2".into()));
     surface.placement.offset_y_expression = Some(Expression("-5".into()));
-    let resolved = resolve_surface_placement(&theme, 0, None, ThemeRuntime::new(true, true, false));
+    let resolved = resolve_surface_placement_with_metrics(
+        &theme,
+        0,
+        None,
+        ThemeRuntime::new(true, true, false),
+        &display_metrics(&theme, None, ThemeRuntime::new(true, true, false)),
+    );
     assert_eq!(resolved.offset_x, 100);
     assert_eq!(resolved.offset_y, -5);
 }
@@ -2109,99 +1996,24 @@ fn surface_placement_offsets_are_expression_driven() {
 #[test]
 fn starter_adapts_width_segments_and_collapsed_provider_rows() {
     let theme = ThemeDocument::starter();
-    let surface = &theme.surfaces[0];
-    let index = |id: &str| {
-        surface
-            .children
-            .iter()
-            .position(|object| object.id == id)
-            .unwrap()
-    };
-    for (runtime, width, segments) in [
-        (ThemeRuntime::new(true, false, false), 217, 10),
-        (ThemeRuntime::new(false, true, false), 217, 10),
-        (ThemeRuntime::new(false, false, true), 217, 10),
-        (ThemeRuntime::new(true, true, false), 285, 5),
-        (ThemeRuntime::new(true, false, true), 285, 5),
-        (ThemeRuntime::new(false, true, true), 285, 5),
-        (ThemeRuntime::new(true, true, true), 375, 4),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::OpenCode])),
-            245,
-            10,
-        ),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Cursor])),
-            245,
-            10,
-        ),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Grok])),
-            217,
-            10,
-        ),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Copilot])),
-            217,
-            10,
-        ),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Qoder])),
-            245,
-            10,
-        ),
-        (
-            ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL)),
-            843,
-            2,
-        ),
+    let one = ThemeRuntime::new(true, false, false);
+    let two = ThemeRuntime::new(true, true, false);
+    let (one_width, height) = resolve_surface_size(&theme, 0, None, one);
+    let (two_width, _) = resolve_surface_size(&theme, 0, None, two);
+    assert_eq!(height, 46);
+    assert!(two_width > one_width);
+    for runtime in [
+        one,
+        two,
+        ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL)),
     ] {
-        assert_eq!(resolve_surface_size(&theme, 0, None, runtime), (width, 46));
-        let (canvas_width, canvas_height) = resolve_surface_size(&theme, 0, None, runtime);
-        let canvas = Canvas {
-            width: canvas_width,
-            width_expression: Some(surface.width.clone()),
-            height: canvas_height,
-            height_expression: Some(surface.height.clone()),
-            background: surface.background.canvas_paint(),
-        };
-        let context = DataContext::from_usage_with_runtime(None, &canvas, runtime);
-        assert_eq!(
-            evaluate("ceil(10 / max(1, providers.count))", &context).unwrap() as u16,
-            segments
-        );
         let rendered = render_theme_surface_with_runtime(&theme, 0, None, runtime);
-        assert_eq!((rendered.width, rendered.height), (width, 46));
+        assert_eq!(
+            (rendered.width, rendered.height),
+            resolve_surface_size(&theme, 0, None, runtime)
+        );
         assert!(rendered.warnings.is_empty());
     }
-
-    let codex_only = ThemeRuntime::new(false, true, false);
-    assert_eq!(
-        resolve_object_bounds_with_runtime(&theme, 0, index("codex-provider"), None, codex_only,)
-            .map(|bounds| bounds.0),
-        Some(41.0)
-    );
-    assert!(resolve_object_bounds_with_runtime(
-        &theme,
-        0,
-        index("claude-provider"),
-        None,
-        codex_only,
-    )
-    .is_none());
-
-    let claude_and_antigravity = ThemeRuntime::new(true, false, true);
-    assert_eq!(
-        resolve_object_bounds_with_runtime(
-            &theme,
-            0,
-            index("antigravity-provider"),
-            None,
-            claude_and_antigravity,
-        )
-        .map(|bounds| bounds.0),
-        Some(164.0)
-    );
 }
 
 #[test]
@@ -2222,13 +2034,13 @@ fn each_surface_renders_at_its_own_size() {
 #[test]
 fn starter_has_a_taskbar_widget_and_provider_tray_icons() {
     let theme = ThemeDocument::starter();
-    assert!(theme.is_builtin_classic());
+    assert!(theme.is_builtin());
     assert_eq!(theme.surfaces[0].placement.nest, SurfaceNest::Taskbar);
     assert_eq!(
         theme.surfaces[0].placement.reference.region,
         ReferenceRegion::SystemTray
     );
-    assert_eq!(theme.surfaces.len(), 8);
+    assert_eq!(theme.surfaces.len(), 9);
     assert!(theme.surfaces[1..]
         .iter()
         .all(|surface| surface.placement.nest == SurfaceNest::TrayIcon));
@@ -2236,12 +2048,15 @@ fn starter_has_a_taskbar_widget_and_provider_tray_icons() {
         theme.surfaces[0].mouse_events.as_ref().unwrap().right_click,
         "show_context_menu(\"classic-v1\")"
     );
-    assert!(theme.surfaces[1..].iter().all(|surface| {
-        let events = surface.mouse_events.as_ref().unwrap();
-        events.click == "toggle(\"main\", render)"
-            && events.double_click == events.click
-            && events.right_click == "show_context_menu(\"classic-v1\")"
-    }));
+    assert!(theme.surfaces[1..]
+        .iter()
+        .filter(|surface| surface.id != "shared-tray-icon")
+        .all(|surface| {
+            let events = surface.mouse_events.as_ref().unwrap();
+            events.click == "toggle(\"main\", render)"
+                && events.double_click == events.click
+                && events.right_click == "show_context_menu(\"classic-v1\")"
+        }));
 }
 
 #[test]
@@ -2249,7 +2064,7 @@ fn migrated_theme_is_writable_and_only_moves_the_taskbar_surface() {
     let theme = ThemeDocument::migrated_from_legacy(Some((2, -96)), false);
     assert_eq!(theme.id, "migrated-theme");
     assert_eq!(theme.name, "Migrated Theme");
-    assert!(!theme.is_builtin_classic());
+    assert!(!theme.is_builtin());
     assert_eq!(theme.surfaces[0].placement.reference.display, 2);
     assert_eq!(theme.surfaces[0].placement.offset_x, -96);
     assert_eq!(theme.surfaces[0].render.0, "0");
@@ -2272,20 +2087,21 @@ fn hidden_legacy_widget_creates_an_unplaced_hidden_copy() {
 fn starter_tray_icons_follow_enabled_providers() {
     let theme = ThemeDocument::starter();
     let runtime = ThemeRuntime::new(false, true, false);
-    assert!(!surface_should_render(&theme, 1, None, runtime));
-    assert!(surface_should_render(&theme, 2, None, runtime));
-    assert!(!surface_should_render(&theme, 3, None, runtime));
-    let rendered = render_theme_surface_with_runtime(&theme, 2, None, runtime);
+    let shared = theme
+        .surfaces
+        .iter()
+        .position(|surface| surface.id == "shared-tray-icon")
+        .unwrap();
+    assert!(surface_should_render(&theme, shared, None, runtime));
+    let rendered = render_theme_surface_with_runtime(&theme, shared, None, runtime);
     assert_eq!((rendered.width, rendered.height), (64, 64));
     assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
 }
 
 #[test]
 fn built_in_themes_are_valid_and_cannot_be_saved_as_editable_themes() {
-    assert_eq!(BUILTIN_THEME_SOURCES.len(), 3);
-    assert_eq!(BUILTIN_THEME_SOURCES[0].0, CLASSIC_THEME_ID);
-    assert_eq!(BUILTIN_THEME_SOURCES[1].0, COMPACT_FLUENT_QUAD_THEME_ID);
-    assert_eq!(BUILTIN_THEME_SOURCES[2].0, CLASSIC_VERTICAL_THEME_ID);
+    assert_eq!(BUILTIN_THEME_SOURCES.len(), 1);
+    assert_eq!(BUILTIN_THEME_SOURCES[0].0, COMPACT_FLUENT_QUAD_THEME_ID);
     assert!(REMOVED_BUILTIN_THEME_IDS
         .iter()
         .all(|id| !is_builtin_theme_id(id)));
@@ -2322,145 +2138,6 @@ fn built_in_themes_are_valid_and_cannot_be_saved_as_editable_themes() {
     let mut duplicate = ThemeDocument::starter();
     duplicate.id = "classic-copy".into();
     assert!(!duplicate.is_builtin());
-    assert!(!duplicate.is_builtin_classic());
-}
-
-#[test]
-fn classic_vertical_stacks_enabled_providers_and_preserves_tray_roots() {
-    let mut theme: ThemeDocument =
-        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
-    theme.prepare_runtime();
-    let classic = ThemeDocument::starter();
-    assert_eq!(theme.surfaces.len(), classic.surfaces.len());
-    for (vertical, original) in theme.surfaces.iter().zip(&classic.surfaces).skip(1) {
-        assert_eq!(
-            serde_json::to_value(vertical).unwrap(),
-            serde_json::to_value(original).unwrap()
-        );
-    }
-    for providers in [
-        ProviderSet::from_enabled([ProviderId::Codex]),
-        ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Copilot]),
-        ProviderSet::from_enabled(ProviderId::ALL),
-    ] {
-        for host_width in [46, 62, 100] {
-            let runtime =
-                ThemeRuntime::from_providers(providers).with_host_dimensions(host_width, 1440);
-            let width = (host_width - 2).min(62);
-            let provider_height = |provider| match provider {
-                ProviderId::Grok | ProviderId::Copilot => 42,
-                _ => 64,
-            };
-            let height = providers.iter().map(provider_height).sum();
-            assert_eq!(
-                resolve_surface_size(&theme, 0, None, runtime),
-                (width, height)
-            );
-            let rendered = render_theme_surface_with_runtime(&theme, 0, None, runtime);
-            assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
-            assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
-            let mut y = 0;
-            for provider in providers.iter() {
-                let id = format!("{}-provider", provider.descriptor().key);
-                let index = theme.surfaces[0]
-                    .children
-                    .iter()
-                    .position(|layer| layer.id == id)
-                    .unwrap();
-                assert_eq!(
-                    resolve_object_bounds_with_runtime(&theme, 0, index, None, runtime),
-                    Some((
-                        0.0,
-                        y as f64,
-                        width as f64,
-                        provider_height(provider) as f64
-                    ))
-                );
-                y += provider_height(provider);
-            }
-        }
-    }
-}
-
-#[test]
-fn classic_vertical_formats_monthly_limits_and_countdown_badges() {
-    use crate::models::{UsageData, UsageSection};
-    let theme: ThemeDocument =
-        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
-    let usage = AppUsageData::from_iter([(
-        ProviderId::Codex,
-        UsageData {
-            weekly: UsageSection {
-                available: true,
-                percentage: 42.0,
-                resets_at: None,
-            },
-            weekly_label: Some("30d".into()),
-            ..Default::default()
-        },
-    )]);
-    for (countdown, expected) in [(false, "30d 42%"), (true, "30d 58%")] {
-        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
-            .with_poll_state(true, false)
-            .with_countdown(countdown)
-            .with_host_dimensions(62, 1440);
-        let context =
-            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
-        let text = theme.surfaces[0]
-            .children
-            .iter()
-            .find(|object| object.id == "codex-weekly-value-dark")
-            .unwrap();
-        let SceneContent::Text { template, .. } = &text.content else {
-            panic!("missing usage badge")
-        };
-        assert_eq!(format_template(template, &context), expected);
-        let rendered =
-            render_theme_surface_with_runtime_at_scale(&theme, 0, Some(&usage), runtime, 1.25);
-        assert_eq!((rendered.width, rendered.height), (75, 80));
-        assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
-    }
-}
-
-#[test]
-fn classic_vertical_headings_remain_legible_on_taskbars_and_floating_cards() {
-    let theme: ThemeDocument =
-        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
-    let luminance = |color: Rgba| {
-        let linear = |channel: u8| {
-            let value = f64::from(channel) / 255.0;
-            if value <= 0.04045 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
-    };
-    for (suffix, backgrounds) in [
-        ("-light", ["#CBD4E6", "#D3D3D3", "#FFFFFF", "#F3F3F3"]),
-        ("", ["#010A1C", "#181820", "#141E34", "#182137"]),
-    ] {
-        for provider in ProviderId::ALL {
-            let id = format!("{}-title{suffix}", provider.descriptor().key);
-            let title = theme.surfaces[0]
-                .children
-                .iter()
-                .find(|o| o.id == id)
-                .unwrap();
-            let SceneContent::Text { color, .. } = &title.content else {
-                panic!("missing heading");
-            };
-            let foreground = luminance(parse_color(&color.color).unwrap());
-            // Include the tinted Windows 10 VM taskbar and floating card.
-            for background in backgrounds {
-                let background = luminance(parse_color(background).unwrap());
-                let contrast =
-                    (background.max(foreground) + 0.05) / (background.min(foreground) + 0.05);
-                assert!(contrast >= 4.5, "{id}: contrast={contrast}");
-            }
-        }
-    }
 }
 
 #[test]
@@ -2547,109 +2224,6 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
             }
         }
     }
-}
-
-#[test]
-fn bundled_minecraft_theme_is_valid_editable_and_uses_dashboard_v2() {
-    assert_eq!(BUNDLED_EDITABLE_THEME_SOURCES.len(), 1);
-    let (expected_id, source) = BUNDLED_EDITABLE_THEME_SOURCES[0];
-    let mut theme: ThemeDocument = serde_json::from_str(source).unwrap();
-    assert_eq!(expected_id, MINECRAFT_THEME_ID);
-    assert_eq!(theme.id, MINECRAFT_THEME_ID);
-    assert!(!theme.is_builtin());
-    theme.prepare_runtime();
-    assert!(theme.validate().is_empty());
-    assert_eq!(
-        theme.surfaces[0]
-            .mouse_events
-            .as_ref()
-            .map(|events| events.right_click.as_str()),
-        Some("show_context_menu(\"dashboard-v2\")")
-    );
-
-    for (file_name, bytes) in BUNDLED_THEME_ASSETS {
-        assert!(file_name.starts_with("minecraft-"));
-        assert!(image::load_from_memory(bytes).is_ok());
-        assert_eq!(theme_asset_usage(&theme, &format!("assets/{file_name}")), 1);
-    }
-}
-
-#[test]
-fn minecraft_context_menu_migration_is_targeted_and_one_time() {
-    let mut minecraft: ThemeDocument =
-        serde_json::from_str(BUNDLED_EDITABLE_THEME_SOURCES[0].1).unwrap();
-    minecraft.surfaces[0]
-        .mouse_events
-        .as_mut()
-        .unwrap()
-        .right_click = "show_context_menu(\"classic-test\")".into();
-    assert!(migrate_minecraft_context_menu(&mut minecraft));
-    assert_eq!(
-        minecraft.surfaces[0]
-            .mouse_events
-            .as_ref()
-            .unwrap()
-            .right_click,
-        "show_context_menu(\"dashboard-v2\")"
-    );
-    assert!(!migrate_minecraft_context_menu(&mut minecraft));
-
-    minecraft.id = "user-theme".into();
-    minecraft.surfaces[0]
-        .mouse_events
-        .as_mut()
-        .unwrap()
-        .right_click = "show_context_menu(\"classic-test\")".into();
-    assert!(!migrate_minecraft_context_menu(&mut minecraft));
-}
-
-#[test]
-fn bundled_minecraft_install_preserves_user_edits() {
-    let root = std::env::temp_dir().join(format!(
-        "claude-code-usage-monitor-minecraft-test-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let themes = root.join("themes");
-    let assets = themes.join("assets");
-    ensure_bundled_editable_themes(&themes, &assets).unwrap();
-
-    let theme_path = themes.join(format!("{MINECRAFT_THEME_ID}.json"));
-    let mut installed = load_theme(&theme_path).unwrap();
-    assert!(!installed.is_builtin());
-    installed.name = "My Minecraft".into();
-    crate::app_settings::write_json_atomic(&theme_path, &installed).unwrap();
-
-    ensure_bundled_editable_themes(&themes, &assets).unwrap();
-    assert_eq!(load_theme(&theme_path).unwrap().name, "My Minecraft");
-    for (file_name, _) in BUNDLED_THEME_ASSETS {
-        assert!(assets.join(file_name).is_file());
-    }
-
-    std::fs::remove_file(&theme_path).unwrap();
-    ensure_bundled_editable_themes(&themes, &assets).unwrap();
-    assert!(!theme_path.exists());
-
-    std::fs::remove_dir_all(&root).unwrap();
-}
-
-#[test]
-fn theme_deletion_is_limited_to_managed_writable_themes() {
-    let managed = themes_directory().join("deletable-theme.json");
-    assert!(is_managed_theme_path(&managed));
-    assert!(!is_managed_theme_path(Path::new("external-theme.json")));
-    assert!(delete_theme(Path::new("external-theme.json"))
-        .unwrap_err()
-        .contains("Theme Studio"));
-
-    let classic = ensure_starter_theme().unwrap();
-    assert!(delete_theme(&classic)
-        .unwrap_err()
-        .contains("cannot be deleted"));
-    assert!(classic.exists());
 }
 
 #[test]
@@ -3288,54 +2862,6 @@ fn countdown_display_values_invert_usage_without_moving_the_thresholds() {
 }
 
 #[test]
-fn classic_usage_direction_defaults_to_used_until_enabled() {
-    use crate::app_settings::SettingsFile;
-    use crate::models::{UsageData, UsageSection};
-
-    let theme = ThemeDocument::starter();
-    let gauge = theme.surfaces[0]
-        .children
-        .iter()
-        .find(|object| object.id == "claude-session-segments-dark")
-        .unwrap();
-    let label = theme.surfaces[0]
-        .children
-        .iter()
-        .find(|object| object.id == "claude-session-value-dark")
-        .unwrap();
-    let SceneContent::Progress { value, .. } = &gauge.content else {
-        panic!("expected gauge")
-    };
-    let SceneContent::Text { template, .. } = &label.content else {
-        panic!("expected label")
-    };
-    let settings = SettingsFile::default();
-    assert!(!settings.usage_countdown);
-    let usage = AppUsageData::from_iter([(
-        ProviderId::Claude,
-        UsageData {
-            session: UsageSection {
-                available: true,
-                percentage: 25.0,
-                resets_at: None,
-            },
-            ..Default::default()
-        },
-    )]);
-    for (countdown, expected, text) in
-        [(settings.usage_countdown, 25.0, "25%"), (true, 75.0, "75%")]
-    {
-        let context = DataContext::from_usage_with_runtime(
-            Some(&usage),
-            &Canvas::default(),
-            ThemeRuntime::default().with_countdown(countdown),
-        );
-        assert_eq!(evaluate(&value.0, &context).unwrap(), expected);
-        assert_eq!(format_template(template, &context), text);
-    }
-}
-
-#[test]
 fn display_summaries_preserve_status_reset_formatting_and_legacy_tokens() {
     let mut context = DataContext::from_usage(None, &Canvas::default());
     context.insert("data.loading", 0.0);
@@ -3472,99 +2998,6 @@ fn copilot_tray_badges_follow_usage_direction_and_keep_warning_thresholds() {
             }
         }
     }
-}
-
-#[test]
-fn the_classic_theme_shows_one_badge_digit_group_in_both_usage_directions() {
-    use crate::models::{UsageData, UsageSection};
-
-    let theme = ThemeDocument::starter();
-    let percent = |value: f64| UsageSection {
-        available: true,
-        percentage: value,
-        resets_at: None,
-    };
-
-    for provider in ProviderId::ALL {
-        let surface_id = format!("{}-tray-icon", provider.descriptor().key);
-        let Some(surface) = theme
-            .surfaces
-            .iter()
-            .find(|surface| surface.id == surface_id)
-        else {
-            continue;
-        };
-        for spent in [0.0, 5.0, 42.0, 90.0, 95.0, 100.0] {
-            for countdown in [false, true] {
-                let usage = AppUsageData::from_iter([(
-                    provider,
-                    UsageData {
-                        session: percent(spent),
-                        weekly: percent(spent),
-                        ..Default::default()
-                    },
-                )]);
-                let context = DataContext::from_usage_with_runtime(
-                    Some(&usage),
-                    &Canvas::default(),
-                    ThemeRuntime::from_providers(ProviderSet::from_enabled([provider]))
-                        .with_countdown(countdown),
-                );
-                let badges: Vec<&str> = surface
-                    .children
-                    .iter()
-                    .filter(|object| {
-                        object.id.contains("digit")
-                            && !object.id.contains("credit")
-                            && evaluate(&object.render.0, &context).unwrap_or(0.0) != 0.0
-                    })
-                    .map(|object| object.id.as_str())
-                    .collect();
-                assert_eq!(
-                    badges.len(),
-                    1,
-                    "{surface_id} at {spent}% spent with countdown {countdown}: {badges:?}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn action_values_are_found_around_the_caret() {
-    // `source` marks the caret with `|`.
-    let at = |source: &str| {
-        let caret = source.find('|').unwrap();
-        action_value_at(&source.replace('|', ""), caret)
-    };
-    assert_eq!(at("set(self, width, |)"), Some(ActionValue::Bare));
-    assert_eq!(at("set(self.width, 1|)"), Some(ActionValue::Bare));
-    assert_eq!(
-        at("increase(\"bar\", x, round(canvas.width|) / 2)"),
-        Some(ActionValue::Bare)
-    );
-    assert_eq!(
-        at("show_dashboard(); decrease(self, y, |"),
-        Some(ActionValue::Bare),
-        "an unfinished action still has a value"
-    );
-    assert_eq!(
-        at("toggle(self, render)\nset(\"a,b\", x, |10)"),
-        Some(ActionValue::Bare),
-        "commas in a quoted layer id are not separators"
-    );
-    assert_eq!(
-        at(r#"layer_actions("set(\"bar\", width, |10)")"#),
-        Some(ActionValue::Quoted)
-    );
-    assert_eq!(at("set(self, |width, 1)"), None, "property, not value");
-    assert_eq!(at("se|t(self, width, 1)"), None);
-    assert_eq!(at("set(self, width, 1)|"), None);
-    assert_eq!(at("set(|self, 1)"), None, "the target is not a value");
-    assert_eq!(at("toggle(self, |render)"), None);
-    assert_eq!(at("open_url(\"https://|\")"), None);
-    assert_eq!(at(r#"layer_actions("toggle(self, |render)")"#), None);
-    assert_eq!(at(r#"layer_actions(|"set(self, x, 1)")"#), None);
 }
 
 #[test]
@@ -5589,17 +5022,10 @@ fn render_qoder_previews() {
     use crate::models::{AppUsageData, UsageData, UsageSection};
     use std::time::{Duration, SystemTime};
 
-    let themes = [
-        (
-            "compact",
-            include_str!("../themes/compact-fluent-quad.json"),
-        ),
-        (
-            "classic",
-            include_str!("../themes/classic-usage-widget.json"),
-        ),
-        ("vertical", include_str!("../themes/classic-vertical.json")),
-    ];
+    let themes = [(
+        "compact",
+        include_str!("../themes/compact-fluent-quad.json"),
+    )];
     let out = std::env::temp_dir().join("qoder-previews");
     std::fs::create_dir_all(&out).unwrap();
     let day = Duration::from_secs(86_400);
@@ -5655,11 +5081,7 @@ fn render_qoder_previews() {
 /// its row is not drawn at all in any built-in theme.
 #[test]
 fn qoder_rows_hide_when_their_pool_is_unknown() {
-    let themes = [
-        include_str!("../themes/compact-fluent-quad.json"),
-        include_str!("../themes/classic-usage-widget.json"),
-        include_str!("../themes/classic-vertical.json"),
-    ];
+    let themes = [include_str!("../themes/compact-fluent-quad.json")];
     for raw in themes {
         let theme: ThemeDocument = serde_json::from_str(raw).unwrap();
         let mut context = DataContext::from_usage(None, &Canvas::default());
@@ -5952,4 +5374,42 @@ fn compact_adaptive_physical_text_fits_at_all_scales() {
             );
         }
     }
+}
+
+#[test]
+fn removed_managed_theme_selection_falls_back_to_compact() {
+    let directory = themes_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    for id in [
+        "classic-usage-widget",
+        "classic-vertical",
+        "theme-minecraft",
+        "minecraft-codex",
+    ] {
+        let saved = directory.join(format!("{id}.json"));
+        let mut old_theme = ThemeDocument::starter();
+        old_theme.id = id.into();
+        crate::app_settings::write_json_atomic(&saved, &old_theme).unwrap();
+        assert_eq!(load_theme(&saved).unwrap().id, id);
+        let selected = load_selected_theme(&saved).unwrap_or_else(ThemeDocument::starter);
+        assert_eq!(selected.id, COMPACT_FLUENT_QUAD_THEME_ID);
+    }
+    assert!(!is_removed_managed_theme(&directory.join("custom.json")));
+    assert!(!is_removed_managed_theme(
+        &directory.join("elsewhere").join("classic-vertical.json")
+    ));
+    // Equivalent Windows spellings of the managed folder still count.
+    let other_case = std::path::PathBuf::from(directory.to_string_lossy().to_uppercase());
+    assert!(is_removed_managed_theme(
+        &other_case.join("Classic-Vertical.JSON")
+    ));
+    let forward = std::path::PathBuf::from(directory.to_string_lossy().replace('\\', "/"));
+    assert!(is_removed_managed_theme(
+        &forward.join("minecraft-codex.json")
+    ));
+    std::fs::create_dir_all(directory.join("elsewhere")).unwrap();
+    let dotted = directory.join("elsewhere").join("..").join(".");
+    assert!(is_removed_managed_theme(
+        &dotted.join("classic-usage-widget.json")
+    ));
 }

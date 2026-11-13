@@ -26,11 +26,6 @@ impl<'a> NumberField<'a> {
         self
     }
 
-    pub(crate) fn suffix(mut self, suffix: &'a str) -> Self {
-        self.widget = self.widget.suffix(suffix);
-        self
-    }
-
     /// Shows the field in a row whose height cannot change when keyboard
     /// editing replaces the drag button with a text field.
     pub(crate) fn show(self, ui: &mut egui::Ui, width: f32) -> egui::Response {

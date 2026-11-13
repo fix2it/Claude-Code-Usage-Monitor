@@ -157,6 +157,7 @@ impl DataContext {
         matches!(field, "key" | "label" | "kind" | "model_id" | "scope").then_some("")
     }
 
+    #[cfg(test)]
     pub fn limit_variables(&self) -> Vec<&str> {
         let mut keys: Vec<_> = self
             .values
@@ -167,23 +168,6 @@ impl DataContext {
             .collect();
         keys.sort_unstable();
         keys
-    }
-
-    /// Prefixes such as `accounts.claude.work` for each named account.
-    pub fn account_prefixes(&self) -> Vec<&str> {
-        let mut prefixes: Vec<_> = self
-            .strings
-            .keys()
-            .filter_map(|key| key.strip_suffix(".name"))
-            .filter(|prefix| {
-                prefix
-                    .strip_prefix("accounts.")
-                    .and_then(|rest| rest.split_once('.'))
-                    .is_some_and(|(_, id)| valid_key(id))
-            })
-            .collect();
-        prefixes.sort_unstable();
-        prefixes
     }
 }
 

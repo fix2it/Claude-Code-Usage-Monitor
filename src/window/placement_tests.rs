@@ -2,11 +2,7 @@ use super::*;
 
 #[test]
 fn builtins_leave_incompatible_taskbars_and_keep_compatible_layouts_docked() {
-    let sources = [
-        include_str!("../themes/classic-usage-widget.json"),
-        include_str!("../themes/compact-fluent-quad.json"),
-        include_str!("../themes/classic-vertical.json"),
-    ];
+    let sources = [include_str!("../themes/compact-fluent-quad.json")];
     for (theme_index, source) in sources.iter().enumerate() {
         let mut theme: ThemeDocument = serde_json::from_str(source).unwrap();
         theme.prepare_runtime();
@@ -67,7 +63,7 @@ fn builtins_leave_incompatible_taskbars_and_keep_compatible_layouts_docked() {
                         Some(taskbar),
                         Some(tray),
                     );
-                    let incompatible = (theme_index == 2) == horizontal;
+                    let incompatible = !horizontal;
                     for locked in [false, true] {
                         assert_eq!(
                             positioning::taskbar_ejection_required(taskbar, rect, false, locked),
@@ -229,10 +225,7 @@ fn locked_windows_10_widgets_tolerate_overhang_but_not_mostly_hidden_layouts() {
 
 #[test]
 fn horizontal_builtins_stay_locked_on_windows_10_across_dpi_and_provider_counts() {
-    for source in [
-        include_str!("../themes/classic-usage-widget.json"),
-        include_str!("../themes/compact-fluent-quad.json"),
-    ] {
+    for source in [include_str!("../themes/compact-fluent-quad.json")] {
         let mut theme: ThemeDocument = serde_json::from_str(source).unwrap();
         theme.prepare_runtime();
         for scale in [1.0, 1.25, 1.5, 2.0] {
@@ -400,49 +393,6 @@ fn auto_hide_slides_and_reveal_strips_are_not_fully_shown() {
             },
         };
         assert!(!taskbar_collision::taskbar_fully_shown(strip, &monitors));
-    }
-}
-
-#[test]
-fn classic_vertical_fits_above_the_tray_on_either_vertical_edge() {
-    let theme: ThemeDocument =
-        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
-    for (left, top, scale) in [(2498, 0, 1.0), (0, 0, 1.0), (-2560, -1440, 1.25)] {
-        let taskbar = RECT {
-            left,
-            top,
-            right: left + (62.0 * scale) as i32,
-            bottom: top + 1440,
-        };
-        let tray = RECT {
-            top: top + 1200,
-            ..taskbar
-        };
-        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL))
-            .with_host_dimensions(62, logical_host_dimension(1440, scale));
-        let (width, height) = theme_engine::resolve_surface_size(&theme, 0, None, runtime);
-        let target = positioning::surface_screen_rect(
-            &theme.surfaces[0].placement,
-            scaled_theme_dimension(width, scale),
-            scaled_theme_dimension(height, scale),
-            scale,
-            taskbar,
-            Some(taskbar),
-            Some(tray),
-        );
-        assert!(target.left >= taskbar.left && target.right <= taskbar.right);
-        assert!(target.top >= taskbar.top && target.bottom < tray.top);
-        // Win10's News and interests button occupies one row above TrayNotifyWnd.
-        assert!(target.bottom <= tray.top - scaled_theme_dimension(48, scale));
-        assert!(positioning::is_taskbar_capacity_sufficient(
-            taskbar,
-            RECT {
-                bottom: tray.top,
-                ..taskbar
-            },
-            target.right - target.left,
-            target.bottom - target.top,
-        ));
     }
 }
 

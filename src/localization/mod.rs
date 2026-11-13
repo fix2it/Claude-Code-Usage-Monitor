@@ -288,8 +288,6 @@ mod tests {
     fn every_non_english_locale_translates_the_primary_dashboard_workflow() {
         let keys = [
             "Open Dashboard",
-            "Theme Studio",
-            "Assets",
             "Every 5 minutes",
             "Enabled",
             "Active theme",
@@ -318,11 +316,9 @@ mod tests {
             "Unable to export theme package",
             "Save or discard changes before importing",
             "Add images once, reuse them across themes, or drop image files here to import them.",
-            "Theme Studio packages and themes",
             "Theme packages",
             "Theme files",
             "All files",
-            "Theme Studio packages",
             "Images",
             "Builder",
             "Build safe mouse actions that affect layers at runtime.",
@@ -330,7 +326,6 @@ mod tests {
             "Enter actions...",
             "Show dashboard",
             "Toggle dashboard",
-            "Context Menus",
             "Show context menu",
             "Set property",
             "Reset property",

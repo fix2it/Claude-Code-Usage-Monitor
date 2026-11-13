@@ -1,15 +1,30 @@
 use super::*;
+use crate::app_settings::{POLL_15_MIN, POLL_5_MIN};
 
-#[test]
-fn font_setting_reaches_preview_runtime() {
-    let mut app = app_with_surfaces(vec![root("main")]);
-    assert!(app.theme_runtime().use_windows_default_font);
-    app.settings.use_windows_default_font = false;
-    assert!(!app.theme_runtime().use_windows_default_font);
+fn test_app() -> StudioApp {
+    let mut settings = SettingsFile::default();
+    settings.language = Some("en-US".into());
+    StudioApp {
+        owner: 0,
+        update_status: crate::dashboard::UpdateStatus::Idle,
+        diagnostics: studio_diagnostics::DiagnosticsView::new(),
+        page: Page::Settings,
+        synced_poll_interval_ms: settings.poll_interval_ms,
+        synced_taskbar_lock: settings.lock_taskbar,
+        poll_interval_editor_generation: 0,
+        settings,
+        startup_enabled: false,
+        theme: ThemeDocument::starter(),
+        theme_path: None,
+        available_themes: AvailableThemesCache::new(theme_engine::themes_directory()),
+        usage: None,
+        usage_poll_ok: false,
+        usage_has_error: false,
+        last_cache_read: Instant::now(),
+        settings_error: None,
+        theme_error: None,
+    }
 }
-use crate::ui::components::helper::{
-    show_helper, Caret, HelperInsertion, HelperState, HelperStatus, HelperView, InsertMode,
-};
 
 #[test]
 fn dashboard_does_not_retry_after_successful_opengl_run() {
@@ -189,320 +204,6 @@ fn configured_fonts_render_fallback_text_and_lucide_icons() {
     });
 }
 
-#[test]
-fn colorref_conversion_uses_windows_bgr_byte_order() {
-    assert_eq!(
-        colorref_to_egui(0x0033_2211),
-        egui::Color32::from_rgb(0x11, 0x22, 0x33)
-    );
-}
-
-#[test]
-fn native_context_menu_metrics_are_valid_at_common_dpi_scales() {
-    for scale in [1.0, 1.25, 1.5, 2.0] {
-        let appearance = NativeContextMenuAppearance::detect(scale);
-        assert!(appearance.font.size >= 9.0);
-        assert!(appearance.row_height > appearance.font.size);
-        assert!(appearance.left_gutter > 0.0);
-        assert!(appearance.frame_inset > 0.0);
-    }
-}
-
-#[test]
-fn context_menu_preview_submenu_opens_on_hover() {
-    let context = egui::Context::default();
-    let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
-    let preview_bounds = std::cell::Cell::new(egui::Rect::NOTHING);
-    let open_submenu_state_ids = std::cell::RefCell::new(Vec::new());
-    let mut input = egui::RawInput {
-        screen_rect: Some(screen_rect),
-        ..Default::default()
-    };
-    input
-        .events
-        .push(egui::Event::PointerMoved(egui::pos2(50.0, 20.0)));
-    let mut popup_rect = None;
-    run_test_ui(&context, input, |ui| {
-        let (_, popup) = preview_context_menu_submenu(
-            ui,
-            egui::Button::new("").min_size(egui::vec2(120.0, 24.0)),
-            &preview_bounds,
-            &open_submenu_state_ids,
-            |ui| {
-                ui.label("Submenu");
-            },
-        );
-        popup_rect = popup.map(|popup| popup.response.rect);
-    });
-    let popup_rect = popup_rect.expect("submenu should open over its parent button");
-
-    let mut input = egui::RawInput {
-        screen_rect: Some(screen_rect),
-        ..Default::default()
-    };
-    input.events.push(egui::Event::PointerMoved(egui::pos2(
-        popup_rect.left() + 1.0,
-        popup_rect.center().y,
-    )));
-    let mut remained_open = false;
-    run_test_ui(&context, input, |ui| {
-        let (_, popup) = preview_context_menu_submenu(
-            ui,
-            egui::Button::new("").min_size(egui::vec2(120.0, 24.0)),
-            &preview_bounds,
-            &open_submenu_state_ids,
-            |ui| {
-                ui.label("Submenu");
-            },
-        );
-        remained_open = popup.is_some();
-    });
-    assert!(
-        remained_open,
-        "submenu should remain open at its overlapping edge"
-    );
-
-    let mut input = egui::RawInput {
-        screen_rect: Some(screen_rect),
-        ..Default::default()
-    };
-    input
-        .events
-        .push(egui::Event::PointerMoved(popup_rect.center()));
-    remained_open = false;
-    run_test_ui(&context, input, |ui| {
-        let (_, popup) = preview_context_menu_submenu(
-            ui,
-            egui::Button::new("").min_size(egui::vec2(120.0, 24.0)),
-            &preview_bounds,
-            &open_submenu_state_ids,
-            |ui| {
-                ui.label("Submenu");
-            },
-        );
-        remained_open = popup.is_some();
-    });
-    assert!(
-        remained_open,
-        "submenu should remain open under the pointer"
-    );
-
-    let mut input = egui::RawInput {
-        screen_rect: Some(screen_rect),
-        ..Default::default()
-    };
-    let outside = egui::pos2(350.0, 250.0);
-    input.events.extend([
-        egui::Event::PointerMoved(outside),
-        egui::Event::PointerButton {
-            pos: outside,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        },
-        egui::Event::PointerButton {
-            pos: outside,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        },
-    ]);
-    remained_open = true;
-    run_test_ui(&context, input, |ui| {
-        preview_context_menu_submenu(
-            ui,
-            egui::Button::new("").min_size(egui::vec2(120.0, 24.0)),
-            &preview_bounds,
-            &open_submenu_state_ids,
-            |ui| {
-                ui.label("Submenu");
-            },
-        );
-    });
-    let unrelated_popup_id = egui::Id::unique("unrelated-dropdown-popup");
-    egui::Popup::open_id(&context, unrelated_popup_id);
-    collapse_context_menu_preview_on_outside_click(
-        &context,
-        preview_bounds.get(),
-        &open_submenu_state_ids.borrow(),
-    );
-    assert!(
-        egui::Popup::is_id_open(&context, unrelated_popup_id),
-        "an outside preview click must not close unrelated UI popups"
-    );
-    let input = egui::RawInput {
-        screen_rect: Some(screen_rect),
-        ..Default::default()
-    };
-    run_test_ui(&context, input, |ui| {
-        let (_, popup) = preview_context_menu_submenu(
-            ui,
-            egui::Button::new("").min_size(egui::vec2(120.0, 24.0)),
-            &preview_bounds,
-            &open_submenu_state_ids,
-            |ui| {
-                ui.label("Submenu");
-            },
-        );
-        remained_open = popup.is_some();
-    });
-    assert!(!remained_open, "an outside click should close the submenu");
-}
-
-#[test]
-fn legacy_menu_theme_colors_are_normalized_to_the_native_fluent_palette() {
-    let colors = normalize_native_menu_theme_colors(NativeMenuThemeColors {
-        background: egui::Color32::from_rgb(240, 240, 240),
-        text: egui::Color32::BLACK,
-        disabled_text: egui::Color32::from_rgb(109, 109, 109),
-        highlight: egui::Color32::from_rgb(0, 120, 215),
-        highlight_text: egui::Color32::WHITE,
-        border: egui::Color32::from_rgb(100, 100, 100),
-    });
-    assert_eq!(colors.background, egui::Color32::from_rgb(249, 249, 249));
-    assert_eq!(colors.text, egui::Color32::from_rgb(31, 31, 31));
-    assert_eq!(colors.border, egui::Color32::from_rgb(229, 229, 229));
-}
-
-#[test]
-fn context_menu_preview_marks_a_rendered_target_layer_as_checked() {
-    let mut app = app_with_surfaces(vec![root("main")]);
-    let action = ContextMenuAction::ToggleLayerRender {
-        target: "main".into(),
-    };
-    assert!(context_menu_preview_action_checked(
-        &action,
-        &app.settings,
-        app.startup_enabled,
-        &app.theme,
-        app.usage.as_ref(),
-        app.theme_runtime(),
-    ));
-
-    app.theme.surfaces[0].render = 0.0.into();
-    assert!(!context_menu_preview_action_checked(
-        &action,
-        &app.settings,
-        app.startup_enabled,
-        &app.theme,
-        app.usage.as_ref(),
-        app.theme_runtime(),
-    ));
-}
-
-#[test]
-fn studio_preview_uses_cached_poll_failure_state_instead_of_stale_values() {
-    let mut app = app_with_surfaces(vec![root("main")]);
-    app.usage = Some(AppUsageData::from_iter([(
-        crate::providers::ProviderId::Codex,
-        crate::models::UsageData {
-            limits: Vec::new(),
-            session: crate::models::UsageSection {
-                available: true,
-                percentage: 7.0,
-                resets_at: None,
-            },
-            weekly: Default::default(),
-            weekly_label: None,
-            monthly: None,
-            credits: None,
-            stale: false,
-            ..Default::default()
-        },
-    )]));
-    app.usage_poll_ok = false;
-    app.usage_has_error = true;
-    let context = DataContext::from_usage_with_runtime(
-        app.usage.as_ref(),
-        &Canvas::default(),
-        app.theme_runtime(),
-    );
-    assert_eq!(
-        theme_engine::format_template("{codex.session:usage_line}", &context),
-        "!"
-    );
-}
-
-fn root(id: &str) -> SceneObject {
-    SceneObject::root(id, id, 200.0.into(), 100.0.into(), Placement::default())
-}
-
-fn object(id: &str, parent: Option<&str>) -> SceneObject {
-    let mut object = SceneObject::object(id, id);
-    object.parent = parent.map(str::to_string);
-    object
-}
-
-fn app_with_surfaces(surfaces: Vec<SceneObject>) -> StudioApp {
-    let mut theme = ThemeDocument::starter();
-    theme.id = "test-theme".into();
-    theme.surfaces = surfaces;
-    theme.prepare_runtime();
-    let history_snapshot = theme.clone();
-    StudioApp {
-        owner: 0,
-        update_status: crate::dashboard::UpdateStatus::Idle,
-        diagnostics: studio_diagnostics::DiagnosticsView::new(),
-        page: Page::Studio,
-        // Pin English so UI text assertions do not follow the system language.
-        settings: {
-            let mut settings = SettingsFile::default();
-            settings.language = Some("en-US".into());
-            settings
-        },
-        synced_poll_interval_ms: SettingsFile::default().poll_interval_ms,
-        synced_taskbar_lock: false,
-        poll_interval_editor_generation: 0,
-        startup_enabled: false,
-        theme,
-        theme_path: None,
-        available_themes: AvailableThemesCache::new(theme_engine::themes_directory()),
-        selection: Selection::Surface(0),
-        preview: None,
-        preview_dirty: true,
-        preview_renderer: PreviewRenderer::new(egui::Context::default()),
-        preview_generation: 0,
-        preview_render_key: None,
-        usage: None,
-        usage_poll_ok: false,
-        usage_has_error: false,
-        last_cache_read: Instant::now(),
-        next_preview_countdown_refresh: None,
-        next_preview_clock_refresh: None,
-        dirty: false,
-        live_apply: DEFAULT_LIVE_APPLY,
-        zoom: 1.0,
-        preview_pan: egui::Vec2::ZERO,
-        undo_stack: Vec::new(),
-        redo_stack: Vec::new(),
-        history_snapshot,
-        scene_width: DEFAULT_SCENE_WIDTH,
-        inspector_width: DEFAULT_INSPECTOR_WIDTH,
-        hovered_scene_item: None,
-        helper: None,
-        preview_mouse_overrides: HashMap::new(),
-        preview_hover_target: None,
-        preview_pending_click: None,
-        asset_picker: None,
-        asset_thumbnails: HashMap::new(),
-        asset_page_filter: String::new(),
-        asset_page_selected: None,
-        asset_error: None,
-        settings_error: None,
-        theme_error: None,
-        pending_unsaved_action: None,
-        asset_delete_confirmation: None,
-        new_theme_name: None,
-        duplicate_theme_name: None,
-        delete_theme_confirmation: None,
-        context_menu: context_menu::classic_context_menu(),
-        context_menu_path: None,
-        context_menu_dirty: false,
-        context_menu_selection: None,
-        delete_context_menu_confirmation: None,
-    }
-}
-
 mod monitor_reconnection {
     use super::*;
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -577,12 +278,9 @@ mod monitor_reconnection {
     #[test]
     fn dashboard_reconnects_after_monitor_replacement_and_preserves_edits() {
         let original = MonitorWindow::new();
-        let mut app = app_with_surfaces(vec![root("root")]);
+        let mut app = test_app();
         app.owner = original.owner();
-        app.dirty = true;
         app.theme.name = "Unsaved theme".into();
-        app.undo_stack.push(app.theme.clone());
-        app.context_menu_dirty = true;
         app.settings.poll_interval_ms = POLL_5_MIN;
         drop(original);
 
@@ -599,10 +297,7 @@ mod monitor_reconnection {
             app.update_status,
             crate::dashboard::UpdateStatus::Available("3.0.0".into())
         );
-        assert!(app.dirty);
         assert_eq!(app.theme.name, "Unsaved theme");
-        assert_eq!(app.undo_stack.len(), 1);
-        assert!(app.context_menu_dirty);
         assert_eq!(app.settings.poll_interval_ms, POLL_5_MIN);
         app.request_refresh();
         assert!(app.settings_error.is_none());
@@ -612,7 +307,7 @@ mod monitor_reconnection {
     #[test]
     fn dashboard_commands_reconnect_before_periodic_refresh() {
         let original = MonitorWindow::new();
-        let mut app = app_with_surfaces(vec![root("root")]);
+        let mut app = test_app();
         app.owner = original.owner();
         drop(original);
         let replacement = MonitorWindow::new();
@@ -714,9 +409,44 @@ mod monitor_reconnection {
 }
 
 #[test]
+fn selector_excludes_retired_managed_theme_and_user_theme_persists() {
+    let managed = theme_engine::themes_directory();
+    std::fs::create_dir_all(&managed).unwrap();
+    let retired = managed.join("classic-vertical.json");
+    let user_directory = tempfile::tempdir().unwrap();
+    let user_theme = user_directory.path().join("classic-vertical.json");
+    let mut theme = ThemeDocument::starter();
+    theme.id = "user-theme".into();
+    theme.name = "User theme".into();
+    app_settings::write_json_atomic(&retired, &theme).unwrap();
+    app_settings::write_json_atomic(&user_theme, &theme).unwrap();
+
+    let mut app = test_app();
+    app.theme_path = Some(retired.clone());
+    assert!(!app
+        .available_themes()
+        .iter()
+        .any(|entry| entry.path == retired));
+    app.activate_theme(user_theme.clone());
+    assert!(app.theme_error.is_none());
+    assert!(app
+        .available_themes()
+        .iter()
+        .any(|entry| entry.path == user_theme));
+
+    let mut reloaded = StudioApp::new_with_context(&egui::Context::default(), 0, Page::Settings);
+    assert_eq!(reloaded.theme_path.as_deref(), Some(user_theme.as_path()));
+    assert_eq!(reloaded.theme.name, "User theme");
+    let themes = reloaded.available_themes();
+    assert!(themes.iter().any(|entry| entry.path == user_theme));
+    assert!(!themes.iter().any(|entry| entry.path == retired));
+    assert!(retired.exists());
+}
+
+#[test]
 fn available_themes_keeps_current_external_theme_fresh_without_stale_fallbacks() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = app_with_surfaces(vec![root("root")]);
+    let mut app = test_app();
     app.available_themes = AvailableThemesCache::new(directory.path().join("library"));
     let first_path = directory.path().join("first.json");
     app.theme_path = Some(first_path.clone());
@@ -739,7 +469,7 @@ fn available_themes_keeps_current_external_theme_fresh_without_stale_fallbacks()
 fn diagnostics_page_has_logging_controls_and_menu_version() {
     let context = egui::Context::default();
     configure_style(&context, LanguageId::English);
-    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut app = test_app();
     app.page = Page::Diagnostics;
     let mut output = context.run_ui(
         egui::RawInput {
@@ -770,7 +500,10 @@ fn diagnostics_page_has_logging_controls_and_menu_version() {
         collect_text(&shape.shape, &mut text);
     }
     output.textures_delta.clear();
-    assert!(text.find("Assets").unwrap() < text.find("Diagnostics").unwrap());
+    assert!(text.find("Settings").unwrap() < text.find("Diagnostics").unwrap());
+    assert!(!text.contains("Theme Studio"));
+    assert!(!text.contains("Context Menus"));
+    assert!(!text.contains("Assets"));
     assert!(text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
     assert!(text.contains("Logging"));
     assert!(text.contains("Write diagnostic events to"));
@@ -790,15 +523,13 @@ fn diagnostics_page_has_logging_controls_and_menu_version() {
 
 #[test]
 fn context_menu_frequency_replaces_custom_dashboard_value_and_edit_buffer() {
-    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut app = test_app();
     app.settings.poll_interval_ms = 2 * POLL_1_MIN;
     app.synced_poll_interval_ms = app.settings.poll_interval_ms;
-    app.dirty = true;
 
     app.sync_poll_interval(POLL_5_MIN);
     assert_eq!(app.settings.poll_interval_ms, POLL_5_MIN);
     assert_eq!(app.poll_interval_editor_generation, 1);
-    assert!(app.dirty);
 
     // An unrelated settings edit must not restore the previous two minutes.
     app.settings.usage_countdown = true;
@@ -810,7 +541,7 @@ fn context_menu_frequency_replaces_custom_dashboard_value_and_edit_buffer() {
 
 #[test]
 fn local_frequency_edits_survive_sync_before_save() {
-    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut app = test_app();
     app.sync_poll_interval(POLL_5_MIN);
     let generation = app.poll_interval_editor_generation;
     app.settings.poll_interval_ms = 2 * POLL_1_MIN;
@@ -829,7 +560,7 @@ fn local_frequency_edits_survive_sync_before_save() {
 
 #[test]
 fn menu_taskbar_lock_survives_unrelated_dashboard_edits() {
-    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut app = test_app();
     let mut persisted = SettingsFile::default();
     persisted.lock_taskbar = true;
     app_settings::save_settings(&persisted).unwrap();
@@ -848,7 +579,7 @@ fn menu_taskbar_lock_survives_unrelated_dashboard_edits() {
 
 #[test]
 fn local_taskbar_lock_edits_survive_sync_before_save() {
-    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut app = test_app();
     for saved in [false, true] {
         app.settings.lock_taskbar = saved;
         app.synced_taskbar_lock = saved;
@@ -860,596 +591,6 @@ fn local_taskbar_lock_edits_survive_sync_before_save() {
         app.sync_taskbar_lock(saved);
         assert_eq!(app.settings.lock_taskbar, saved);
     }
-}
-
-#[test]
-fn preview_render_scale_bounds_monitor_sized_themes_to_the_viewport() {
-    let (scale, width, height) = preview_render_scale(3440, 1440, egui::vec2(1200.0, 800.0), 1.0);
-    assert!((scale - 1200.0 / 3440.0).abs() < 0.0001);
-    assert_eq!((width, height), (1200, 502));
-    assert!(u64::from(width) * u64::from(height) < 3440 * 1440 / 8);
-}
-
-#[test]
-fn preview_render_mailbox_keeps_only_the_latest_request() {
-    let request = |generation| PreviewRenderRequest {
-        generation,
-        key: PreviewRenderKey {
-            surface_index: 0,
-            width: 200,
-            height: 100,
-        },
-        theme: ThemeDocument::starter(),
-        usage: None,
-        runtime: ThemeRuntime::default(),
-        scale: 1.0,
-    };
-    let mut mailbox = PreviewRenderMailbox::default();
-    mailbox.replace(request(1));
-    mailbox.replace(request(2));
-    assert_eq!(mailbox.pending.unwrap().generation, 2);
-}
-
-#[test]
-fn preview_renderer_returns_results_from_its_worker_thread() {
-    let renderer = PreviewRenderer::new(egui::Context::default());
-    let mut theme = ThemeDocument::starter();
-    theme.surfaces[0].width = 40.0.into();
-    theme.surfaces[0].height = 20.0.into();
-    renderer.request(PreviewRenderRequest {
-        generation: 7,
-        key: PreviewRenderKey {
-            surface_index: 0,
-            width: 40,
-            height: 20,
-        },
-        theme,
-        usage: None,
-        runtime: ThemeRuntime::default(),
-        scale: 1.0,
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if let Some(result) = renderer.take_latest() {
-            assert_eq!(result.generation, 7);
-            assert_eq!((result.width, result.height), (40, 20));
-            assert_eq!(result.rgba.len(), 40 * 20 * 4);
-            break;
-        }
-        assert!(Instant::now() < deadline, "preview render timed out");
-        std::thread::yield_now();
-    }
-}
-
-#[test]
-fn unchanged_usage_cache_does_not_invalidate_the_preview() {
-    let mut app = app_with_surfaces(vec![root("main")]);
-    let cache = UsageCache {
-        poll_ok: false,
-        ..Default::default()
-    };
-    assert!(app.update_usage_cache(cache.clone()));
-    app.preview_dirty = false;
-    assert!(!app.update_usage_cache(cache));
-    assert!(!app.preview_dirty);
-}
-
-#[test]
-fn preview_countdowns_refresh_on_minute_boundaries_until_the_final_minute() {
-    assert_eq!(
-        preview_countdown_delay(Duration::from_secs(125)),
-        Duration::from_secs(6)
-    );
-    assert_eq!(
-        preview_countdown_delay(Duration::from_secs(119)),
-        Duration::from_secs(60)
-    );
-    assert_eq!(
-        preview_countdown_delay(Duration::from_secs(59)),
-        Duration::from_secs(1)
-    );
-}
-
-#[test]
-fn inspector_controls_use_a_consistent_maximum_width() {
-    assert_eq!(crate::ui::components::layout::control_width(180.0), 180.0);
-    assert_eq!(crate::ui::components::layout::control_width(500.0), 180.0);
-}
-
-#[test]
-fn context_menu_items_can_be_dragged_into_and_out_of_groups() {
-    let mut items = vec![
-        ContextMenuItem::submenu("tools", "Tools", vec![]),
-        ContextMenuItem::action("site", "Website", ContextMenuAction::OpenDashboard),
-    ];
-    let mut selection = Some(vec![1]);
-    assert!(move_context_menu_item_to(
-        &mut items,
-        &[1],
-        &ContextMenuDropTarget::Into(vec![0]),
-        &mut selection,
-    ));
-    assert_eq!(selection, Some(vec![0, 0]));
-    assert!(move_context_menu_item_to(
-        &mut items,
-        &[0, 0],
-        &ContextMenuDropTarget::After(vec![0]),
-        &mut selection,
-    ));
-    assert_eq!(selection, Some(vec![1]));
-    assert_eq!(items[1].id, "site");
-    assert!(move_context_menu_item_to(
-        &mut items,
-        &[1],
-        &ContextMenuDropTarget::Before(vec![0]),
-        &mut selection,
-    ));
-    assert_eq!(selection, Some(vec![0]));
-    assert_eq!(items[0].id, "site");
-}
-
-#[test]
-fn context_menu_item_ids_are_unique_across_nested_items() {
-    let items = vec![ContextMenuItem::submenu(
-        "tools",
-        "Tools",
-        vec![ContextMenuItem::action(
-            "action-1",
-            "Action",
-            ContextMenuAction::OpenDashboard,
-        )],
-    )];
-    assert_eq!(next_context_menu_item_id(&items, "action"), "action-2");
-}
-
-#[test]
-fn context_menu_action_scripts_round_trip_every_action_kind() {
-    let actions = [
-        ContextMenuAction::OpenDashboard,
-        ContextMenuAction::Refresh,
-        ContextMenuAction::SetUpdateFrequency {
-            seconds: POLL_5_MIN_SECONDS,
-        },
-        ContextMenuAction::ToggleProvider {
-            provider: ContextMenuProvider::Codex,
-        },
-        ContextMenuAction::ToggleStartup,
-        ContextMenuAction::ToggleTaskbarLock,
-        ContextMenuAction::ToggleShowPace,
-        ContextMenuAction::ToggleShowFable,
-        ContextMenuAction::ToggleWidget,
-        ContextMenuAction::SetLanguage {
-            language: "en-US".into(),
-        },
-        ContextMenuAction::CheckForUpdates,
-        ContextMenuAction::ToggleLayerRender {
-            target: "main".into(),
-        },
-        ContextMenuAction::LayerActions {
-            actions: "increase(self, width, 10)".into(),
-        },
-        ContextMenuAction::OpenUrl {
-            url: "https://example.com/a?q=1".into(),
-        },
-        ContextMenuAction::Exit,
-    ];
-    for action in actions {
-        let script = context_menu_action_script(&action);
-        assert_eq!(parse_context_menu_action_script(&script), Ok(action));
-    }
-}
-
-#[test]
-fn context_menu_action_script_rejects_multiple_or_unsafe_actions() {
-    assert!(parse_context_menu_action_script("refresh()\nexit()").is_err());
-    assert!(parse_context_menu_action_script("open_url(\"mailto:test@example.com\")").is_err());
-    assert!(parse_context_menu_action_script("open_url(\"file:///temp\")").is_err());
-    assert!(parse_context_menu_action_script("toggle_provider(unknown)").is_err());
-    assert!(parse_context_menu_action_script("reset_position()").is_err());
-    assert_eq!(
-        parse_context_menu_action_script("set_update_frequency(300000)"),
-        Ok(ContextMenuAction::SetUpdateFrequency { seconds: 300 })
-    );
-}
-
-#[test]
-fn text_helper_catalog_only_builds_valid_template_tokens() {
-    let context = DataContext::from_usage(None, &Canvas::default());
-    for value in TEXT_TEMPLATE_VALUES {
-        for format in text_template_formats(value.kind) {
-            let token = text_template_token(value.expression, *format);
-            assert!(
-                theme_engine::validate_template(&token, &context).is_empty(),
-                "invalid helper token: {token}"
-            );
-        }
-    }
-    assert_eq!(
-        text_template_token("claude.session.percentage", TextTemplateFormat::Percentage),
-        "{claude.session.percentage:percent}"
-    );
-    let display = text_template_value("claude.session.display").unwrap();
-    for format in [
-        TextTemplateFormat::UsageLine,
-        TextTemplateFormat::UsageBadge,
-    ] {
-        assert!(text_template_formats(display.kind).contains(&format));
-    }
-}
-
-#[test]
-fn text_helper_only_marks_real_template_tokens_as_expressions() {
-    assert!(!template_has_expression("Plain text"));
-    assert!(!template_has_expression("A literal {{ brace"));
-    assert!(!template_has_expression("An incomplete {value"));
-    assert!(template_has_expression(
-        "Used {claude.session.percentage:percent}"
-    ));
-}
-
-#[test]
-fn reported_limits_are_grouped_with_claude_in_both_editors() {
-    use crate::models::{UsageData, UsageLimit, UsageSection};
-    use crate::providers::ProviderId;
-    let usage = UsageData {
-        limits: vec![UsageLimit {
-            key: "nimbus_quill".into(),
-            kind: "nimbus_quill".into(),
-            label: "nimbus quill".into(),
-            usage: UsageSection {
-                available: true,
-                percentage: 37.0,
-                resets_at: None,
-            },
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-    let data = AppUsageData::from_iter([(ProviderId::Claude, usage)]);
-    let context = DataContext::from_usage(Some(&data), &Canvas::default());
-    let language = LanguageId::English;
-    let choices = text_template_choices(&context, language);
-    let mut seen_claude = false;
-    let mut left_claude = false;
-    for value in &choices {
-        if value.group == "Claude Code" {
-            assert!(!left_claude, "Claude values must be in one group");
-            seen_claude = true;
-        } else if seen_claude {
-            left_claude = true;
-        }
-    }
-    let shown = choices
-        .iter()
-        .find(|value| value.expression == "claude.limits.nimbus_quill.display")
-        .unwrap();
-    assert_eq!(shown.group, "Claude Code");
-    assert_eq!(shown.label, "Nimbus quill — Shown");
-    let token = text_template_token(&shown.expression, TextTemplateFormat::Percentage);
-    assert_eq!(token, "{claude.limits.nimbus_quill.display:percent}");
-    assert_eq!(theme_engine::format_template(&token, &context), "37%");
-    for choice in choices
-        .iter()
-        .filter(|value| value.expression.starts_with("claude.limits."))
-    {
-        for format in text_template_formats(choice.kind) {
-            assert!(theme_engine::validate_template(
-                &text_template_token(&choice.expression, *format),
-                &context
-            )
-            .is_empty());
-        }
-    }
-
-    // A refresh can remove a quota while its format picker remains open.
-    let empty = DataContext::from_usage(None, &Canvas::default());
-    let missing = text_template_choice(&shown.expression, &empty, language).unwrap();
-    assert_eq!(missing.expression, shown.expression);
-    assert!(matches!(
-        missing.kind,
-        TextTemplateValueKind::DisplayPercentage
-    ));
-}
-
-#[test]
-fn text_helper_lists_reported_quotas_with_provider_filters() {
-    let language = LanguageId::English;
-    let mut data = DataContext::from_usage(None, &Canvas::default());
-    data.insert("claude.limits.nimbus_quill.available", 1.0);
-    data.insert("claude.limits.nimbus_quill.percentage", 37.0);
-    data.insert_string("claude.limits.nimbus_quill.label", "nimbus quill");
-    let entries = value_entries(&data, language, ValueSyntax::Template);
-    let used = entries
-        .iter()
-        .find(|entry| entry.id == "claude.limits.nimbus_quill.percentage")
-        .expect("reported quota is listed");
-    assert_eq!(used.group, "Claude Code · Nimbus quill");
-    assert_eq!(used.label, "Used");
-    assert_eq!(used.value.as_deref(), Some("37%"));
-    assert_eq!(used.scope, Some("claude"));
-    assert_eq!(used.category, "Usage");
-    assert!(entries
-        .iter()
-        .filter(|entry| entry.id.contains(".reset."))
-        .all(|entry| entry.category == "Resets"));
-
-    let context = egui::Context::default();
-    configure_style(&context, language);
-    let mut state = HelperState::new(String::new());
-    state.search = "nimbus".into();
-    let scopes = helper_scopes(language);
-    let mut output = context.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1200.0, 900.0),
-            )),
-            ..Default::default()
-        },
-        |ui| {
-            show_helper(
-                ui,
-                &mut state,
-                HelperView {
-                    kind_icon: LucideIcon::Type,
-                    kind: "Text",
-                    description: "",
-                    hint: "",
-                    code_editor: false,
-                    editor_height: 64.0,
-                    categories: &[],
-                    scopes: &scopes,
-                    entries: &entries,
-                },
-                language,
-                |_| HelperStatus::Valid {
-                    message: "Template is valid".into(),
-                    result: None,
-                },
-                None,
-                |_, entry, _| {
-                    Ok(HelperInsertion::new(
-                        text_template_token(&entry.id, TextTemplateFormat::Percentage),
-                        InsertMode::Inline,
-                    ))
-                },
-            );
-        },
-    );
-    fn collect(shape: &egui::epaint::Shape, text: &mut String) {
-        match shape {
-            egui::epaint::Shape::Text(shape) => {
-                text.push_str(&shape.galley.job.text);
-                text.push('\n');
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    collect(shape, text);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut text = String::new();
-    for shape in &output.shapes {
-        collect(&shape.shape, &mut text);
-    }
-    output.textures_delta.clear();
-    assert!(text.contains("Claude Code"));
-    assert!(text.contains("Claude Code · Nimbus quill"));
-    assert!(text.contains("Used"));
-    assert!(text.contains("37%"));
-    assert!(text.contains("Insert"));
-    assert!(!text.contains("Codex"));
-    assert!(state
-        .selected
-        .as_deref()
-        .is_some_and(|id| id.contains("nimbus_quill")));
-}
-
-#[test]
-fn expression_and_text_helpers_offer_the_same_values() {
-    let mut data = DataContext::from_usage(None, &Canvas::default());
-    data.insert("claude.limits.nimbus_quill.available", 1.0);
-    data.insert("claude.limits.nimbus_quill.percentage", 37.0);
-    let expression = value_entries(&data, LanguageId::English, ValueSyntax::Expression);
-    let template = value_entries(&data, LanguageId::English, ValueSyntax::Template);
-    for name in [
-        "active.five_hour.percentage",
-        "codex.five_hour.reset.minutes",
-        "claude.weekly.remaining",
-        "claude.weekly.label",
-        "claude.headline.percentage",
-        "opencode.credits.balance",
-        "claude.limits.nimbus_quill.percentage",
-        "claude.limits.nimbus_quill.reset.unix",
-        "time.local.hour",
-        "time.now.unix",
-        "canvas.width",
-        "providers.count",
-        "app.version",
-        "i18n.now",
-        "fn:round",
-        "op:>",
-    ] {
-        for entries in [&expression, &template] {
-            assert!(
-                entries.iter().any(|entry| entry.id == name),
-                "{name} is missing"
-            );
-        }
-    }
-    // Only a text template can show a whole window as a usage summary.
-    assert!(template.iter().any(|entry| entry.id == "claude.session"));
-    assert!(!expression.iter().any(|entry| entry.id == "claude.session"));
-    assert_eq!(
-        template.len(),
-        expression.len()
-            + template
-                .iter()
-                .filter(|entry| !expression.iter().any(|other| other.id == entry.id))
-                .count()
-    );
-    assert!(!expression
-        .iter()
-        .any(|entry| entry.token == "claude.five_hour.percentage"));
-    for entries in [&expression, &template] {
-        let mut ids = entries.iter().map(|entry| &entry.id).collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        assert_eq!(ids.len(), entries.len(), "entry ids are unique");
-    }
-}
-
-#[test]
-fn values_insert_to_suit_the_field_and_the_caret() {
-    let language = LanguageId::English;
-    let data = DataContext::from_usage(None, &Canvas::default());
-    let entries = value_entries(&data, language, ValueSyntax::Template);
-    let entry = |id: &str| entries.iter().find(|entry| entry.id == id).unwrap();
-    let context = egui::Context::default();
-    // `draft` marks the caret with `|`.
-    let insert = |id: &str, syntax: ValueSyntax, draft: &str| {
-        let index = draft.chars().position(|c| c == '|').unwrap();
-        let draft = draft.replace('|', "");
-        let mut forms = HelperForms::default();
-        let mut result = None;
-        run_test_ui(&context, egui::RawInput::default(), |ui| {
-            result = Some(value_details(
-                ui,
-                entry(id),
-                syntax,
-                Caret::new(&draft, index),
-                &mut forms,
-                &data,
-                language,
-            ));
-        });
-        result
-            .unwrap()
-            .map(|insertion| (insertion.text, insertion.mode))
-    };
-    let template = ValueSyntax::Template;
-    assert_eq!(
-        insert("claude.session.reset.unix", template, "Resets |"),
-        Ok((
-            "{claude.session.reset.unix:datetime_short}".into(),
-            InsertMode::Inline
-        ))
-    );
-    assert_eq!(
-        insert("fn:round", template, "Used |"),
-        Ok(("{round(0):0.##}".into(), InsertMode::Inline))
-    );
-    assert_eq!(
-        insert("fn:round", template, "Used {|a:percent}"),
-        Ok(("round(0)".into(), InsertMode::Spaced))
-    );
-    assert!(insert("op:>", template, "Used |").is_err());
-    assert_eq!(
-        insert("op:>", template, "Used {a |:percent}"),
-        Ok((">".into(), InsertMode::Spaced))
-    );
-    assert_eq!(
-        insert("claude.session.reset.unix", ValueSyntax::Expression, "|"),
-        Ok(("claude.session.reset.unix".into(), InsertMode::Spaced))
-    );
-
-    // Actions take values only where an expression is accepted.
-    let action = ValueSyntax::Action;
-    assert_eq!(
-        insert("canvas.width", action, "set(self, width, |)"),
-        Ok(("canvas.width".into(), InsertMode::Spaced))
-    );
-    assert_eq!(
-        insert(
-            "fn:round",
-            action,
-            "show_dashboard()\nincrease(\"bar\", x, 10 * |)"
-        ),
-        Ok(("round(0)".into(), InsertMode::Spaced))
-    );
-    assert_eq!(
-        insert(
-            "op:*",
-            action,
-            r#"layer_actions("set(\"bar\", width, 10 |)")"#
-        ),
-        Ok(("*".into(), InsertMode::Spaced))
-    );
-    assert!(insert("canvas.width", action, "set(self, |width, 1)").is_err());
-    assert!(insert("canvas.width", action, "show_dashboard()|").is_err());
-    assert!(insert("op:*", action, "|").is_err());
-}
-
-#[test]
-fn duplicating_layers_remaps_mouse_action_targets() {
-    let mut source = object("source", None);
-    source.mouse_events = Some(MouseEvents {
-        click: "set(\"target\", render, false)".into(),
-        ..Default::default()
-    });
-    let target = object("target", None);
-    let mut objects = vec![source, target];
-    remap_scene_ids(&mut objects, &std::collections::HashSet::new(), true);
-    let handler = &objects[0].mouse_events.as_ref().unwrap().click;
-    assert!(!handler.contains("\"target\""));
-    assert!(handler.contains(&format!("\"{}\"", objects[1].id)));
-}
-
-#[test]
-fn blank_theme_starts_writable_with_one_empty_surface() {
-    let theme = blank_theme("New theme");
-
-    assert_eq!(theme.name, "New theme");
-    assert!(!theme.is_builtin());
-    assert_eq!(theme.surfaces.len(), 1);
-    assert!(matches!(theme.surfaces[0].content, SceneContent::None));
-    assert!(theme.surfaces[0].children.is_empty());
-    assert!(theme.validate().is_empty());
-}
-
-#[test]
-fn searchable_dropdown_filter_is_case_insensitive_and_matches_partial_names() {
-    let matches = crate::ui::components::searchable_dropdown::option_matches;
-    assert!(matches("Segoe UI Variable Text", "segoe ui"));
-    assert!(matches("Consolas", ""));
-    assert!(!matches("Consolas", "arial"));
-}
-
-#[test]
-fn live_apply_starts_disabled() {
-    const { assert!(!DEFAULT_LIVE_APPLY) };
-}
-
-#[test]
-fn dirty_theme_defers_theme_switch_until_the_user_decides() {
-    let mut app = app_with_surfaces(vec![root("alpha")]);
-    let requested = PathBuf::from("another-theme.json");
-    app.dirty = true;
-
-    app.request_activate_theme(requested.clone());
-
-    assert_eq!(
-        app.pending_unsaved_action,
-        Some(PendingUnsavedAction::ActivateTheme(requested))
-    );
-    assert_eq!(app.theme.surfaces[0].name, "alpha");
-}
-
-#[test]
-fn dirty_theme_defers_new_theme_until_the_user_decides() {
-    let mut app = app_with_surfaces(vec![root("alpha")]);
-    app.dirty = true;
-
-    app.request_new_theme();
-
-    assert_eq!(
-        app.pending_unsaved_action,
-        Some(PendingUnsavedAction::NewTheme)
-    );
-    assert!(app.new_theme_name.is_none());
 }
 
 #[test]
@@ -1469,9 +610,8 @@ fn version_text_and_trailing_icon_share_one_update_button() {
         for click_icon in [false, true] {
             let context = egui::Context::default();
             configure_style(&context, LanguageId::English);
-            let mut app = app_with_surfaces(vec![root("alpha")]);
+            let mut app = test_app();
             app.update_status = status.clone();
-            app.dirty = true;
             let mut rect = egui::Rect::NOTHING;
             run_test_ui(&context, egui::RawInput::default(), |ui| {
                 rect = footer_button(&mut app, ui).rect;
@@ -1575,13 +715,11 @@ fn version_text_and_trailing_icon_share_one_update_button() {
             run_test_ui(&context, input, |ui| {
                 footer_button(&mut app, ui);
             });
-            assert_eq!(
-                app.pending_unsaved_action,
-                Some(PendingUnsavedAction::Update {
-                    install: matches!(status, crate::dashboard::UpdateStatus::Available(_)),
-                }),
-            );
-            assert!(app.theme_error.is_none());
+            assert!(app
+                .theme_error
+                .as_deref()
+                .unwrap()
+                .contains("not connected"));
         }
     }
 }
@@ -1592,17 +730,16 @@ fn update_button_ignores_repeated_clicks_while_busy() {
         crate::dashboard::UpdateStatus::Checking,
         crate::dashboard::UpdateStatus::Applying,
     ] {
-        let mut app = app_with_surfaces(vec![root("alpha")]);
+        let mut app = test_app();
         app.update_status = status;
         app.request_update_action();
         assert!(app.theme_error.is_none());
-        assert!(app.pending_unsaved_action.is_none());
     }
 }
 
 #[test]
 fn disconnected_update_button_reports_error_without_staying_busy() {
-    let mut app = app_with_surfaces(vec![root("alpha")]);
+    let mut app = test_app();
     app.request_update_action();
     assert!(app
         .theme_error
@@ -1610,238 +747,4 @@ fn disconnected_update_button_reports_error_without_staying_busy() {
         .unwrap()
         .contains("not connected"));
     assert!(!app.update_status.is_busy());
-}
-
-#[test]
-fn save_failure_remains_dirty_and_surfaces_the_error() {
-    let mut app = app_with_surfaces(vec![root("")]);
-    app.dirty = true;
-
-    assert!(!app.save_theme());
-    assert!(app.dirty);
-    assert!(app
-        .theme_error
-        .as_deref()
-        .is_some_and(|error| error.contains("Unable to save theme")));
-}
-
-#[test]
-fn add_layer_inserts_beside_the_selected_root() {
-    let mut app = app_with_surfaces(vec![root("alpha"), root("beta")]);
-    app.selection = Selection::Surface(0);
-
-    app.add_layer();
-
-    assert_eq!(app.theme.surfaces.len(), 3);
-    assert_eq!(app.theme.surfaces[0].name, "alpha");
-    assert_eq!(app.theme.surfaces[2].name, "beta");
-    assert_eq!(app.selection, Selection::Surface(1));
-}
-
-#[test]
-fn add_layer_inserts_beside_the_selected_child_at_the_same_level() {
-    let mut surface = root("surface");
-    surface.children = vec![
-        object("parent", None),
-        object("selected", Some("parent")),
-        object("existing-sibling", Some("parent")),
-    ];
-    let mut app = app_with_surfaces(vec![surface]);
-    app.selection = Selection::Object(0, 1);
-
-    app.add_layer();
-
-    assert_eq!(app.theme.surfaces[0].children.len(), 4);
-    assert_eq!(
-        app.theme.surfaces[0].children[2].parent.as_deref(),
-        Some("parent")
-    );
-    assert_eq!(app.theme.surfaces[0].children[3].name, "existing-sibling");
-    assert_eq!(app.selection, Selection::Object(0, 2));
-}
-
-#[test]
-fn add_layer_falls_back_to_the_top_for_an_invalid_selection() {
-    let mut app = app_with_surfaces(vec![root("alpha"), root("beta")]);
-    app.selection = Selection::Surface(usize::MAX);
-
-    app.add_layer();
-
-    assert_eq!(app.theme.surfaces[1].name, "alpha");
-    assert_eq!(app.selection, Selection::Surface(0));
-}
-
-#[test]
-fn surfaces_can_become_children_and_be_promoted_again() {
-    let alpha = root("alpha");
-    let mut beta = root("beta");
-    beta.children.push(object("beta-child", None));
-    let mut app = app_with_surfaces(vec![alpha, beta]);
-
-    assert!(app.apply_scene_drop(
-        Selection::Surface(1),
-        SceneDropTarget::Into(Selection::Surface(0)),
-    ));
-    assert_eq!(app.theme.surfaces.len(), 1);
-    let beta_index = app.theme.surfaces[0]
-        .children
-        .iter()
-        .position(|object| object.name == "beta")
-        .unwrap();
-    let beta_id = app.theme.surfaces[0].children[beta_index].id.clone();
-    assert_eq!(app.theme.surfaces[0].children[beta_index].parent, None);
-    assert!(app.theme.surfaces[0]
-        .children
-        .iter()
-        .any(|object| object.name == "beta-child"
-            && object.parent.as_deref() == Some(beta_id.as_str())));
-    assert!(app.theme.validate().is_empty());
-
-    assert!(app.apply_scene_drop(Selection::Object(0, beta_index), SceneDropTarget::RootAt(1),));
-    assert_eq!(app.theme.surfaces.len(), 2);
-    assert_eq!(app.theme.surfaces[1].name, "beta");
-    assert!(app.theme.surfaces[1]
-        .children
-        .iter()
-        .any(|object| object.name == "beta-child" && object.parent.is_none()));
-    assert!(app.theme.validate().is_empty());
-}
-
-#[test]
-fn scene_drop_reparents_reorders_and_rejects_cycles() {
-    let mut surface = root("surface");
-    surface.children = vec![object("a", None), object("b", None), object("c", None)];
-    let mut app = app_with_surfaces(vec![surface]);
-
-    assert!(app.apply_scene_drop(
-        Selection::Object(0, 1),
-        SceneDropTarget::Into(Selection::Object(0, 0)),
-    ));
-    let a = app.theme.surfaces[0]
-        .children
-        .iter()
-        .position(|object| object.name == "a")
-        .unwrap();
-    let b = app.theme.surfaces[0]
-        .children
-        .iter()
-        .position(|object| object.name == "b")
-        .unwrap();
-    assert_eq!(
-        app.theme.surfaces[0].children[b].parent.as_deref(),
-        Some("a")
-    );
-    assert!(!app.apply_scene_drop(
-        Selection::Object(0, a),
-        SceneDropTarget::Into(Selection::Object(0, b)),
-    ));
-
-    let c = app.theme.surfaces[0]
-        .children
-        .iter()
-        .position(|object| object.name == "c")
-        .unwrap();
-    assert!(app.apply_scene_drop(
-        Selection::Object(0, b),
-        SceneDropTarget::After(Selection::Object(0, c)),
-    ));
-    let names: Vec<&str> = app.theme.surfaces[0]
-        .children
-        .iter()
-        .map(|object| object.name.as_str())
-        .collect();
-    assert_eq!(names, vec!["a", "c", "b"]);
-    assert!(app.theme.surfaces[0].children[2].parent.is_none());
-    assert!(app.theme.validate().is_empty());
-}
-
-#[test]
-fn duplicate_and_delete_include_the_selected_subtree() {
-    let mut surface = root("surface");
-    surface.children = vec![object("a", None), object("b", Some("a"))];
-    let mut app = app_with_surfaces(vec![surface]);
-    app.selection = Selection::Object(0, 0);
-
-    assert!(app.duplicate_selection());
-    assert_eq!(app.theme.surfaces[0].children.len(), 4);
-    assert!(app.theme.validate().is_empty());
-    assert!(app.delete_selection());
-    assert_eq!(app.theme.surfaces[0].children.len(), 2);
-    assert!(app.theme.validate().is_empty());
-}
-
-#[test]
-fn scene_preview_colors_preserve_alpha_and_choose_readable_icons() {
-    let mut light = Paint::new("#FFFFFFFF");
-    light.opacity = 0.5.into();
-    let light = scene_paint_color(&light);
-    assert_eq!(light.a(), 128);
-    assert_eq!(
-        scene_icon_contrast_color(egui::Color32::WHITE),
-        egui::Color32::BLACK
-    );
-
-    let dark = scene_paint_color(&Paint::new("#101214FF"));
-    assert_eq!(scene_icon_contrast_color(dark), egui::Color32::WHITE);
-    assert_eq!(
-        scene_icon_contrast_color(egui::Color32::TRANSPARENT),
-        egui::Color32::WHITE
-    );
-
-    let mut layout_object = object("layout", None);
-    assert_eq!(
-        scene_object_icon(&layout_object).unicode(),
-        LucideIcon::SquareDashed.unicode()
-    );
-    layout_object.layout = ChildLayout::Row;
-    assert_eq!(
-        scene_object_icon(&layout_object).unicode(),
-        LucideIcon::SquareDashedText.unicode()
-    );
-    layout_object.layout = ChildLayout::Column;
-    assert_eq!(
-        scene_object_icon(&layout_object).unicode(),
-        LucideIcon::SquareDashedKanban.unicode()
-    );
-
-    let text_paint = Paint::new("#4A90E2FF");
-    layout_object.content = SceneContent::Text {
-        template: "Text".into(),
-        font_family: "Segoe UI".into(),
-        font_size: 16.0.into(),
-        weight: FontWeight::Regular,
-        rendering: FontRendering::Antialiased,
-        contrast: 1.0.into(),
-        align: TextAlign::Left,
-        color: text_paint.clone(),
-    };
-    assert_eq!(
-        scene_object_icon_color(&layout_object, egui::Color32::WHITE),
-        scene_paint_color(&text_paint)
-    );
-}
-
-#[test]
-fn scene_preview_stretches_the_entire_layer_background() {
-    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(24.0, 24.0));
-    let stretch = scene_preview_stretch(bounds, egui::vec2(250.0, 46.0));
-    assert!((stretch.x - 0.096).abs() < 0.001);
-    assert!((stretch.y - 24.0 / 46.0).abs() < 0.001);
-    assert_ne!(stretch.x, stretch.y);
-
-    let outline = scene_preview_outline(bounds, 23.0 * stretch.x, 23.0 * stretch.y);
-    let outline_bounds = egui::Rect::from_points(&outline);
-    assert!((outline_bounds.width() - bounds.width()).abs() < 0.001);
-    assert!((outline_bounds.height() - bounds.height()).abs() < 0.001);
-
-    let start = egui::Color32::GREEN;
-    let end = egui::Color32::RED;
-    assert_eq!(
-        scene_preview_gradient_color(bounds.left_center(), bounds, start, end, 0.0),
-        start
-    );
-    assert_eq!(
-        scene_preview_gradient_color(bounds.right_center(), bounds, start, end, 0.0),
-        end
-    );
 }

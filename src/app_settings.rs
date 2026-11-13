@@ -604,7 +604,6 @@ mod tests {
             usage_cache_path(),
             codex_credits_path(),
             crate::theme_engine::themes_directory(),
-            crate::theme_engine::assets_directory(),
             crate::context_menu::context_menus_directory(),
             crate::theme_engine::ensure_starter_theme().unwrap(),
             crate::context_menu::ensure_builtin_context_menus().unwrap(),

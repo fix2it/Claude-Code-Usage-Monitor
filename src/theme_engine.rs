@@ -1,9 +1,3 @@
-//! Versioned custom theme documents, expression evaluation, and live data binding.
-//!
-//! The renderer deliberately consumes this module's resolved scene rather than the
-//! persisted structs directly. That keeps malformed user input recoverable and
-//! makes theme files portable across machines and future renderer revisions.
-
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -19,45 +13,12 @@ use crate::models::AppUsageData;
 use crate::providers::{ProviderId, ProviderSet, PROVIDER_DESCRIPTORS};
 
 pub const THEME_SCHEMA_VERSION: u32 = 1;
-pub const CLASSIC_THEME_ID: &str = "classic-usage-widget";
 pub const COMPACT_FLUENT_QUAD_THEME_ID: &str = "compact-fluent-quad";
-pub const CLASSIC_VERTICAL_THEME_ID: &str = "classic-vertical";
-pub const MINECRAFT_THEME_ID: &str = "theme-minecraft";
 
-const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[
-    (
-        CLASSIC_THEME_ID,
-        include_str!(concat!(env!("OUT_DIR"), "/classic-usage-widget.json")),
-    ),
-    (
-        COMPACT_FLUENT_QUAD_THEME_ID,
-        include_str!(concat!(env!("OUT_DIR"), "/compact-fluent-quad.json")),
-    ),
-    (
-        CLASSIC_VERTICAL_THEME_ID,
-        include_str!(concat!(env!("OUT_DIR"), "/classic-vertical.json")),
-    ),
-];
-
-/// Bundled starting points are copied into the managed library only when they
-/// are missing. Their ids are deliberately excluded from `is_builtin_theme_id`
-/// so users can edit, rename, export, or delete them in Theme Studio.
-const BUNDLED_EDITABLE_THEME_SOURCES: &[(&str, &str)] = &[(
-    MINECRAFT_THEME_ID,
-    include_str!(concat!(env!("OUT_DIR"), "/minecraft-codex.json")),
+const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[(
+    COMPACT_FLUENT_QUAD_THEME_ID,
+    include_str!(concat!(env!("OUT_DIR"), "/compact-fluent-quad.json")),
 )];
-const BUNDLED_EDITABLE_INSTALL_MARKER: &str = ".minecraft-theme-installed";
-
-const BUNDLED_THEME_ASSETS: &[(&str, &[u8])] = &[
-    (
-        "minecraft-empty.png",
-        include_bytes!("themes/assets/minecraft-empty.png"),
-    ),
-    (
-        "minecraft-full.png",
-        include_bytes!("themes/assets/minecraft-full.png"),
-    ),
-];
 
 const REMOVED_BUILTIN_THEME_IDS: &[&str] = &[
     "mission-control",
@@ -394,16 +355,6 @@ impl MouseEvents {
             MouseEventKind::MouseLeave => &self.mouse_leave,
         }
     }
-
-    pub fn handler_mut(&mut self, event: MouseEventKind) -> &mut String {
-        match event {
-            MouseEventKind::Click => &mut self.click,
-            MouseEventKind::DoubleClick => &mut self.double_click,
-            MouseEventKind::RightClick => &mut self.right_click,
-            MouseEventKind::MouseEnter => &mut self.mouse_enter,
-            MouseEventKind::MouseLeave => &mut self.mouse_leave,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -427,16 +378,6 @@ pub enum MouseActionProperty {
 }
 
 impl MouseActionProperty {
-    pub const ALL: [Self; 7] = [
-        Self::Render,
-        Self::Visibility,
-        Self::X,
-        Self::Y,
-        Self::Width,
-        Self::Height,
-        Self::Rotation,
-    ];
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Render => "render",
@@ -739,120 +680,6 @@ fn split_action_arguments(source: &str) -> Result<Vec<String>, String> {
     }
     result.push(current.trim().to_string());
     Ok(result)
-}
-
-/// How text inserted into an action value must be written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActionValue {
-    /// Directly in an action script.
-    Bare,
-    /// Inside the quoted script of a context menu `layer_actions("…")`, where
-    /// quotes and backslashes are escaped.
-    Quoted,
-}
-
-/// Whether byte offset `caret` in an action script falls in the value of a
-/// `set`, `increase` or `decrease` action, where any expression is accepted.
-/// The script inside a context menu `layer_actions("…")` is searched too.
-pub fn action_value_at(source: &str, caret: usize) -> Option<ActionValue> {
-    let (name, args, index) = action_argument_at(source, caret)?;
-    match name.as_str() {
-        "set" | "increase" | "decrease" => {
-            (index > 0 && index + 1 == args.len()).then_some(ActionValue::Bare)
-        }
-        "layer_actions" => {
-            let argument = args[index].clone();
-            let open = argument.start + source[argument.clone()].find('"')?;
-            let close = source[open + 1..argument.end]
-                .rfind('"')
-                .map_or(argument.end, |offset| open + 1 + offset);
-            if caret <= open || caret > close {
-                return None;
-            }
-            let before = unescape_action_string(&source[open + 1..caret])?;
-            let script = before.clone() + &unescape_action_string(&source[caret..close])?;
-            action_value_at(&script, before.len()).map(|_| ActionValue::Quoted)
-        }
-        _ => None,
-    }
-}
-
-/// The action call around byte offset `caret`: its lowercase name, the byte
-/// ranges of its arguments, and the index of the argument holding the caret.
-fn action_argument_at(
-    source: &str,
-    caret: usize,
-) -> Option<(String, Vec<std::ops::Range<usize>>, usize)> {
-    let mut statement = 0;
-    let mut open = None;
-    let mut args = Vec::new();
-    let mut argument = 0;
-    let mut depth = 0usize;
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, character) in source.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match character {
-            '\\' if quoted => escaped = true,
-            '"' => quoted = !quoted,
-            _ if quoted => {}
-            '(' => {
-                if depth == 0 {
-                    open = Some(index);
-                    argument = index + 1;
-                }
-                depth += 1;
-            }
-            ',' if depth == 1 => {
-                args.push(argument..index);
-                argument = index + 1;
-            }
-            ')' if depth == 1 => {
-                args.push(argument..index);
-                depth = 0;
-                if caret <= index {
-                    break;
-                }
-            }
-            ')' => depth = depth.saturating_sub(1),
-            ';' | '\n' | '\r' if depth == 0 => {
-                if caret <= index {
-                    break;
-                }
-                statement = index + 1;
-                open = None;
-                args.clear();
-            }
-            _ => {}
-        }
-    }
-    let open = open.filter(|open| *open >= statement && *open < caret)?;
-    if depth > 0 {
-        args.push(argument..source.len());
-    }
-    let index = args
-        .iter()
-        .position(|range| range.start <= caret && caret <= range.end)?;
-    let name = source[statement..open].trim().to_ascii_lowercase();
-    Some((name, args, index))
-}
-
-/// Reverses the escaping of a quoted action string, or `None` when `source`
-/// ends partway through an escape.
-fn unescape_action_string(source: &str) -> Option<String> {
-    let mut result = String::with_capacity(source.len());
-    let mut characters = source.chars();
-    while let Some(character) = characters.next() {
-        if character == '\\' {
-            result.push(characters.next()?);
-        } else {
-            result.push(character);
-        }
-    }
-    Some(result)
 }
 
 fn parse_target_property(source: &str) -> Result<(MouseActionTarget, MouseActionProperty), String> {
@@ -1325,6 +1152,7 @@ pub struct RenderedTheme {
     pub height: u32,
     /// Top-down, premultiplied BGRA pixels, represented as 0xAARRGGBB.
     pub pixels: Vec<u32>,
+    #[cfg(test)]
     pub warnings: Vec<String>,
 }
 
@@ -2969,19 +2797,6 @@ impl DataContext {
         self.values.insert(name.to_ascii_lowercase(), value);
     }
 
-    /// Whether a Builder catalogue can be reused. Clock rows are refreshed
-    /// separately because the fractional Unix timestamp changes every frame.
-    pub(crate) fn same_catalogue_data(&self, other: &Self) -> bool {
-        self.strings == other.strings
-            && self.display_metrics == other.display_metrics
-            && self.values.len() == other.values.len()
-            && self.values.iter().all(|(name, value)| {
-                other.values.get(name).is_some_and(|other| {
-                    name.starts_with("time.") || value.to_bits() == other.to_bits()
-                })
-            })
-    }
-
     pub fn get(&self, name: &str) -> Option<f64> {
         if let Some(value) = self.values.get(name).copied() {
             return Some(value);
@@ -3382,6 +3197,7 @@ impl MouseActionExecutionContext<'_> {
     }
 }
 
+#[cfg(test)]
 pub fn execute_mouse_actions(
     theme: &ThemeDocument,
     surface_index: usize,
@@ -3542,21 +3358,16 @@ impl ThemeDocument {
         is_builtin_theme_id(&self.id)
     }
 
-    pub fn is_builtin_classic(&self) -> bool {
-        self.id == CLASSIC_THEME_ID
-    }
-
     /// Identifies the short-lived first Studio approximation so it can be
     /// upgraded without replacing themes users have renamed or repurposed.
     pub fn is_obsolete_studio_starter(&self) -> bool {
         (self.id == "classic-segments" && self.name == "Classic Segments")
             || (self.id == "midnight-glass" && self.name == "Midnight Glass")
-            || (self.id == "classic-usage-widget" && self.name == "Classic Usage Widget")
     }
 
     pub fn starter() -> Self {
         let mut theme: Self = serde_json::from_str(BUILTIN_THEME_SOURCES[0].1)
-            .expect("built-in Classic theme must be valid JSON");
+            .expect("built-in Compact Fluent Quad theme must be valid JSON");
         theme.prepare_runtime();
         theme
     }

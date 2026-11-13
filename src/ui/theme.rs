@@ -260,10 +260,6 @@ pub(crate) fn accent() -> egui::Color32 {
     egui::Color32::from_rgb(217, 119, 87)
 }
 
-pub(crate) fn accent_hover_border() -> egui::Color32 {
-    egui::Color32::from_rgb(157, 73, 45)
-}
-
 pub(crate) fn menu_surface() -> egui::Color32 {
     egui::Color32::from_rgb(32, 32, 32)
 }
@@ -274,26 +270,6 @@ pub(crate) fn muted() -> egui::Color32 {
 
 pub(crate) fn selected_menu_fill() -> egui::Color32 {
     egui::Color32::from_rgb(49, 49, 49)
-}
-
-pub(crate) fn helper_surface() -> egui::Color32 {
-    egui::Color32::from_rgb(21, 22, 26)
-}
-
-pub(crate) fn helper_card_surface() -> egui::Color32 {
-    egui::Color32::from_rgb(24, 25, 29)
-}
-
-pub(crate) fn helper_border() -> egui::Color32 {
-    egui::Color32::from_rgb(48, 50, 57)
-}
-
-pub(crate) fn success() -> egui::Color32 {
-    egui::Color32::from_rgb(78, 201, 143)
-}
-
-pub(crate) fn danger() -> egui::Color32 {
-    egui::Color32::from_rgb(232, 119, 95)
 }
 
 pub(crate) fn toggle_inactive() -> egui::Color32 {
@@ -310,22 +286,6 @@ pub(crate) fn toggle_knob() -> egui::Color32 {
 
 pub(crate) fn toggle_label() -> egui::Color32 {
     egui::Color32::from_rgb(218, 218, 218)
-}
-
-pub(crate) fn anchor_outline() -> egui::Color32 {
-    egui::Color32::from_rgb(128, 131, 140)
-}
-
-pub(crate) fn anchor_idle_fill() -> egui::Color32 {
-    egui::Color32::from_rgb(35, 37, 42)
-}
-
-pub(crate) fn checkerboard_dark() -> egui::Color32 {
-    egui::Color32::from_gray(72)
-}
-
-pub(crate) fn checkerboard_light() -> egui::Color32 {
-    egui::Color32::from_gray(176)
 }
 
 pub(crate) fn section_surface() -> egui::Color32 {
@@ -346,30 +306,6 @@ pub(crate) fn menu_hover() -> egui::Color32 {
 
 pub(crate) fn menu_text() -> egui::Color32 {
     egui::Color32::from_rgb(245, 245, 245)
-}
-
-pub(crate) fn asset_card_selected() -> egui::Color32 {
-    egui::Color32::from_rgb(57, 48, 46)
-}
-
-pub(crate) fn asset_card_surface() -> egui::Color32 {
-    egui::Color32::from_rgb(31, 32, 36)
-}
-
-pub(crate) fn asset_card_border() -> egui::Color32 {
-    egui::Color32::from_rgb(55, 57, 64)
-}
-
-pub(crate) fn asset_preview_surface() -> egui::Color32 {
-    egui::Color32::from_rgb(24, 25, 28)
-}
-
-pub(crate) fn splitter_hover_surface() -> egui::Color32 {
-    egui::Color32::from_rgb(38, 40, 46)
-}
-
-pub(crate) fn splitter_idle() -> egui::Color32 {
-    egui::Color32::from_rgb(65, 68, 76)
 }
 
 #[cfg(test)]

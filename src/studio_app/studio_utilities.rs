@@ -16,32 +16,6 @@ pub(super) fn language_name(language: LanguageId, code: &str) -> &str {
         .map(|(_, name)| name)
         .unwrap_or_else(|| language.text("System default"))
 }
-pub(super) fn unique_id(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    format!(
-        "{}-{}-{}",
-        prefix,
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    )
-}
-
-pub(super) fn blank_theme(name: &str) -> ThemeDocument {
-    let mut theme = ThemeDocument::starter();
-    theme.id = unique_id("theme");
-    theme.name = name.to_string();
-    theme.surfaces = vec![SceneObject::root(
-        unique_id("surface"),
-        "Surface",
-        320.0.into(),
-        100.0.into(),
-        Placement::default(),
-    )];
-    theme.prepare_runtime();
-    theme
-}
-
 pub(super) fn choose_file(owner: isize, title: &str, filter: &str) -> Option<PathBuf> {
     let mut file = [0u16; 32768];
     let filter: Vec<u16> = filter.encode_utf16().collect();
@@ -64,63 +38,6 @@ pub(super) fn choose_file(owner: isize, title: &str, filter: &str) -> Option<Pat
         Some(Path::new(&String::from_utf16_lossy(&file[..len])).to_path_buf())
     } else {
         None
-    }
-}
-
-pub(super) fn choose_save_file(
-    owner: isize,
-    title: &str,
-    filter: &str,
-    default_name: &str,
-    default_extension: &str,
-) -> Option<PathBuf> {
-    let mut file = [0u16; 32768];
-    let default_name: Vec<u16> = default_name.encode_utf16().collect();
-    let copy_len = default_name.len().min(file.len().saturating_sub(1));
-    file[..copy_len].copy_from_slice(&default_name[..copy_len]);
-    let filter: Vec<u16> = filter.encode_utf16().collect();
-    let title: Vec<u16> = format!("{title}\0").encode_utf16().collect();
-    let default_extension: Vec<u16> = format!("{default_extension}\0").encode_utf16().collect();
-    let mut dialog = OPENFILENAMEW {
-        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
-        hwndOwner: HWND(owner as *mut _),
-        lpstrFilter: PCWSTR(filter.as_ptr()),
-        nFilterIndex: 1,
-        lpstrFile: PWSTR(file.as_mut_ptr()),
-        nMaxFile: file.len() as u32,
-        lpstrTitle: PCWSTR(title.as_ptr()),
-        lpstrDefExt: PCWSTR(default_extension.as_ptr()),
-        Flags: OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST,
-        ..Default::default()
-    };
-    if unsafe { GetSaveFileNameW(&mut dialog) }.as_bool() {
-        let len = file
-            .iter()
-            .position(|value| *value == 0)
-            .unwrap_or(file.len());
-        Some(Path::new(&String::from_utf16_lossy(&file[..len])).to_path_buf())
-    } else {
-        None
-    }
-}
-
-pub(super) fn safe_file_name(value: &str, fallback: &str) -> String {
-    let mut result = String::new();
-    let mut separator = false;
-    for character in value.trim().chars() {
-        if character.is_alphanumeric() || matches!(character, '-' | '_') {
-            result.push(character);
-            separator = false;
-        } else if !separator && !result.is_empty() {
-            result.push('-');
-            separator = true;
-        }
-    }
-    let result = result.trim_matches('-');
-    if result.is_empty() {
-        fallback.into()
-    } else {
-        result.into()
     }
 }
 
@@ -158,6 +75,7 @@ impl AvailableThemesCache {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn invalidate(&mut self) {
         self.next_check = None;
         self.needs_reload = true;
@@ -209,6 +127,9 @@ impl AvailableThemesCache {
                 .iter()
                 .filter_map(|file| {
                     let path = file.path.clone();
+                    if theme_engine::is_removed_managed_theme(&path) {
+                        return None;
+                    }
                     theme_engine::load_theme(&path).ok().map(|theme| {
                         let read_only = theme.is_builtin();
                         let label = if read_only {
@@ -238,7 +159,9 @@ impl StudioApp {
     pub(super) fn available_themes(&mut self) -> Arc<Vec<AvailableTheme>> {
         let mut themes = self.available_themes.snapshot(Instant::now());
         if let Some(path) = &self.theme_path {
-            if !themes.iter().any(|theme| theme.path == *path) {
+            if !theme_engine::is_removed_managed_theme(path)
+                && !themes.iter().any(|theme| theme.path == *path)
+            {
                 // An active theme outside the managed library remains selectable.
                 // Keep this fallback separate so unsaved renames and switches are
                 // reflected immediately without rebuilding the disk cache.
@@ -280,7 +203,9 @@ mod theme_cache_tests {
     use super::*;
 
     fn write_theme(path: &Path, name: &str) {
-        let theme = blank_theme(name);
+        let mut theme = ThemeDocument::starter();
+        theme.id = format!("test-{name}");
+        theme.name = name.to_string();
         app_settings::write_json_atomic(path, &theme).unwrap();
     }
 
@@ -408,5 +333,11 @@ mod theme_cache_tests {
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(library).unwrap();
         assert!(cache.snapshot(now + Duration::from_secs(2)).is_empty());
+    }
+}
+
+pub(super) fn nav(ui: &mut egui::Ui, current: &mut Page, page: Page, title: &str) {
+    if crate::ui::components::navigation::navigation_item(ui, *current == page, title).clicked() {
+        *current = page;
     }
 }

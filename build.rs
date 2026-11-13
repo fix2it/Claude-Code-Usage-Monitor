@@ -40,12 +40,7 @@ fn main() {
 
 fn build_themes() {
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR was not set"));
-    for name in [
-        "classic-usage-widget.json",
-        "compact-fluent-quad.json",
-        "classic-vertical.json",
-        "minecraft-codex.json",
-    ] {
+    for name in ["compact-fluent-quad.json"] {
         let path = Path::new("src/themes").join(name);
         println!("cargo:rerun-if-changed={}", path.display());
         let source = fs::read(&path)
@@ -411,7 +406,7 @@ fn build_ui_fallback_subset() {
         .unwrap_or_else(|error| panic!("Failed to write {}: {error}", output.display()));
 
     println!(
-        "cargo:warning=UI fallback font subset: {} characters, {} -> {} bytes",
+        "UI fallback font subset: {} characters, {} -> {} bytes",
         codepoints.len(),
         stats.original_size,
         stats.subset_size
@@ -464,7 +459,7 @@ fn build_lucide_subset() {
         .unwrap_or_else(|error| panic!("Failed to write {}: {error}", output.display()));
 
     println!(
-        "cargo:warning=Lucide font subset: {} icons, {} -> {} bytes",
+        "Lucide font subset: {} icons, {} -> {} bytes",
         codepoints.len(),
         stats.original_size,
         stats.subset_size

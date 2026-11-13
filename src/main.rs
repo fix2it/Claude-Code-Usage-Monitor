@@ -6,7 +6,6 @@ mod context_menu;
 mod dashboard;
 mod desktop_compositor;
 mod diagnose;
-mod font_catalog;
 #[cfg(test)]
 mod https_test;
 mod known_folders;
@@ -18,7 +17,6 @@ mod providers;
 mod studio_app;
 mod theme;
 mod theme_engine;
-mod theme_package;
 mod tray_icon;
 mod ui;
 mod updater;

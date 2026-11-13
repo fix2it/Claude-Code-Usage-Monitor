@@ -6,7 +6,6 @@ impl StudioApp {
         let language = self.language();
         let mut changed = false;
         let mut requested_theme = None;
-        let mut open_theme_studio = false;
         let themes = self.available_themes();
         if let Some(error) = &self.settings_error {
             ui.colored_label(egui::Color32::from_rgb(196, 64, 64), error);
@@ -166,7 +165,7 @@ impl StudioApp {
                 setting_row(
                     ui,
                     language.text("Active theme"),
-                    language.text("The widget is managed in Theme Studio"),
+                    language.text("Open a theme"),
                     |ui| {
                         Dropdown::from_id_salt("active_theme")
                             .width(220.0)
@@ -184,17 +183,6 @@ impl StudioApp {
                             });
                     },
                 );
-                setting_separator(ui);
-                setting_row(
-                    ui,
-                    language.text("Theme editor"),
-                    language.text("Create and edit themes"),
-                    |ui| {
-                        if ui.button(language.text("Open Theme Studio")).clicked() {
-                            open_theme_studio = true;
-                        }
-                    },
-                );
             });
         });
         if changed {
@@ -207,14 +195,10 @@ impl StudioApp {
             if new_language != language {
                 configure_style(ui.ctx(), new_language);
             }
-            self.preview_dirty = true;
             self.save_settings();
         }
         if let Some(path) = requested_theme {
-            self.request_activate_theme(path);
-        }
-        if open_theme_studio {
-            self.page = Page::Studio;
+            self.activate_theme(path);
         }
     }
 }
