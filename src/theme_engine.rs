@@ -1185,6 +1185,7 @@ pub struct ThemeRuntime {
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     pub view_mode: u8,
     pub mode_phase: f64,
+    widget_mode_phases: [Option<f64>; 9],
     pub surface_nest: SurfaceNest,
     pub floating_card_opacity: u8,
     pub antigravity_gemini_enabled: bool,
@@ -1217,6 +1218,7 @@ impl Default for ThemeRuntime {
             show_fable: false,
             view_mode: 1,
             mode_phase: 0.0,
+            widget_mode_phases: [None; 9],
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
             antigravity_gemini_enabled: true,
@@ -1266,6 +1268,7 @@ impl ThemeRuntime {
             show_fable: false,
             view_mode: 1,
             mode_phase: 0.0,
+            widget_mode_phases: [None; 9],
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
             antigravity_gemini_enabled: agy,
@@ -1376,6 +1379,22 @@ impl ThemeRuntime {
     pub fn with_mode_phase(mut self, phase: f64) -> Self {
         self.mode_phase = phase.clamp(0.0, 2.0);
         self
+    }
+
+    /// Override the phase for a Compact provider or the separate Fable column.
+    pub fn with_widget_mode_phase(mut self, key: &str, phase: f64) -> Self {
+        if let Some(index) = widget_mode_index(key) {
+            self.widget_mode_phases[index] = Some(phase.clamp(0.0, 2.0));
+        } else {
+            debug_assert!(false, "unknown Compact widget key {key}");
+        }
+        self
+    }
+
+    fn widget_mode_phase(&self, index: usize) -> f64 {
+        self.widget_mode_phases[index]
+            .unwrap_or(self.mode_phase)
+            .clamp(0.0, 2.0)
     }
 
     pub fn with_opencode_state(mut self, opacity: f64) -> Self {
@@ -1571,6 +1590,13 @@ pub const DISPLAY_PROVIDER_KEYS: [&str; 8] = [
     "copilot",
 ];
 
+fn widget_mode_index(key: &str) -> Option<usize> {
+    DISPLAY_PROVIDER_KEYS
+        .iter()
+        .position(|candidate| *candidate == key)
+        .or_else(|| (key == "fable").then_some(FABLE_METRICS_INDEX))
+}
+
 const COMPACT_PERCENT_WIDTH: f64 = 30.0;
 const COMPACT_CURSOR_TEXT_WIDTH: f64 = 80.0;
 const DISPLAY_METRICS_CACHE_CAPACITY: usize = 8;
@@ -1616,7 +1642,6 @@ impl DisplayMetrics {
     }
 
     pub(crate) fn legacy_with_widgets(runtime: ThemeRuntime, widget_count: usize) -> Self {
-        let phases = decompose_mode_phase(runtime.mode_phase);
         let bar = compact_bar_full_width(widget_count);
         let mut metrics = Self {
             providers: [ProviderMetrics::default(); 8],
@@ -1631,10 +1656,11 @@ impl DisplayMetrics {
             COMPACT_PERCENT_WIDTH,
             COMPACT_MARKER_WIDTH,
             COMPACT_ORIGIN_LEGACY,
-            phases,
+            decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
             dual,
         );
         for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
+            let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
             let text_box = if *key == "cursor" {
                 COMPACT_CURSOR_TEXT_WIDTH
             } else {
@@ -1867,6 +1893,7 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
             for hover in [false, true] {
                 let mut variant = runtime;
                 variant.mode_phase = phase;
+                variant.widget_mode_phases = [None; 9];
                 variant.view_mode = view_mode;
                 let (claude, codex, antigravity, opencode, qoder) = if hover {
                     (1.0, 1.0, 0.0, 1.0, 1.0)
@@ -2072,7 +2099,6 @@ pub(crate) fn display_metrics(
     }
 
     let legacy = DisplayMetrics::legacy_with_widgets(runtime, widgets);
-    let phases = decompose_mode_phase(runtime.mode_phase);
     let bar = compact_bar_full_width(widgets);
     let claude_dual = base.get("claude.dual_mode").unwrap_or(0.0) != 0.0;
     let codex_dual = base.get("codex.dual_mode").unwrap_or(0.0) != 0.0;
@@ -2087,10 +2113,11 @@ pub(crate) fn display_metrics(
         percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0),
         fable_marker_box,
         fable_origin,
-        phases,
+        decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
         claude_dual,
     );
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
+        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
         let fallback = legacy.providers[index];
         let text_box = text_advance[index].map_or(fallback.text_box, |advance| advance + 2.0);
         let percent_box =
@@ -2132,9 +2159,9 @@ pub(crate) fn metrics_for_phase(
     mut metrics: DisplayMetrics,
     runtime: ThemeRuntime,
 ) -> DisplayMetrics {
-    let phases = decompose_mode_phase(runtime.mode_phase);
     let bar = compact_bar_full_width(metrics.widget_count);
-    for provider in &mut metrics.providers {
+    for (index, provider) in metrics.providers.iter_mut().enumerate() {
+        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
         provider.text_slide = -provider.text_box * phases.text_collapse;
         provider.row_width = compact_row_width(
             bar,
@@ -2150,7 +2177,7 @@ pub(crate) fn metrics_for_phase(
         metrics.fable.percent_box,
         metrics.fable.marker_box,
         metrics.fable.origin,
-        phases,
+        decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
         claude_dual(runtime),
     );
     metrics.providers_width = compact_providers_width(
@@ -2222,6 +2249,25 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, 
     context.insert("display.mode_phase", phase);
     context.insert("display.mode_text_progress", phases.text_collapse);
     context.insert("display.mode_bar_progress", phases.bar_collapse);
+
+    for (index, key) in DISPLAY_PROVIDER_KEYS
+        .iter()
+        .copied()
+        .chain(std::iter::once("fable"))
+        .enumerate()
+    {
+        let phase = runtime.widget_mode_phase(index);
+        let phases = decompose_mode_phase(phase);
+        context.insert(&format!("display.mode_phase.{key}"), phase);
+        context.insert(
+            &format!("display.mode_text_progress.{key}"),
+            phases.text_collapse,
+        );
+        context.insert(
+            &format!("display.mode_bar_progress.{key}"),
+            phases.bar_collapse,
+        );
+    }
 
     let bar = compact_bar_full_width(widgets);
     context.insert("display.widget_count", widgets as f64);

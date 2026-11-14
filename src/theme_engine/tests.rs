@@ -3506,6 +3506,145 @@ fn animation_bindings_follow_the_mode_phase() {
 }
 
 #[test]
+fn widget_mode_bindings_default_to_global_and_allow_one_override() {
+    for phase in [0.0, 0.25, 0.5, 1.0, 1.5, 2.0] {
+        let runtime = ThemeRuntime::default().with_mode_phase(phase);
+        let base = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        let changed = DataContext::from_usage_with_runtime(
+            None,
+            &Canvas::default(),
+            runtime.with_widget_mode_phase("claude", 2.0),
+        );
+        for key in DISPLAY_PROVIDER_KEYS
+            .into_iter()
+            .chain(std::iter::once("fable"))
+        {
+            for name in ["mode_phase", "mode_text_progress", "mode_bar_progress"] {
+                let binding = format!("display.{name}.{key}");
+                assert_eq!(base.get(&binding), base.get(&format!("display.{name}")));
+                if key != "claude" {
+                    assert_eq!(changed.get(&binding), base.get(&binding));
+                }
+            }
+        }
+        assert_eq!(changed.get("display.mode_phase.claude"), Some(2.0));
+        assert_eq!(changed.get("display.mode_text_progress.claude"), Some(1.0));
+        assert_eq!(changed.get("display.mode_bar_progress.claude"), Some(1.0));
+        assert_eq!(changed.get("display.mode_phase"), Some(phase));
+    }
+}
+
+#[test]
+fn widget_modes_preserve_global_metrics_and_pixels() {
+    let raw = include_str!("../themes/compact-fluent-quad.json");
+    let theme: ThemeDocument = serde_json::from_str(raw).unwrap();
+    let mut old_raw = raw.to_string();
+    for key in DISPLAY_PROVIDER_KEYS
+        .into_iter()
+        .chain(std::iter::once("fable"))
+    {
+        old_raw = old_raw.replace(
+            &format!("display.mode_bar_progress.{key}"),
+            "display.mode_bar_progress",
+        );
+    }
+    let old_theme: ThemeDocument = serde_json::from_str(&old_raw).unwrap();
+    let usage = fable_usage();
+    let single = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]));
+    for runtime in [
+        single,
+        single.with_show_fable(true),
+        single
+            .with_show_fable(true)
+            .with_claude_state(false, true, true, 0.0),
+    ] {
+        for data in [None, Some(&usage)] {
+            for phase in [0.0, 0.25, 0.5, 1.0, 1.5, 2.0] {
+                let global = runtime.with_mode_phase(phase);
+                let mut explicit = global;
+                for key in DISPLAY_PROVIDER_KEYS
+                    .into_iter()
+                    .chain(std::iter::once("fable"))
+                {
+                    explicit = explicit.with_widget_mode_phase(key, phase);
+                }
+                assert_eq!(
+                    display_metrics(&theme, data, global),
+                    display_metrics(&theme, data, explicit)
+                );
+                assert_eq!(
+                    display_metrics(&old_theme, data, global),
+                    display_metrics(&theme, data, global)
+                );
+                assert_eq!(
+                    resolve_surface_size(&old_theme, 0, data, global),
+                    resolve_surface_size(&theme, 0, data, explicit)
+                );
+                let before = render_theme_surface_with_runtime(&old_theme, 0, data, global);
+                let after = render_theme_surface_with_runtime(&theme, 0, data, explicit);
+                assert_eq!((before.width, before.height), (after.width, after.height));
+                assert_eq!(before.pixels, after.pixels);
+            }
+        }
+    }
+}
+
+#[test]
+fn widget_phase_changes_only_its_row_and_root_width() {
+    let mut theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    theme.id = "widget-phase-cache-test".into();
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+    ]))
+    .with_show_fable(true)
+    .with_claude_state(false, true, true, 0.0);
+    let baseline = display_metrics(&theme, None, runtime);
+    let root = |metrics: &DisplayMetrics, runtime| {
+        let mut context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        insert_display_metrics(&mut context, metrics);
+        evaluate(&theme.surfaces[0].width.0, &context).unwrap()
+    };
+    for key in ["claude", "codex", "fable"] {
+        let changed_runtime = runtime.with_widget_mode_phase(key, 2.0);
+        let changed = display_metrics(&theme, None, changed_runtime);
+        // A widget phase is pure geometry over the same text measurement: the
+        // result equals re-deriving the baseline for the new phase. (The
+        // measurement counter is not asserted here: the metrics cache is
+        // process-wide and parallel tests can evict entries.)
+        assert_eq!(
+            changed,
+            metrics_for_phase(baseline.clone(), changed_runtime)
+        );
+        for other in DISPLAY_PROVIDER_KEYS {
+            if other != key {
+                assert_eq!(
+                    baseline.provider(other).unwrap(),
+                    changed.provider(other).unwrap()
+                );
+            }
+        }
+        if key != "fable" {
+            assert_eq!(baseline.fable, changed.fable);
+        }
+        let (before, after) = if key == "fable" {
+            (baseline.fable.row_width, changed.fable.row_width)
+        } else {
+            (
+                baseline.provider(key).unwrap().row_width,
+                changed.provider(key).unwrap().row_width,
+            )
+        };
+        assert_ne!(before, after);
+        assert!(
+            (root(&changed, changed_runtime) - root(&baseline, runtime) - (after - before)).abs()
+                < 1e-9
+        );
+    }
+}
+
+#[test]
 fn mode_row_bindings_match_the_planned_geometry() {
     let bar = 109.0;
     for phase in [0.0_f64, 0.5, 1.0, 1.5, 2.0] {
@@ -3739,9 +3878,14 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         let stripped = tick.visibility.0.strip_prefix("(100) * ").unwrap();
         // Ticks fade out together with the collapsing bar in mode 3, but keep
         // the same hover crossfade factor as their gauge.
-        let stripped = stripped
-            .strip_suffix(" * (1 - display.mode_bar_progress)")
+        let widget = tick
+            .parent
+            .as_deref()
+            .unwrap()
+            .strip_suffix("-provider")
             .unwrap();
+        let suffix = format!(" * (1 - display.mode_bar_progress.{widget})");
+        let stripped = stripped.strip_suffix(suffix.as_str()).unwrap();
         let stripped = stripped
             .strip_suffix(" * antigravity.gemini.opacity")
             .or_else(|| stripped.strip_suffix(" * antigravity.external.opacity"))
@@ -4625,6 +4769,7 @@ fn compact_gauges_labels_and_percent_follow_the_mode_phase() {
         context.insert("display.text_opacity", 100.0 * (1.0 - a));
         context.insert("display.percent_opacity", 100.0 * b);
         context.insert("display.mode_bar_progress", b);
+        context.insert("display.mode_bar_progress.claude", b);
 
         let gauge = by_id("claude-session-segments-dark");
         assert_eq!(gauge.width.0, "display.bar_width");
