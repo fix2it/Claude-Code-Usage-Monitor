@@ -3896,8 +3896,9 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         .enumerate()
         .filter(|(_, object)| object.id.ends_with("-pace"))
         .collect::<Vec<_>>();
-    // Includes one tick per two-pool Fable row and colour scheme.
-    assert_eq!(ticks.len(), 100);
+    // Includes one tick per two-pool Fable row and colour scheme, and the
+    // agy widget's pool o row (eight ticks).
+    assert_eq!(ticks.len(), 108);
     for (index, tick) in ticks {
         let gauge = &children[index - 1];
         assert_eq!(tick.id, format!("{}-pace", gauge.id));
@@ -3914,9 +3915,9 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
             .unwrap()
             .strip_suffix("-provider")
             .unwrap();
-        // The agy external-models widget follows the agy widget's mode.
+        // The agy external-models widget has its own mode key.
         let widget = if widget == "antigravity-external" {
-            "antigravity"
+            AGY_EXTERNAL_KEY
         } else {
             widget
         };
@@ -3927,6 +3928,8 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
             .or_else(|| stripped.strip_suffix(" * antigravity.external.opacity"))
             .or_else(|| stripped.strip_suffix(" * antigravity.normal.opacity"))
             .or_else(|| stripped.strip_suffix(" * antigravity.hover.opacity"))
+            .or_else(|| stripped.strip_suffix(" * agy_external.normal.opacity"))
+            .or_else(|| stripped.strip_suffix(" * agy_external.hover.opacity"))
             .or_else(|| stripped.strip_suffix(" * claude.normal.opacity"))
             .or_else(|| stripped.strip_suffix(" * claude.hover.opacity"))
             .or_else(|| stripped.strip_suffix(" * codex.normal.opacity"))
@@ -3950,6 +3953,8 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         context.insert("antigravity.external.opacity", 1.0);
         context.insert("antigravity.normal.opacity", 1.0);
         context.insert("antigravity.hover.opacity", 1.0);
+        context.insert("agy_external.normal.opacity", 1.0);
+        context.insert("agy_external.hover.opacity", 1.0);
         context.insert("claude.normal.opacity", 1.0);
         context.insert("claude.hover.opacity", 1.0);
         context.insert("codex.normal.opacity", 1.0);
@@ -4098,8 +4103,9 @@ fn compact_dual_mode_geometry_morphs_with_hover_phase() {
                 && matches!(o.content, SceneContent::Text { .. })
         })
         .collect::<Vec<_>>();
-    // Eight in the agy widget, eight in its external-models widget.
-    assert_eq!(antigravity_labels.len(), 16);
+    // Eight in the agy widget plus four for its pool o row, eight in its
+    // external-models widget.
+    assert_eq!(antigravity_labels.len(), 20);
     for text in antigravity_labels {
         assert!(!text.y.0.contains("hover_phase"), "{}", text.id);
         let base = geometry(text, "y", 0.0);
@@ -4157,6 +4163,16 @@ fn compact_marker_and_label_rows_share_the_same_y() {
 /// same vertical line (measured residual 0.21 px across 12 renders). An extra
 /// `-1` column offset was tried and then removed by the owner; the centred
 /// glyphs already clear the gauge column, which starts at `x = 12`.
+/// `display.*.<key>` suffix of an object's widget: the agy external-models
+/// widget has its own key, every other object uses its id prefix.
+fn widget_binding_key(object: &SceneObject) -> &str {
+    if object.parent.as_deref() == Some(super::ANTIGRAVITY_EXTERNAL_WIDGET) {
+        super::AGY_EXTERNAL_KEY
+    } else {
+        object.id.split('-').next().unwrap()
+    }
+}
+
 #[test]
 fn compact_markers_are_centered_and_clear_of_the_gauges() {
     let theme: ThemeDocument =
@@ -4170,7 +4186,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
     // the two agy pools (A and O) add eight more in each agy widget.
     assert_eq!(markers.len(), 46);
     for marker in &markers {
-        let key = marker.id.split('-').next().unwrap();
+        let key = widget_binding_key(marker);
         assert_eq!(marker.x.0, "0");
         assert_eq!(marker.width.0, format!("display.marker_box.{key}"));
     }
@@ -4184,8 +4200,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
                     matches!(
                         template.as_str(),
                         "o" | "x"
-                            | "A"
-                            | "O"
+                            | "a"
                             | "w"
                             | "m"
                             | "f"
@@ -4209,8 +4224,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
     assert_eq!(
         templates,
         std::collections::BTreeSet::from([
-            "A",
-            "O",
+            "a",
             "f",
             "m",
             "o",
@@ -4253,7 +4267,8 @@ fn compact_pace_ticks_follow_morphing_gauges_at_every_hover_phase() {
         .enumerate()
         .filter(|(_, object)| object.id.ends_with("-pace"))
         .collect::<Vec<_>>();
-    assert_eq!(ticks.len(), 100);
+    // 100 plus the agy widget's pool o row.
+    assert_eq!(ticks.len(), 108);
     let mut context = DataContext::from_usage(None, &Canvas::default());
     for opacity in [
         "antigravity.gemini.opacity",
@@ -4708,7 +4723,7 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
             "{} is not gated by the mode",
             twin.id
         );
-        let key = label.id.split('-').next().unwrap();
+        let key = widget_binding_key(label);
         let (width, x) = (
             format!("display.percent_box.{key}"),
             format!("display.origin.{key}"),
@@ -4727,8 +4742,9 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
         }
     }
     // 68 before the two-pool Fable rows added four value labels with twins;
-    // the agy external-models widget adds eight more.
-    assert_eq!(twins, 82);
+    // the agy external-models widget adds eight more and the agy widget's
+    // pool o row four.
+    assert_eq!(twins, 86);
 
     // A dual-mode row: mode controls appearance, hover controls the value.
     let normal = by_id("claude-main-text-dark-normal-pct");
@@ -6384,7 +6400,7 @@ fn agy_pool_o_with_external_models_on_shows_gemini_and_external_widgets_together
     assert!(renders("antigravity-external-provider", &context));
     for id in [
         "antigravity-gemini-5h-dark-normal",
-        "antigravity-external-5h-dark-normal",
+        "antigravity-o-row-5h-dark-normal",
         "antigravity-a-marker-dark-normal",
         "antigravity-o-marker-dark-normal",
         "antigravity-ext-a-5h-dark-normal",
@@ -6393,6 +6409,7 @@ fn agy_pool_o_with_external_models_on_shows_gemini_and_external_widgets_together
         assert!(renders(id, &context), "{id}");
     }
     for id in [
+        "antigravity-external-5h-dark-normal",
         "antigravity-ext-o-5h-dark-normal",
         "antigravity-ext-o-marker-dark-normal",
         "antigravity-session-gemini-solo-dark",
@@ -6529,4 +6546,234 @@ fn agy_pool_o_reserves_a_marker_column_only_while_shown() {
     assert_eq!(off.origin, 0.0);
     assert!(on.origin > 0.0 && on.marker_box > 0.0);
     assert!(on.row_width > off.row_width);
+}
+
+fn quad_theme() -> ThemeDocument {
+    serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap()
+}
+
+fn quad_object<'a>(theme: &'a ThemeDocument, id: &str) -> &'a SceneObject {
+    theme.surfaces[0]
+        .children
+        .iter()
+        .find(|object| object.id == id)
+        .unwrap_or_else(|| panic!("{id} missing"))
+}
+
+fn progress_fill(object: &SceneObject) -> String {
+    match &object.content {
+        SceneContent::Progress { fill, .. } => fill.color.to_ascii_uppercase(),
+        _ => panic!("{} is not a gauge", object.id),
+    }
+}
+
+fn scaled_70(color: &str) -> String {
+    let channel = |at: usize| {
+        let value = u8::from_str_radix(&color[at..at + 2], 16).unwrap();
+        (f64::from(value) * 0.7).round() as u8
+    };
+    format!("#{:02X}{:02X}{:02X}FF", channel(1), channel(3), channel(5))
+}
+
+#[test]
+fn agy_pool_markers_are_lowercase_in_both_agy_widgets() {
+    let theme = quad_theme();
+    let markers = theme.surfaces[0]
+        .children
+        .iter()
+        .filter(|o| o.id.starts_with("antigravity-") && o.id.contains("-marker-"))
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 16);
+    for marker in markers {
+        let SceneContent::Text { template, .. } = &marker.content else {
+            panic!("{}", marker.id);
+        };
+        let expected = if marker.id.contains("-a-marker-") {
+            "a"
+        } else {
+            "o"
+        };
+        assert_eq!(template, expected, "{}", marker.id);
+    }
+}
+
+#[test]
+fn agy_rows_use_their_widget_colour_and_weekly_gauges_are_30_percent_darker() {
+    let theme = quad_theme();
+    for scheme in ["dark", "light"] {
+        for state in ["normal", "hover"] {
+            let gemini = progress_fill(quad_object(
+                &theme,
+                &format!("antigravity-gemini-5h-{scheme}-{state}"),
+            ));
+            let external = progress_fill(quad_object(
+                &theme,
+                &format!("antigravity-ext-a-5h-{scheme}-{state}"),
+            ));
+            // Pool o in the agy widget uses the agy colour, not external's.
+            assert_eq!(
+                progress_fill(quad_object(
+                    &theme,
+                    &format!("antigravity-o-row-5h-{scheme}-{state}")
+                )),
+                gemini
+            );
+            assert_eq!(
+                progress_fill(quad_object(
+                    &theme,
+                    &format!("antigravity-ext-o-5h-{scheme}-{state}")
+                )),
+                external
+            );
+            for (id, main) in [
+                ("antigravity-gemini-weekly", &gemini),
+                ("antigravity-o-row-weekly", &gemini),
+                ("antigravity-ext-a-weekly", &external),
+                ("antigravity-ext-o-weekly", &external),
+            ] {
+                let id = format!("{id}-{scheme}-{state}");
+                assert_eq!(
+                    progress_fill(quad_object(&theme, &id)),
+                    scaled_70(main),
+                    "{id}"
+                );
+            }
+            // Without pool O the second row keeps its external-models gauge,
+            // and its weekly gauge follows the same rule.
+            let row2 = progress_fill(quad_object(
+                &theme,
+                &format!("antigravity-external-5h-{scheme}-{state}"),
+            ));
+            assert_eq!(
+                progress_fill(quad_object(
+                    &theme,
+                    &format!("antigravity-external-weekly-{scheme}-{state}")
+                )),
+                scaled_70(&row2)
+            );
+        }
+    }
+    for marker in ["dark-normal", "dark-hover", "light-normal", "light-hover"] {
+        let colour = |id: String| match &quad_object(&theme, &id).content {
+            SceneContent::Text { color, .. } => color.color.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            colour(format!("antigravity-o-marker-{marker}")),
+            colour(format!("antigravity-a-marker-{marker}"))
+        );
+    }
+}
+
+#[test]
+fn agy_external_widget_has_its_own_hover_and_mode_bindings() {
+    let theme = quad_theme();
+    for object in theme.surfaces[0]
+        .children
+        .iter()
+        .filter(|o| o.parent.as_deref() == Some(ANTIGRAVITY_EXTERNAL_WIDGET))
+    {
+        let encoded = serde_json::to_string(object).unwrap();
+        for shared in [
+            "antigravity.normal.opacity",
+            "antigravity.hover.opacity",
+            "antigravity.hover_phase",
+            "display.bar_width.antigravity",
+            "display.origin.antigravity",
+            "display.text_opacity.antigravity",
+            "display.percent_opacity.antigravity",
+            "display.mode_bar_progress.antigravity",
+        ] {
+            assert!(!encoded.contains(shared), "{} uses {shared}", object.id);
+        }
+    }
+    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+    let runtime = agy_runtime(true, true)
+        .with_agy_external_state(1.0)
+        .with_widget_mode_phase(AGY_EXTERNAL_KEY, 2.0)
+        .with_widget_mode_phase("antigravity", 0.0);
+    let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+    assert_eq!(context.get("agy_external.hover_phase"), Some(1.0));
+    assert_eq!(context.get("agy_external.hover.opacity"), Some(1.0));
+    assert_eq!(context.get("antigravity.hover_phase"), Some(0.0));
+    assert_eq!(context.get("display.mode_phase.agy_external"), Some(2.0));
+    assert_eq!(context.get("display.mode_phase.antigravity"), Some(0.0));
+}
+
+#[test]
+fn agy_widgets_follow_the_shared_adaptive_size_rules() {
+    let theme = quad_theme();
+    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+    let segments = |context: &DataContext| {
+        evaluate("min(5, ceil(10 / max(1, display.widget_count)))", context).unwrap()
+    };
+    // One pool, external models in the same widget: one widget.
+    // Two pools: one widget; two pools with external models: two widgets.
+    for (external, pool_o, widgets) in [
+        (false, false, 1.0),
+        (true, false, 1.0),
+        (false, true, 1.0),
+        (true, true, 2.0),
+    ] {
+        let runtime = agy_runtime(external, pool_o);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        assert_eq!(context.get("display.widget_count"), Some(widgets));
+        assert!(segments(&context) <= 5.0);
+        assert_eq!(segments(&context), (10.0 / widgets).ceil().min(5.0));
+        let metrics = display_metrics(&theme, Some(&data), runtime);
+        let agy = metrics.provider("antigravity").unwrap();
+        let mut expected = agy.row_width;
+        if widgets > 1.0 {
+            let external = metrics.agy_external();
+            assert!(external.marker_box > 0.0 && external.origin > 0.0);
+            expected += external.row_width + 6.0;
+        }
+        assert!(
+            (metrics.providers_width - expected).abs() < 1e-9,
+            "{external} {pool_o}"
+        );
+    }
+    // The external widget collapses on its own mode, not with the agy one.
+    let normal = display_metrics(&theme, Some(&data), agy_runtime(true, true));
+    let collapsed = display_metrics(
+        &theme,
+        Some(&data),
+        agy_runtime(true, true).with_widget_mode_phase(AGY_EXTERNAL_KEY, 2.0),
+    );
+    assert!(collapsed.agy_external().row_width < normal.agy_external().row_width);
+    assert_eq!(
+        collapsed.provider("antigravity").unwrap().row_width,
+        normal.provider("antigravity").unwrap().row_width
+    );
+}
+
+#[test]
+fn agy_pool_a_off_shows_only_pool_o_in_one_row() {
+    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+    let runtime = agy_runtime(true, true).with_antigravity_a(false);
+    let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+    assert_eq!(context.get("antigravity.pool_o"), Some(0.0));
+    assert_eq!(context.get("display.agy_split"), Some(0.0));
+    assert_eq!(context.get("display.widget_count"), Some(1.0));
+    // Pool O's Gemini (70) and external models (55) fill the agy widget.
+    assert_eq!(
+        context.get("antigravity.gemini.session.percentage"),
+        Some(70.0)
+    );
+    assert_eq!(
+        context.get("antigravity.row2.session.percentage"),
+        Some(55.0)
+    );
+    // Pool A on (also the default) keeps both pools.
+    let context = DataContext::from_usage_with_runtime(
+        Some(&data),
+        &Canvas::default(),
+        agy_runtime(true, true),
+    );
+    assert_eq!(context.get("antigravity.pool_o"), Some(1.0));
+    assert_eq!(
+        context.get("antigravity.gemini.session.percentage"),
+        Some(10.0)
+    );
 }

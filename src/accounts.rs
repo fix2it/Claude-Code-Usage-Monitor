@@ -172,6 +172,8 @@ impl ProviderAccounts {
     }
 }
 
+/// Profile id of the first Antigravity pool's on/off switch.
+pub const ANTIGRAVITY_A_ID: &str = "default";
 /// Profile id of the second Antigravity pool, whose token lives only in OpenCode.
 pub const ANTIGRAVITY_X_ID: &str = "antigravity_x";
 /// OpenCode keeps its Google login in this SQLite file under the home folder.
@@ -203,6 +205,35 @@ impl Default for AccountSettings {
 }
 
 impl AccountSettings {
+    /// Pool A (Antigravity's own login) is on. Settings without its profile
+    /// load it on; it is stored only once the user turns it off.
+    pub fn antigravity_a_enabled(&self) -> bool {
+        self.antigravity.is_profile_enabled(ANTIGRAVITY_A_ID, true)
+    }
+
+    /// Switch pool A on or off. Its profile only carries the switch; pool A
+    /// always reads the provider's own credentials.
+    pub fn set_antigravity_a_enabled(&mut self, enabled: bool) {
+        if let Some(profile) = self
+            .antigravity
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == ANTIGRAVITY_A_ID)
+        {
+            profile.enabled = enabled;
+            return;
+        }
+        let mut profile = Self::antigravity_a_profile();
+        profile.enabled = enabled;
+        self.antigravity.profiles.push(profile);
+        self.antigravity.used_ids.insert(ANTIGRAVITY_A_ID.into());
+    }
+
+    /// Pool A is off and pool O on: pool O is agy's only, selected reading.
+    pub fn antigravity_o_only(&self) -> bool {
+        self.antigravity_x().is_some() && !self.antigravity_a_enabled()
+    }
+
     /// The enabled second Antigravity pool, if the user turned it on.
     pub fn antigravity_x(&self) -> Option<&AccountProfile> {
         self.antigravity
@@ -226,7 +257,7 @@ impl AccountSettings {
     pub fn antigravity_x_profile() -> AccountProfile {
         AccountProfile {
             id: ANTIGRAVITY_X_ID.into(),
-            name: "agy (O = OpenCode)".into(),
+            name: "agy (o = OpenCode)".into(),
             config_dir: String::new(),
             credentials_path: OPENCODE_DB_PATH.into(),
             enabled: false,

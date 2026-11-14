@@ -68,6 +68,18 @@ pub(super) fn poll_accounts(
 }
 
 #[cfg(test)]
+pub(super) fn poll_accounts_for_test<F>(
+    enabled: ProviderSet,
+    settings: &AccountSettings,
+    poll: F,
+) -> Result<AppUsageData, PollFailure>
+where
+    F: Fn(ProviderId, Option<&std::path::Path>) -> Result<UsageData, PollError> + Sync,
+{
+    poll_accounts_with(enabled, settings, poll)
+}
+
+#[cfg(test)]
 fn poll_accounts_with<F>(
     enabled: ProviderSet,
     settings: &AccountSettings,
@@ -123,6 +135,11 @@ where
                     path,
                 });
             }
+        } else if provider == ProviderId::Antigravity
+            && settings.antigravity_x().is_some()
+            && !settings.antigravity_a_enabled()
+        {
+            // Pool A is off: only pool O (pushed below) is polled.
         } else if provider == ProviderId::Antigravity && settings.antigravity_x().is_some() {
             // With pool O on, pool A is polled as an account of its own, the
             // way two Claude or Codex profiles are: each keeps its own error,

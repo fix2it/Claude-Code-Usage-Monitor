@@ -37,7 +37,10 @@ pub(super) unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_MOUSEHOVER => {
-            widget_tooltip::show(hwnd);
+            // A tooltip popping up over an open context menu competes with it.
+            if !window_context_menu::menu_session_active() {
+                widget_tooltip::show(hwnd);
+            }
             LRESULT(0)
         }
         WM_NCHITTEST => LRESULT(HTCLIENT as isize),
@@ -135,7 +138,11 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     begin_update_check(hwnd, false);
                 }
                 TIMER_WINDOW_STATE => {
-                    sync_theme_window_visibility();
+                    // Re-showing a floating surface re-asserts topmost; the
+                    // timer repeats, so skipping while the menu is open is safe.
+                    if !window_context_menu::menu_session_active() {
+                        sync_theme_window_visibility();
+                    }
                 }
                 TIMER_MOUSE_CLICK => {
                     let _ = kill_controller_timer(Some(hwnd), TIMER_MOUSE_CLICK);
@@ -188,6 +195,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 state.codex_tile_rect = None;
                 state.opencode_tile_rect = None;
                 state.qoder_tile_rect = None;
+                state.agy_external_tile_rect = None;
             }
             check_theme_change();
             check_language_change();
@@ -895,42 +903,11 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            let is_gemini = id == IDM_PROVIDER_ANTIGRAVITY_GEMINI;
-                            let current = if is_gemini {
-                                s.show_antigravity_gemini
-                            } else {
-                                s.show_antigravity_external
-                            };
-                            let target = !current;
-                            // Only the parent controls provider membership and the last-provider guard.
-                            if !(is_gemini
-                                && !target
-                                && s.providers.len() <= 1
-                                && s.providers.contains(ProviderId::Antigravity))
-                            {
-                                if is_gemini {
-                                    s.show_antigravity_gemini = target;
-                                    s.providers.set(ProviderId::Antigravity, target);
-                                    should_reposition = true;
-                                } else {
-                                    s.show_antigravity_external = target;
-                                }
-                                invalidate_metrics(s);
-                                let any_pool = (s.show_antigravity_gemini
-                                    || s.show_antigravity_external)
-                                    && s.providers.contains(ProviderId::Antigravity);
-                                s.antigravity_tile_rect = None;
-                                s.claude_tile_rect = None;
-                                s.codex_tile_rect = None;
-                                s.opencode_tile_rect = None;
-                                s.qoder_tile_rect = None;
-                                if !any_pool {
-                                    s.antigravity_hovered = false;
-                                    s.crossfade_opacity = 1.0;
-                                    s.crossfade_animation = None;
-                                    s.stop_crossfade_timer_if_idle(hwnd);
-                                }
-                            }
+                            should_reposition = super::toggle_antigravity_models(
+                                s,
+                                id == IDM_PROVIDER_ANTIGRAVITY_GEMINI,
+                            );
+                            s.stop_crossfade_timer_if_idle(hwnd);
                         }
                     }
                     save_state_settings();
@@ -941,11 +918,31 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }
+                IDM_PROVIDER_ANTIGRAVITY_A => {
+                    let mut should_reposition = false;
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            should_reposition = super::toggle_antigravity_a(s);
+                            // Pool A off leaves pool O alone in one row.
+                            super::invalidate_hover_tile_rects(s);
+                            invalidate_metrics(s);
+                        }
+                    }
+                    save_state_settings();
+                    if should_reposition {
+                        position_at_taskbar();
+                    }
+                    render_layered();
+                    super::mouse::revalidate_mouse_hover(hwnd);
+                    sync_tray_icon(hwnd);
+                    request_poll(hwnd);
+                }
                 IDM_PROVIDER_ANTIGRAVITY_X => {
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            super::toggle_antigravity_x(&mut s.accounts);
+                            super::toggle_antigravity_pool_o(s);
                             // Pool O adds a marker column and a second row.
                             super::invalidate_hover_tile_rects(s);
                             invalidate_metrics(s);
@@ -1159,6 +1156,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                 s.codex_tile_rect = None;
                                 s.opencode_tile_rect = None;
                                 s.qoder_tile_rect = None;
+                                s.agy_external_tile_rect = None;
                             }
                         }
                     }
@@ -1184,6 +1182,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             s.codex_tile_rect = None;
                             s.opencode_tile_rect = None;
                             s.qoder_tile_rect = None;
+                            s.agy_external_tile_rect = None;
                             if !s.providers.contains(ProviderId::Claude) {
                                 s.claude_hovered = false;
                                 s.claude_crossfade_opacity = 0.0;

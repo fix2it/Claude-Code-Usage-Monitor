@@ -227,6 +227,13 @@ impl SettingsFile {
         self.widget_modes.retain(|key, mode| {
             widget_mode_keys().any(|known| known == key) && (1..=3).contains(mode)
         });
+        // The external-models widget used to share agy's mode: settings saved
+        // before it had its own key start it in agy's mode, not the global one.
+        if let Some(agy) = self.widget_modes.get("antigravity").copied() {
+            self.widget_modes
+                .entry(crate::theme_engine::AGY_EXTERNAL_KEY.to_string())
+                .or_insert(agy);
+        }
     }
 
     pub fn widget_mode(&self, key: &str) -> u8 {
@@ -535,10 +542,10 @@ fn default_poll_interval() -> u32 {
 fn default_true() -> bool {
     true
 }
+/// Providers, the Fable column and the agy external-models widget. A file
+/// saved before a key existed loads it from the global `view_mode`.
 pub(crate) fn widget_mode_keys() -> impl Iterator<Item = &'static str> {
-    crate::theme_engine::DISPLAY_PROVIDER_KEYS
-        .into_iter()
-        .chain(std::iter::once("fable"))
+    crate::theme_engine::widget_keys()
 }
 
 fn deserialize_widget_modes<'de, D>(deserializer: D) -> Result<BTreeMap<String, u8>, D::Error>
@@ -853,6 +860,24 @@ mod tests {
         let restored = decode_settings(&encoded).unwrap();
         assert_eq!(restored.view_mode, 2);
         assert_eq!(restored.widget_modes, loaded.widget_modes);
+    }
+
+    #[test]
+    fn agy_external_mode_migrates_from_the_agy_override() {
+        let key = crate::theme_engine::AGY_EXTERNAL_KEY;
+        let mut old =
+            decode_settings(r#"{"view_mode":1,"widget_modes":{"antigravity":3}}"#).unwrap();
+        old.normalize();
+        assert_eq!(old.widget_mode(key), 3);
+        let mut own = decode_settings(&format!(
+            r#"{{"view_mode":1,"widget_modes":{{"antigravity":3,"{key}":2}}}}"#
+        ))
+        .unwrap();
+        own.normalize();
+        assert_eq!(own.widget_mode(key), 2);
+        let mut none = decode_settings(r#"{"view_mode":2}"#).unwrap();
+        none.normalize();
+        assert_eq!(none.widget_mode(key), 2);
     }
 
     #[test]

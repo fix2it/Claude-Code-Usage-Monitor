@@ -222,6 +222,13 @@ impl AccountUsage {
         self.provider == ProviderId::Antigravity
             && self.profile.id == crate::accounts::ANTIGRAVITY_X_ID
     }
+
+    /// The account is the provider's own reading: any account except pool O
+    /// while it sits next to pool A. With pool A off, pool O is selected and
+    /// stands for agy everywhere (tray, summaries, stale carry-over).
+    pub fn stands_for_provider(&self) -> bool {
+        !self.is_side_pool() || self.selected
+    }
 }
 
 impl AppUsageData {
@@ -280,6 +287,12 @@ impl AppUsageData {
         self.providers.insert(provider, usage)
     }
 
+    /// Drop a provider's reading, e.g. when the pool it came from is switched
+    /// off, so it is never shown as another pool's figures.
+    pub fn remove(&mut self, provider: ProviderId) -> Option<UsageData> {
+        self.providers.remove(&provider)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty() && self.accounts.iter().all(|account| account.usage.is_none())
     }
@@ -320,7 +333,10 @@ impl AppUsageData {
                 .get(account.provider)
                 .and_then(|configured| configured.selected())
                 .is_some_and(|selected| *selected == account.profile)
-                || (account.is_antigravity_pool_a() && settings.antigravity_x().is_some());
+                || (account.is_antigravity_pool_a()
+                    && settings.antigravity_x().is_some()
+                    && settings.antigravity_a_enabled())
+                || (account.is_side_pool() && settings.antigravity_o_only());
         }
         for provider in [ProviderId::Claude, ProviderId::Codex] {
             let configured = settings.get(provider).unwrap();
@@ -346,7 +362,15 @@ impl AppUsageData {
         }
         // Pool A as an account stands for the provider, like a selected
         // Claude profile: a failing pool A never borrows an old reading here.
-        if settings.antigravity_x().is_some() {
+        if settings.antigravity_o_only() {
+            // Pool A is off: pool O is agy's reading, and an old pool A
+            // reading is never shown in its place.
+            let usage = self.antigravity_x().and_then(|pool_o| pool_o.usage.clone());
+            self.providers.remove(&ProviderId::Antigravity);
+            if let Some(usage) = usage {
+                self.providers.insert(ProviderId::Antigravity, usage);
+            }
+        } else if settings.antigravity_x().is_some() {
             if let Some(pool_a) = self
                 .accounts
                 .iter()
@@ -361,7 +385,7 @@ impl AppUsageData {
         }
         self.accounts.retain(|account| {
             if account.is_antigravity_pool_a() {
-                return settings.antigravity_x().is_some();
+                return settings.antigravity_x().is_some() && settings.antigravity_a_enabled();
             }
             if account.is_side_pool() {
                 return settings
@@ -407,7 +431,7 @@ impl AppUsageData {
                 account.usage = None;
                 account.error = None;
                 // A side pool never stands for its provider's own reading.
-                if !account.is_side_pool() {
+                if account.stands_for_provider() {
                     self.providers.remove(&account.provider);
                 }
             }

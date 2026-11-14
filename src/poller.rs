@@ -162,7 +162,7 @@ pub fn carry_forward_failures(
         let has_account = |data: &AppUsageData| {
             data.accounts
                 .iter()
-                .any(|account| account.provider == provider && !account.is_side_pool())
+                .any(|account| account.provider == provider && account.stands_for_provider())
         };
         if has_account(&merged) || has_account(previous) {
             continue;
@@ -177,6 +177,20 @@ pub fn carry_forward_failures(
         }
     }
     merged
+}
+
+/// Account poll with an injected fetcher, for end-to-end tests elsewhere in
+/// the crate (poll result to tray summary).
+#[cfg(test)]
+pub(crate) fn poll_accounts_for_test<F>(
+    enabled: ProviderSet,
+    settings: &crate::accounts::AccountSettings,
+    poll: F,
+) -> Result<AppUsageData, PollFailure>
+where
+    F: Fn(ProviderId, Option<&std::path::Path>) -> Result<UsageData, PollError> + Sync,
+{
+    accounts::poll_accounts_for_test(enabled, settings, poll)
 }
 
 #[cfg(test)]

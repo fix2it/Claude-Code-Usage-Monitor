@@ -120,15 +120,20 @@ struct AppState {
     qoder_crossfade_opacity: f64,
     opencode_crossfade_animation: Option<PhaseAnimation>,
     qoder_crossfade_animation: Option<PhaseAnimation>,
+    /// The agy external-models widget has its own hover area and crossfade.
+    pub(super) agy_external_tile_rect: Option<(f64, f64, f64, f64)>,
+    agy_external_hovered: bool,
+    agy_external_crossfade_opacity: f64,
+    agy_external_crossfade_animation: Option<PhaseAnimation>,
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     view_mode: u8,
     mode_phase: f64,
-    widget_modes: [(u8, f64); 9],
+    widget_modes: [(u8, f64); crate::theme_engine::WIDGET_SLOTS],
     /// +1 while the click cycle moves 1 -> 3, -1 while it moves back.
     /// The wheel overwrites this explicitly; clicks bounce off the ends.
-    widget_directions: [i8; 9],
-    widget_animations: [Option<PhaseAnimation>; 9],
+    widget_directions: [i8; crate::theme_engine::WIDGET_SLOTS],
+    widget_animations: [Option<PhaseAnimation>; crate::theme_engine::WIDGET_SLOTS],
     accounts: crate::accounts::AccountSettings,
 
     data: Option<AppUsageData>,
@@ -192,6 +197,7 @@ impl AppState {
             || self.codex_crossfade_animation.is_some()
             || self.opencode_crossfade_animation.is_some()
             || self.qoder_crossfade_animation.is_some()
+            || self.agy_external_crossfade_animation.is_some()
             || self.widget_animations.iter().any(Option::is_some)
     }
 
@@ -301,6 +307,7 @@ const IDM_DASHBOARD: u16 = 71;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_GEMINI: u16 = 68;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_EXTERNAL: u16 = 67;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_X: u16 = 75;
+pub(super) const IDM_PROVIDER_ANTIGRAVITY_A: u16 = 76;
 pub(super) const IDM_PROVIDER_CODEX_MAIN: u16 = 69;
 pub(super) const IDM_PROVIDER_CODEX_X: u16 = 70;
 pub(super) const IDM_PROVIDER_CLAUDE_MAIN: u16 = 72;
@@ -852,6 +859,7 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         .with_mode_phase(state.mode_phase)
         .with_opencode_state(state.opencode_crossfade_opacity)
         .with_qoder_state(state.qoder_crossfade_opacity)
+        .with_agy_external_state(state.agy_external_crossfade_opacity)
         .with_nest(nest)
         .with_floating_card_opacity(opacity)
         .with_antigravity_pools(
@@ -864,6 +872,7 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
                 && state.show_antigravity_gemini
                 && state.accounts.antigravity_x().is_some(),
         )
+        .with_antigravity_a(state.accounts.antigravity_a_enabled())
         .with_claude_state(
             state.claude_hovered,
             state.is_account_profile_enabled(ProviderId::Claude, "default", true),
@@ -1416,7 +1425,7 @@ fn tray_error_lines(
         if !data.is_some_and(|data| {
             data.accounts.iter().any(|account| {
                 account.provider == failure.provider
-                    && !account.is_side_pool()
+                    && account.stands_for_provider()
                     && account.error.is_some()
             })
         }) {
@@ -2112,6 +2121,7 @@ fn replace_active_theme(state: &mut AppState, loaded: ThemeDocument, path: Optio
     state.codex_tile_rect = None;
     state.opencode_tile_rect = None;
     state.qoder_tile_rect = None;
+    state.agy_external_tile_rect = None;
     if path.is_some() {
         state.active_theme_path = path;
     }
@@ -2801,11 +2811,15 @@ pub fn run() {
                 qoder_crossfade_opacity: 0.0,
                 opencode_crossfade_animation: None,
                 qoder_crossfade_animation: None,
+                agy_external_tile_rect: None,
+                agy_external_hovered: false,
+                agy_external_crossfade_opacity: 0.0,
+                agy_external_crossfade_animation: None,
                 view_mode: settings.view_mode,
                 mode_phase: (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0),
                 widget_modes: widget_modes_from_settings(&settings),
-                widget_directions: [1; 9],
-                widget_animations: [None; 9],
+                widget_directions: [1; crate::theme_engine::WIDGET_SLOTS],
+                widget_animations: [None; crate::theme_engine::WIDGET_SLOTS],
                 accounts: settings.accounts.clone(),
                 data: None,
                 prepared_metrics: None,
@@ -2956,6 +2970,17 @@ fn render_layered_animation() {
 }
 
 fn render_layered_impl(trigger: RenderTrigger) {
+    // While the context menu is on screen a full pass (surface sync, shell
+    // re-parenting and z-order) can dismiss it; paint as an animation frame
+    // now and run the full pass when the menu closes.
+    let trigger = if trigger == RenderTrigger::Full
+        && window_context_menu::defer_while_menu_open(
+            window_context_menu::DeferredMenuWork::FullRender,
+        ) {
+        RenderTrigger::Animation
+    } else {
+        trigger
+    };
     if trigger == RenderTrigger::Full {
         // Shell/DPI/theme changes must force one full positioning pass before
         // subsequent animation frames are allowed to reuse the cached result.
@@ -3067,6 +3092,16 @@ fn render_layered_impl(trigger: RenderTrigger) {
                         usage_data.as_ref(),
                         surface_runtime,
                         mouse::QODER_HOVER_OBJECT,
+                        &surface_metrics,
+                    );
+                }
+                if state.agy_external_tile_rect.is_none() {
+                    state.agy_external_tile_rect = theme_engine::object_bounds_with_metrics(
+                        &theme,
+                        0,
+                        usage_data.as_ref(),
+                        surface_runtime,
+                        mouse::AGY_EXTERNAL_HOVER_OBJECT,
                         &surface_metrics,
                     );
                 }
@@ -3864,6 +3899,7 @@ fn invalidate_hover_tile_rects(state: &mut AppState) {
     state.codex_tile_rect = None;
     state.opencode_tile_rect = None;
     state.qoder_tile_rect = None;
+    state.agy_external_tile_rect = None;
 }
 
 /// Toggle the opt-in Fable column and invalidate the geometry-dependent hover
@@ -3874,6 +3910,109 @@ fn toggle_show_fable_x(state: &mut AppState) {
     state.show_fable_x = !state.show_fable_x;
     invalidate_metrics(state);
     invalidate_hover_tile_rects(state);
+}
+
+/// The parent agy item (`gemini`) or its External models child. The parent
+/// turns agy itself on or off and is checked only while agy is on, so after
+/// the last pool was switched off one click brings agy back. The last
+/// provider cannot be turned off. Returns true when the provider set changed.
+fn toggle_antigravity_models(state: &mut AppState, gemini: bool) -> bool {
+    let agy_on = state.providers.contains(ProviderId::Antigravity);
+    if gemini {
+        let target = !(state.show_antigravity_gemini && agy_on);
+        if !target && state.providers.len() <= 1 && agy_on {
+            return false;
+        }
+        set_antigravity_shown(state, target);
+    } else {
+        state.show_antigravity_external = !state.show_antigravity_external;
+    }
+    invalidate_metrics(state);
+    let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
+        && state.providers.contains(ProviderId::Antigravity);
+    if !any_pool {
+        state.antigravity_hovered = false;
+        state.crossfade_opacity = 1.0;
+        state.crossfade_animation = None;
+    }
+    gemini
+}
+
+/// Agy on or off as a whole: the provider and its parent menu item move
+/// together, so the menu never shows agy checked while it is off.
+fn set_antigravity_shown(state: &mut AppState, on: bool) {
+    state.providers.set(ProviderId::Antigravity, on);
+    state.show_antigravity_gemini = on;
+    if !on {
+        state.antigravity_hovered = false;
+        state.crossfade_opacity = 1.0;
+        state.crossfade_animation = None;
+        state.agy_external_hovered = false;
+        state.agy_external_crossfade_opacity = 0.0;
+        state.agy_external_crossfade_animation = None;
+    }
+}
+
+/// Turn agy pool A on or off, like Claude's main pool. The last agy pool
+/// switched off turns agy off unless it is the only provider; switching a
+/// pool on while agy is off turns agy back on. Returns true when the provider
+/// set changed.
+fn toggle_antigravity_a(state: &mut AppState) -> bool {
+    let provider_on = state.providers.contains(ProviderId::Antigravity);
+    let a_on = provider_on && state.accounts.antigravity_a_enabled();
+    let o_on = provider_on && state.accounts.antigravity_x().is_some();
+    let target = !a_on;
+    if !target && !o_on {
+        if state.providers.len() <= 1 {
+            return false;
+        }
+        state.accounts.set_antigravity_a_enabled(true);
+        set_antigravity_shown(state, false);
+        return true;
+    }
+    state.accounts.set_antigravity_a_enabled(target);
+    reselect_antigravity_reading(state, target);
+    if target && !provider_on {
+        set_antigravity_shown(state, true);
+        return true;
+    }
+    false
+}
+
+/// Re-point agy's reading at the pools now on, before the next poll lands:
+/// pool A switched off hands agy to pool O at once, and pool A switched back
+/// on drops pool O's figures instead of showing them as pool A's.
+fn reselect_antigravity_reading(state: &mut AppState, pool_a_turned_on: bool) {
+    if let Some(data) = state.data.as_mut() {
+        if pool_a_turned_on {
+            data.remove(ProviderId::Antigravity);
+        }
+        data.select_accounts(&state.accounts);
+    }
+}
+
+/// Pool O's menu toggle. Turning off the last agy pool (pool A already off)
+/// turns agy off and pool A back on for next time, or is refused when agy is
+/// the only provider, so a switched-off pool A is never polled.
+fn toggle_antigravity_pool_o(state: &mut AppState) {
+    let was_o_only = state.accounts.antigravity_o_only();
+    toggle_antigravity_x(&mut state.accounts);
+    if state.accounts.antigravity_x().is_none() && !state.accounts.antigravity_a_enabled() {
+        if state.providers.len() <= 1 && state.providers.contains(ProviderId::Antigravity) {
+            toggle_antigravity_x(&mut state.accounts);
+        } else {
+            state.accounts.set_antigravity_a_enabled(true);
+            set_antigravity_shown(state, false);
+        }
+    } else if state.accounts.antigravity_x().is_some()
+        && !state.providers.contains(ProviderId::Antigravity)
+    {
+        set_antigravity_shown(state, true);
+    }
+    if was_o_only {
+        // Pool O's figures stood for agy; pool A's own come with the poll.
+        reselect_antigravity_reading(state, true);
+    }
 }
 
 /// Turn the OpenCode agy pool on or off. The profile is created on first use
@@ -3903,8 +4042,11 @@ fn toggle_show_fable(state: &mut AppState) {
     invalidate_hover_tile_rects(state);
 }
 
-fn widget_modes_from_settings(settings: &SettingsFile) -> [(u8, f64); 9] {
-    let mut modes = [(settings.view_mode, f64::from(settings.view_mode) - 1.0); 9];
+fn widget_modes_from_settings(
+    settings: &SettingsFile,
+) -> [(u8, f64); crate::theme_engine::WIDGET_SLOTS] {
+    let mut modes = [(settings.view_mode, f64::from(settings.view_mode) - 1.0);
+        crate::theme_engine::WIDGET_SLOTS];
     for (slot, key) in modes.iter_mut().zip(app_settings::widget_mode_keys()) {
         let mode = settings.widget_mode(key);
         *slot = (mode, f64::from(mode) - 1.0);
@@ -3916,13 +4058,26 @@ fn widget_modes_from_settings(settings: &SettingsFile) -> [(u8, f64); 9] {
 /// override keep following the shared default.
 fn widget_mode_overrides(
     view_mode: u8,
-    modes: &[(u8, f64); 9],
+    modes: &[(u8, f64); crate::theme_engine::WIDGET_SLOTS],
 ) -> std::collections::BTreeMap<String, u8> {
-    app_settings::widget_mode_keys()
+    let mut saved: std::collections::BTreeMap<String, u8> = app_settings::widget_mode_keys()
         .zip(modes.iter())
         .filter(|(_, &(mode, _))| mode != view_mode)
         .map(|(key, &(mode, _))| (key.to_owned(), mode))
-        .collect()
+        .collect();
+    // Loading copies an agy override into a missing external-models key (the
+    // migration for files saved before that key existed), so save the
+    // external mode explicitly whenever agy has an override.
+    if saved.contains_key("antigravity") {
+        let external = app_settings::widget_mode_keys()
+            .zip(modes.iter())
+            .find(|(key, _)| *key == crate::theme_engine::AGY_EXTERNAL_KEY)
+            .map(|(_, &(mode, _))| mode);
+        if let Some(mode) = external {
+            saved.insert(crate::theme_engine::AGY_EXTERNAL_KEY.to_owned(), mode);
+        }
+    }
+    saved
 }
 
 /// Change the selected slots from their own current phases.
@@ -4032,6 +4187,10 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
             (
                 &mut state.qoder_crossfade_animation,
                 &mut state.qoder_crossfade_opacity,
+            ),
+            (
+                &mut state.agy_external_crossfade_animation,
+                &mut state.agy_external_crossfade_opacity,
             ),
         ] {
             let (changed, more) = PhaseAnimation::tick_slot(slot, value, throttle);
@@ -4227,6 +4386,33 @@ pub(super) fn set_qoder_hover(hwnd: HWND, hovered: bool) {
     }
 }
 
+/// Drives the hover crossfade of the agy external-models widget, which is
+/// shown only while agy splits its external models into their own widget.
+pub(super) fn set_agy_external_hover(hwnd: HWND, hovered: bool) {
+    let mut should_animate = false;
+    {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if state.agy_external_hovered != hovered {
+            state.agy_external_hovered = hovered;
+            if state.providers.contains(ProviderId::Antigravity) || !hovered {
+                let target = if hovered { 1.0 } else { 0.0 };
+                state.agy_external_crossfade_animation = Some(hover_phase_animation(
+                    state.agy_external_crossfade_opacity,
+                    target,
+                    QODER_CROSSFADE_DURATION_MS,
+                ));
+                should_animate = true;
+            }
+        }
+    }
+    if should_animate {
+        ensure_crossfade_timer(hwnd);
+    }
+}
+
 fn reload_external_settings(hwnd: HWND) {
     let settings = load_settings();
     let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
@@ -4258,8 +4444,8 @@ fn reload_external_settings(hwnd: HWND) {
         // An external settings reload replaces the transient view state too.
         state.view_mode = settings.view_mode;
         state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
-        state.widget_animations = [None; 9];
-        state.widget_directions = [1; 9];
+        state.widget_animations = [None; crate::theme_engine::WIDGET_SLOTS];
+        state.widget_directions = [1; crate::theme_engine::WIDGET_SLOTS];
         state.widget_modes = widget_modes_from_settings(&settings);
         let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
             && state.providers.contains(ProviderId::Antigravity);
@@ -4292,6 +4478,11 @@ fn reload_external_settings(hwnd: HWND) {
             state.qoder_crossfade_opacity = 0.0;
             state.qoder_crossfade_animation = None;
         }
+        if !state.providers.contains(ProviderId::Antigravity) {
+            state.agy_external_hovered = false;
+            state.agy_external_crossfade_opacity = 0.0;
+            state.agy_external_crossfade_animation = None;
+        }
         state.stop_crossfade_timer_if_idle(hwnd);
         invalidate_metrics(state);
         state.antigravity_tile_rect = None;
@@ -4299,6 +4490,7 @@ fn reload_external_settings(hwnd: HWND) {
         state.codex_tile_rect = None;
         state.opencode_tile_rect = None;
         state.qoder_tile_rect = None;
+        state.agy_external_tile_rect = None;
         update_configured_placement(
             state,
             settings.placement_override,
@@ -5157,7 +5349,7 @@ mod phase_animation_tests {
             .next()
             .unwrap();
         assert!(!setters.contains("render_layered_animation()"));
-        assert_eq!(setters.matches("ensure_crossfade_timer(hwnd)").count(), 5);
+        assert_eq!(setters.matches("ensure_crossfade_timer(hwnd)").count(), 6);
         for duration in [
             super::ANTIGRAVITY_CROSSFADE_DURATION_MS,
             super::CLAUDE_CROSSFADE_DURATION_MS,
@@ -5283,7 +5475,8 @@ mod phase_animation_tests {
                 2 => state.codex_crossfade_animation = value,
                 3 => state.opencode_crossfade_animation = value,
                 4 => state.qoder_crossfade_animation = value,
-                _ => state.widget_animations[index - 5] = value,
+                5 => state.agy_external_crossfade_animation = value,
+                _ => state.widget_animations[index - 6] = value,
             }
         }
 
@@ -5291,7 +5484,7 @@ mod phase_animation_tests {
         assert!(!state.is_any_animation_active());
         let active = || Some(PhaseAnimation::linear(0.0, 1.0, Duration::from_millis(200)));
 
-        for index in 0..14 {
+        for index in 0..6 + crate::theme_engine::WIDGET_SLOTS {
             set_slot(&mut state, index, active());
             assert!(state.is_any_animation_active(), "slot {index}");
             set_slot(&mut state, index, None);
@@ -5433,14 +5626,14 @@ mod phase_animation_tests {
         assert!(state.widget_modes.iter().all(|slot| slot.0 == 3));
         assert!(state.widget_animations[4].is_some());
         // Nothing left to change: no save, no render.
-        state.widget_animations = [None; 9];
+        state.widget_animations = [None; crate::theme_engine::WIDGET_SLOTS];
         assert!(!super::change_widget_mode(&mut state, 1, true, Some(1)));
         assert!(!super::change_widget_mode(&mut state, 1, false, Some(1)));
 
         // Individual changes that bring every widget to one mode make it the
         // shared mode, so nothing is saved as an override.
         state.view_mode = 1;
-        state.widget_modes = [(2, 1.0); 9];
+        state.widget_modes = [(2, 1.0); crate::theme_engine::WIDGET_SLOTS];
         state.widget_modes[3] = (1, 0.0);
         assert!(super::change_widget_mode(&mut state, 3, false, Some(1)));
         assert_eq!(state.view_mode, 2);
@@ -5454,7 +5647,7 @@ mod phase_animation_tests {
             crate::theme_engine::ThemeDocument::starter(),
             placement("taskbar"),
         );
-        state.widget_modes = [(3, 1.5); 9];
+        state.widget_modes = [(3, 1.5); crate::theme_engine::WIDGET_SLOTS];
         super::sync_shared_mode_phase(&mut state);
         assert_eq!(state.mode_phase, 1.5);
         state.widget_modes[2] = (1, 0.0);
@@ -5465,8 +5658,8 @@ mod phase_animation_tests {
 
     #[test]
     fn tick_only_advances_animated_widget() {
-        let mut modes = [(1, 0.0); 9];
-        let mut animations = [None; 9];
+        let mut modes = [(1, 0.0); crate::theme_engine::WIDGET_SLOTS];
+        let mut animations = [None; crate::theme_engine::WIDGET_SLOTS];
         animations[2] = Some(PhaseAnimation::linear(0.0, 1.0, Duration::ZERO));
         for (animation, (_, phase)) in animations.iter_mut().zip(modes.iter_mut()) {
             PhaseAnimation::tick_slot(animation, phase, false);
@@ -5480,7 +5673,7 @@ mod phase_animation_tests {
 
     #[test]
     fn widget_mode_overrides_keep_only_differences() {
-        let mut modes = [(2, 1.0); 9];
+        let mut modes = [(2, 1.0); crate::theme_engine::WIDGET_SLOTS];
         assert!(super::widget_mode_overrides(2, &modes).is_empty());
         modes[0] = (3, 2.0);
         let saved = super::widget_mode_overrides(2, &modes);
@@ -5494,6 +5687,28 @@ mod phase_animation_tests {
         let reloaded = super::widget_modes_from_settings(&settings);
         assert_eq!(reloaded[0], (3, 2.0));
         assert!(reloaded[1..].iter().all(|&slot| slot == (1, 0.0)));
+    }
+
+    #[test]
+    fn agy_external_mode_equal_to_global_survives_save_and_reload() {
+        let keys: Vec<_> = crate::app_settings::widget_mode_keys().collect();
+        let agy = keys.iter().position(|k| *k == "antigravity").unwrap();
+        let ext = keys
+            .iter()
+            .position(|k| *k == crate::theme_engine::AGY_EXTERNAL_KEY)
+            .unwrap();
+        let mut modes = [(2, 1.0); crate::theme_engine::WIDGET_SLOTS];
+        modes[agy] = (3, 2.0);
+        let mut settings = crate::app_settings::SettingsFile::default();
+        settings.view_mode = 2;
+        settings.widget_modes = super::widget_mode_overrides(2, &modes);
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let mut reloaded: crate::app_settings::SettingsFile =
+            serde_json::from_str(&encoded).unwrap();
+        reloaded.normalize();
+        let restored = super::widget_modes_from_settings(&reloaded);
+        assert_eq!(restored[agy].0, 3);
+        assert_eq!(restored[ext].0, 2);
     }
 
     #[test]
@@ -5616,6 +5831,7 @@ mod menu_command_id_tests {
             IDM_PROVIDER_ANTIGRAVITY_GEMINI,
             IDM_PROVIDER_ANTIGRAVITY_EXTERNAL,
             IDM_PROVIDER_ANTIGRAVITY_X,
+            IDM_PROVIDER_ANTIGRAVITY_A,
             IDM_PROVIDER_CODEX_MAIN,
             IDM_PROVIDER_CODEX_X,
             IDM_PROVIDER_CLAUDE_MAIN,
@@ -5711,5 +5927,205 @@ mod antigravity_x_tests {
             super::partial_poll_retry_delay_ms(&data, providers, &accounts, 0, 900_000, 0)
                 .is_some()
         );
+    }
+}
+
+#[cfg(test)]
+mod antigravity_pool_toggle_tests {
+    use super::placement_regression_tests::{placement, state_for};
+    use crate::providers::{ProviderId, ProviderSet};
+    use crate::theme_engine::ThemeDocument;
+
+    #[test]
+    fn agy_pools_switch_independently_and_old_settings_keep_pool_a_on() {
+        let old: crate::accounts::AccountSettings = serde_json::from_str("{}").unwrap();
+        assert!(old.antigravity_a_enabled());
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        state.providers = ProviderSet::from_enabled([ProviderId::Antigravity, ProviderId::Claude]);
+        // Pool O on, then pool A off: agy stays on with pool O alone.
+        super::toggle_antigravity_pool_o(&mut state);
+        assert!(state.accounts.antigravity_x().is_some());
+        assert!(!super::toggle_antigravity_a(&mut state));
+        assert!(!state.accounts.antigravity_a_enabled());
+        assert!(state.providers.contains(ProviderId::Antigravity));
+        assert!(super::theme_runtime_from_state(&state).antigravity_o_only());
+        // Pool A back on, without touching pool O.
+        assert!(!super::toggle_antigravity_a(&mut state));
+        assert!(state.accounts.antigravity_a_enabled());
+        assert!(state.accounts.antigravity_x().is_some());
+        // Last pool off turns agy off and leaves pool A on for next time.
+        super::toggle_antigravity_a(&mut state);
+        super::toggle_antigravity_pool_o(&mut state);
+        assert!(!state.providers.contains(ProviderId::Antigravity));
+        assert!(state.accounts.antigravity_a_enabled());
+        // As the only provider, the last pool cannot be switched off.
+        state.providers = ProviderSet::from_enabled([ProviderId::Antigravity]);
+        assert!(!super::toggle_antigravity_a(&mut state));
+        assert!(state.accounts.antigravity_a_enabled());
+        // The setting survives a settings round trip.
+        state.accounts.set_antigravity_a_enabled(false);
+        let saved = serde_json::to_string(&state.accounts).unwrap();
+        let loaded: crate::accounts::AccountSettings = serde_json::from_str(&saved).unwrap();
+        assert!(!loaded.antigravity_a_enabled());
+    }
+
+    #[test]
+    fn agy_pool_a_off_makes_pool_o_the_agy_reading_from_poll_to_tray() {
+        use crate::localization::LanguageId;
+        use crate::poller::PollError;
+        let mut settings = crate::accounts::AccountSettings::default();
+        let mut profile = crate::accounts::AccountSettings::antigravity_x_profile();
+        profile.credentials_path = "C:\\account-tests\\opencode.db".into();
+        profile.enabled = true;
+        settings.antigravity.profiles.push(profile);
+        let agy = ProviderSet::from_enabled([ProviderId::Antigravity]);
+        let fixture = |percentage: f64| crate::models::UsageData {
+            session: crate::models::UsageSection {
+                available: true,
+                percentage,
+                resets_at: None,
+            },
+            weekly: crate::models::UsageSection {
+                available: true,
+                percentage,
+                resets_at: None,
+            },
+            ..Default::default()
+        };
+        // Both pools on: pool A (15 %) is agy's reading.
+        let both = crate::poller::poll_accounts_for_test(agy, &settings, |_, path| {
+            Ok(fixture(if path.is_some() { 70.0 } else { 15.0 }))
+        })
+        .unwrap();
+        assert_eq!(
+            both.get(ProviderId::Antigravity)
+                .unwrap()
+                .session
+                .percentage,
+            15.0
+        );
+        // Pool A off: only pool O is polled and it is agy's selected reading.
+        settings.set_antigravity_a_enabled(false);
+        let fresh = crate::poller::poll_accounts_for_test(agy, &settings, |_, path| {
+            assert!(path.is_some(), "pool A is off and must not be polled");
+            Ok(fixture(70.0))
+        })
+        .unwrap();
+        let data = crate::poller::carry_forward_failures(fresh, &both, agy);
+        assert_eq!(
+            data.get(ProviderId::Antigravity)
+                .unwrap()
+                .session
+                .percentage,
+            70.0
+        );
+        assert!(data.antigravity_x().unwrap().selected);
+        assert!(!data.accounts.iter().any(|a| a.is_antigravity_pool_a()));
+        let lines = super::tray_usage_summary_lines(&data, agy, LanguageId::English, false);
+        // Gemini line from pool O, plus its (empty) external-models line.
+        assert!(lines[0].contains("5h: 70%"), "{lines:?}");
+        assert!(lines.iter().all(|line| !line.contains("15%")), "{lines:?}");
+        // Pool O failing with pool A off: one tray error, and no stale pool A
+        // reading carried in its place.
+        let failed = crate::poller::poll_accounts_for_test(agy, &settings, |_, _| {
+            Err(PollError::AuthRequired)
+        });
+        let failed = match failed {
+            Ok(data) => data,
+            Err(_) => panic!("an account failure is published as data"),
+        };
+        let failed = crate::poller::carry_forward_failures(failed, &both, agy);
+        assert!(failed.get(ProviderId::Antigravity).is_none());
+        let failure = crate::poller::PollFailure {
+            provider: ProviderId::Antigravity,
+            error: PollError::AuthRequired,
+        };
+        let errors =
+            super::tray_error_lines(Some(&failed), Some(failure), agy, LanguageId::English);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
+
+    #[test]
+    fn agy_pool_switches_reselect_the_shown_reading_at_once() {
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        state.providers = ProviderSet::from_enabled([ProviderId::Antigravity, ProviderId::Claude]);
+        let mut data = crate::models::AppUsageData::default();
+        data.insert(ProviderId::Antigravity, crate::models::UsageData::default());
+        state.data = Some(data);
+        super::toggle_antigravity_pool_o(&mut state);
+        // Pool A off before any pool O poll: pool A's figures disappear.
+        super::toggle_antigravity_a(&mut state);
+        assert!(state
+            .data
+            .as_ref()
+            .unwrap()
+            .get(ProviderId::Antigravity)
+            .is_none());
+    }
+
+    #[test]
+    fn last_agy_pool_off_unchecks_the_parent_and_one_parent_click_restores_agy() {
+        use crate::context_menu::ContextMenuAction;
+        let checked = |state: &super::AppState, action: ContextMenuAction| {
+            super::window_context_menu::context_menu_checked(state, &action)
+        };
+        for last_pool_is_o in [false, true] {
+            let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+            state.providers =
+                ProviderSet::from_enabled([ProviderId::Antigravity, ProviderId::Claude]);
+            state.show_antigravity_gemini = true;
+            if last_pool_is_o {
+                // Pool O on, pool A off, then pool O off.
+                super::toggle_antigravity_pool_o(&mut state);
+                super::toggle_antigravity_a(&mut state);
+                super::toggle_antigravity_pool_o(&mut state);
+            } else {
+                super::toggle_antigravity_a(&mut state);
+            }
+            assert!(!state.providers.contains(ProviderId::Antigravity));
+            assert!(!checked(&state, ContextMenuAction::ToggleAntigravityGemini));
+            // One click on the parent brings agy back with pool A on.
+            assert!(super::toggle_antigravity_models(&mut state, true));
+            assert!(state.providers.contains(ProviderId::Antigravity));
+            assert!(checked(&state, ContextMenuAction::ToggleAntigravityGemini));
+            assert!(checked(&state, ContextMenuAction::ToggleAntigravityA));
+            assert!(state.accounts.antigravity_a_enabled());
+            assert!(state.accounts.antigravity_x().is_none());
+            // A second click turns it off again, as before.
+            super::toggle_antigravity_models(&mut state, true);
+            assert!(!state.providers.contains(ProviderId::Antigravity));
+        }
+        // As the only provider, the parent cannot be turned off.
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        state.providers = ProviderSet::from_enabled([ProviderId::Antigravity]);
+        state.show_antigravity_gemini = true;
+        super::toggle_antigravity_models(&mut state, true);
+        assert!(state.providers.contains(ProviderId::Antigravity));
+    }
+
+    #[test]
+    fn agy_external_widget_mode_is_saved_and_old_settings_load_unchanged() {
+        let key = crate::theme_engine::AGY_EXTERNAL_KEY;
+        let legacy =
+            serde_json::from_str::<crate::app_settings::SettingsFile>(r#"{"view_mode":2}"#)
+                .unwrap();
+        assert_eq!(legacy.widget_mode(key), 2);
+        let modes = super::widget_modes_from_settings(&legacy);
+        assert!(modes.iter().all(|&(mode, _)| mode == 2));
+        let loaded = serde_json::from_str::<crate::app_settings::SettingsFile>(
+            r#"{"view_mode":1,"widget_modes":{"agy_external":3}}"#,
+        )
+        .unwrap();
+        assert_eq!(loaded.widget_mode(key), 3);
+        assert_eq!(loaded.widget_mode("antigravity"), 1);
+        // Changing it moves only its own slot.
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        let index = crate::app_settings::widget_mode_keys()
+            .position(|candidate| candidate == key)
+            .unwrap();
+        assert!(super::change_widget_mode(&mut state, index, false, None));
+        for (slot, &(mode, _)) in state.widget_modes.iter().enumerate() {
+            assert_eq!(mode, if slot == index { 2 } else { 1 }, "slot {slot}");
+        }
     }
 }

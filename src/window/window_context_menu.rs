@@ -85,6 +85,59 @@ pub(super) unsafe fn note_menu_popup(hwnd: HWND, wparam: WPARAM, lparam: LPARAM)
 /// point until Escape, an outside click, or a non-toggle action. The flag also
 /// stops a second right-click from nesting another modal menu loop.
 static MENU_SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// A native popup is on screen (inside `TrackPopupMenu`). Shell-facing work
+/// that re-parents, re-orders or re-shows the owner surface can dismiss the
+/// menu, so it is deferred until the popup closes.
+static MENU_TRACKING: AtomicBool = AtomicBool::new(false);
+static DEFERRED_FULL_RENDER: AtomicBool = AtomicBool::new(false);
+static DEFERRED_RECONCILE: AtomicBool = AtomicBool::new(false);
+
+/// A context-menu session is running (between rounds too).
+pub(super) fn menu_session_active() -> bool {
+    MENU_SESSION_ACTIVE.load(Ordering::Acquire)
+}
+
+/// Shell-facing work that must wait for the popup to close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeferredMenuWork {
+    FullRender,
+    Reconcile,
+}
+
+/// Returns true (and remembers the work) while a popup is on screen; the
+/// caller then skips it. The work runs once when the popup closes.
+pub(super) fn defer_while_menu_open(work: DeferredMenuWork) -> bool {
+    if !MENU_TRACKING.load(Ordering::Acquire) {
+        return false;
+    }
+    match work {
+        DeferredMenuWork::FullRender => DEFERRED_FULL_RENDER.store(true, Ordering::Release),
+        DeferredMenuWork::Reconcile => DEFERRED_RECONCILE.store(true, Ordering::Release),
+    }
+    true
+}
+
+/// Mark the popup open or closed. Closing hands back the deferred work.
+fn set_menu_tracking(open: bool) -> (bool, bool) {
+    MENU_TRACKING.store(open, Ordering::Release);
+    if open {
+        return (false, false);
+    }
+    (
+        DEFERRED_FULL_RENDER.swap(false, Ordering::AcqRel),
+        DEFERRED_RECONCILE.swap(false, Ordering::AcqRel),
+    )
+}
+
+/// Run what was deferred while the popup was on screen.
+fn run_deferred_menu_work((render, reconcile): (bool, bool)) {
+    if reconcile {
+        lifecycle::reconcile_surfaces();
+    }
+    if render {
+        render_layered();
+    }
+}
 
 struct MenuSessionGuard;
 impl Drop for MenuSessionGuard {
@@ -104,6 +157,7 @@ fn is_provider_toggle(action: &ContextMenuAction) -> bool {
         ContextMenuAction::ToggleProvider { .. }
             | ContextMenuAction::ToggleAntigravityGemini
             | ContextMenuAction::ToggleAntigravityExternal
+            | ContextMenuAction::ToggleAntigravityA
             | ContextMenuAction::ToggleAntigravityX
             | ContextMenuAction::ToggleClaudeMain
             | ContextMenuAction::ToggleClaudeX
@@ -201,6 +255,7 @@ pub(super) fn show_context_menu_document(
                 (point.x, point.y)
             };
             let _ = SetForegroundWindow(hwnd);
+            set_menu_tracking(true);
             let selected = TrackPopupMenu(
                 display_menu,
                 TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NOANIMATION,
@@ -211,6 +266,7 @@ pub(super) fn show_context_menu_document(
                 None,
             )
             .0 as usize;
+            run_deferred_menu_work(set_menu_tracking(false));
             ROOT_MENU_HANDLE.store(0, Ordering::Relaxed);
             let _ = DestroyMenu(menu);
 
@@ -339,13 +395,45 @@ pub(super) fn context_menu_action_flags(
     let Some(state) = state.as_ref() else {
         return MENU_ITEM_FLAGS(0);
     };
-    let checked = match action {
+    let checked = context_menu_checked_with_origin(state, action, origin);
+    let disabled = matches!(
+        action,
+        ContextMenuAction::CheckForUpdates
+            if matches!(state.update_status, UpdateStatus::Checking | UpdateStatus::Applying)
+    ) || matches!(
+        action,
+        ContextMenuAction::LayerActions { .. } | ContextMenuAction::ToggleLayerRender { .. }
+    ) && origin.is_none()
+        && state.active_theme.is_none();
+    match (checked, disabled) {
+        (true, true) => MF_CHECKED | MF_GRAYED,
+        (true, false) => MF_CHECKED,
+        (false, true) => MF_GRAYED,
+        (false, false) => MENU_ITEM_FLAGS(0),
+    }
+}
+
+/// Check mark of a menu action for the current state (STATE already locked).
+pub(super) fn context_menu_checked_with_origin(
+    state: &AppState,
+    action: &ContextMenuAction,
+    origin: Option<&(usize, String)>,
+) -> bool {
+    match action {
         ContextMenuAction::SetUpdateFrequency { seconds } => {
             state.poll_interval_ms == seconds.saturating_mul(1_000)
         }
         ContextMenuAction::ToggleProvider { provider } => state.providers.contains(*provider),
-        ContextMenuAction::ToggleAntigravityGemini => state.show_antigravity_gemini,
+        // The parent shows agy itself: unchecked whenever agy is off, so one
+        // click always turns it back on.
+        ContextMenuAction::ToggleAntigravityGemini => {
+            state.show_antigravity_gemini && state.providers.contains(ProviderId::Antigravity)
+        }
         ContextMenuAction::ToggleAntigravityExternal => state.show_antigravity_external,
+        ContextMenuAction::ToggleAntigravityA => {
+            state.providers.contains(ProviderId::Antigravity)
+                && state.accounts.antigravity_a_enabled()
+        }
         ContextMenuAction::ToggleAntigravityX => state.accounts.antigravity_x().is_some(),
         ContextMenuAction::ToggleClaudeMain => {
             state.providers.contains(ProviderId::Claude)
@@ -455,22 +543,12 @@ pub(super) fn context_menu_action_flags(
             })
             .unwrap_or(false),
         _ => false,
-    };
-    let disabled = matches!(
-        action,
-        ContextMenuAction::CheckForUpdates
-            if matches!(state.update_status, UpdateStatus::Checking | UpdateStatus::Applying)
-    ) || matches!(
-        action,
-        ContextMenuAction::LayerActions { .. } | ContextMenuAction::ToggleLayerRender { .. }
-    ) && origin.is_none()
-        && state.active_theme.is_none();
-    match (checked, disabled) {
-        (true, true) => MF_CHECKED | MF_GRAYED,
-        (true, false) => MF_CHECKED,
-        (false, true) => MF_GRAYED,
-        (false, false) => MENU_ITEM_FLAGS(0),
     }
+}
+
+#[cfg(test)]
+pub(super) fn context_menu_checked(state: &AppState, action: &ContextMenuAction) -> bool {
+    context_menu_checked_with_origin(state, action, None)
 }
 
 /// Whether a `toggle_layer_render` target currently draws, so its menu row can
@@ -566,6 +644,7 @@ fn context_menu_static_command(action: &ContextMenuAction) -> Option<u16> {
         }
         ContextMenuAction::ToggleAntigravityGemini => Some(IDM_PROVIDER_ANTIGRAVITY_GEMINI),
         ContextMenuAction::ToggleAntigravityExternal => Some(IDM_PROVIDER_ANTIGRAVITY_EXTERNAL),
+        ContextMenuAction::ToggleAntigravityA => Some(IDM_PROVIDER_ANTIGRAVITY_A),
         ContextMenuAction::ToggleAntigravityX => Some(IDM_PROVIDER_ANTIGRAVITY_X),
         ContextMenuAction::ToggleClaudeMain => Some(IDM_PROVIDER_CLAUDE_MAIN),
         ContextMenuAction::ToggleClaudeX => Some(IDM_PROVIDER_CLAUDE_X),
@@ -644,6 +723,20 @@ pub(super) fn execute_context_menu_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shell_work_waits_for_the_open_popup_and_runs_once_after_it() {
+        use super::{defer_while_menu_open, set_menu_tracking, DeferredMenuWork};
+        assert!(!defer_while_menu_open(DeferredMenuWork::FullRender));
+        assert_eq!(set_menu_tracking(false), (false, false));
+        set_menu_tracking(true);
+        assert!(defer_while_menu_open(DeferredMenuWork::FullRender));
+        assert!(defer_while_menu_open(DeferredMenuWork::FullRender));
+        assert!(defer_while_menu_open(DeferredMenuWork::Reconcile));
+        assert_eq!(set_menu_tracking(false), (true, true));
+        assert_eq!(set_menu_tracking(false), (false, false));
+        assert!(!defer_while_menu_open(DeferredMenuWork::Reconcile));
+    }
+
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetMenuItemID, GetSubMenu};
 
@@ -660,6 +753,7 @@ mod tests {
             },
             ContextMenuAction::ToggleAntigravityGemini,
             ContextMenuAction::ToggleAntigravityExternal,
+            ContextMenuAction::ToggleAntigravityA,
             ContextMenuAction::ToggleAntigravityX,
             ContextMenuAction::ToggleClaudeMain,
             ContextMenuAction::ToggleClaudeX,

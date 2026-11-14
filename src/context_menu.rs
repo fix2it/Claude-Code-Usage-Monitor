@@ -66,6 +66,8 @@ pub enum ContextMenuAction {
     },
     ToggleAntigravityGemini,
     ToggleAntigravityExternal,
+    /// First agy pool (Antigravity's own login), switchable on its own.
+    ToggleAntigravityA,
     /// Second agy pool, read from OpenCode's login.
     ToggleAntigravityX,
     ToggleClaudeMain,
@@ -348,7 +350,8 @@ pub fn rendered_label(
         "Show pace" => language.text("Show pace"),
         "Fable" => language.text("Fable"),
         "External models" => language.text("External models"),
-        "agy (O = OpenCode)" => language.text("agy (O = OpenCode)"),
+        "agy (Main)" => language.text("agy (Main)"),
+        "agy (o = OpenCode)" => language.text("agy (o = OpenCode)"),
         _ => label,
     };
     format!(
@@ -440,8 +443,14 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "antigravity.gemini.enabled",
             ),
             child(
+                "provider-antigravity-a",
+                "agy (Main)",
+                Action::ToggleAntigravityA,
+                "antigravity.gemini.enabled",
+            ),
+            child(
                 "provider-antigravity-x",
-                "agy (O = OpenCode)",
+                "agy (o = OpenCode)",
                 Action::ToggleAntigravityX,
                 "antigravity.gemini.enabled",
             ),
@@ -841,9 +850,15 @@ mod tests {
             ),
             (
                 "provider-antigravity-gemini",
+                "provider-antigravity-a",
+                "antigravity.gemini.enabled",
+                "agy (Main)",
+            ),
+            (
+                "provider-antigravity-gemini",
                 "provider-antigravity-x",
                 "antigravity.gemini.enabled",
-                "agy (O = OpenCode)",
+                "agy (o = OpenCode)",
             ),
         ] {
             let index = providers.iter().position(|item| item.id == parent).unwrap();

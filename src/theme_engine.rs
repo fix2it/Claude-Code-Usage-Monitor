@@ -1186,13 +1186,15 @@ pub struct ThemeRuntime {
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     pub view_mode: u8,
     pub mode_phase: f64,
-    widget_mode_phases: [Option<f64>; 9],
+    widget_mode_phases: [Option<f64>; WIDGET_SLOTS],
     pub surface_nest: SurfaceNest,
     pub floating_card_opacity: u8,
     pub antigravity_gemini_enabled: bool,
     pub antigravity_external_enabled: bool,
     /// The second (OpenCode) agy pool is switched on.
     pub antigravity_x_enabled: bool,
+    /// The first agy pool (Antigravity's own login) is switched on.
+    pub antigravity_a_enabled: bool,
     pub crossfade_opacity: f64,
     pub claude_crossfade_opacity: f64,
     pub claude_hovered: bool,
@@ -1204,6 +1206,9 @@ pub struct ThemeRuntime {
     pub codex_x_enabled: bool,
     pub opencode_crossfade_opacity: f64,
     pub qoder_crossfade_opacity: f64,
+    /// Hover progress (0 = normal, 1 = hovered) of the agy external-models
+    /// widget, which has its own hover area.
+    pub agy_external_crossfade_opacity: f64,
     host_width: u32,
     host_height: u32,
 }
@@ -1222,12 +1227,13 @@ impl Default for ThemeRuntime {
             show_fable_x: false,
             view_mode: 1,
             mode_phase: 0.0,
-            widget_mode_phases: [None; 9],
+            widget_mode_phases: [None; WIDGET_SLOTS],
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
             antigravity_gemini_enabled: true,
             antigravity_external_enabled: false,
             antigravity_x_enabled: false,
+            antigravity_a_enabled: true,
             crossfade_opacity: 1.0,
             claude_crossfade_opacity: 0.0,
             claude_hovered: false,
@@ -1239,6 +1245,7 @@ impl Default for ThemeRuntime {
             codex_x_enabled: false,
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
+            agy_external_crossfade_opacity: 0.0,
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1274,12 +1281,13 @@ impl ThemeRuntime {
             show_fable_x: false,
             view_mode: 1,
             mode_phase: 0.0,
-            widget_mode_phases: [None; 9],
+            widget_mode_phases: [None; WIDGET_SLOTS],
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
             antigravity_gemini_enabled: agy,
             antigravity_external_enabled: false,
             antigravity_x_enabled: false,
+            antigravity_a_enabled: true,
             crossfade_opacity: 1.0,
             claude_crossfade_opacity: 0.0,
             claude_hovered: false,
@@ -1291,6 +1299,7 @@ impl ThemeRuntime {
             codex_x_enabled: false,
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
+            agy_external_crossfade_opacity: 0.0,
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1340,6 +1349,17 @@ impl ThemeRuntime {
     pub fn with_antigravity_x(mut self, enabled: bool) -> Self {
         self.antigravity_x_enabled = enabled;
         self
+    }
+
+    /// Pool A can be off while pool O is on; agy then shows pool O alone.
+    pub fn with_antigravity_a(mut self, enabled: bool) -> Self {
+        self.antigravity_a_enabled = enabled;
+        self
+    }
+
+    /// Only pool O is shown: it fills the single-pool agy layout.
+    pub(crate) fn antigravity_o_only(self) -> bool {
+        self.antigravity_x_enabled && !self.antigravity_a_enabled
     }
 
     pub fn with_nest(mut self, nest: SurfaceNest) -> Self {
@@ -1422,6 +1442,11 @@ impl ThemeRuntime {
 
     pub fn with_qoder_state(mut self, opacity: f64) -> Self {
         self.qoder_crossfade_opacity = opacity;
+        self
+    }
+
+    pub fn with_agy_external_state(mut self, opacity: f64) -> Self {
+        self.agy_external_crossfade_opacity = opacity;
         self
     }
 
@@ -1559,6 +1584,7 @@ pub(crate) fn antigravity_pool_o(data: Option<&AppUsageData>, runtime: ThemeRunt
     runtime.provider_enabled(ProviderId::Antigravity)
         && runtime.antigravity_gemini_enabled
         && runtime.antigravity_x_enabled
+        && runtime.antigravity_a_enabled
         && !data
             .and_then(AppUsageData::antigravity_x)
             .is_some_and(|account| account.error == Some(crate::poller::PollError::NoCredentials))
@@ -1636,10 +1662,15 @@ pub const DISPLAY_PROVIDER_KEYS: [&str; 8] = [
 ];
 
 fn widget_mode_index(key: &str) -> Option<usize> {
+    widget_keys().position(|candidate| candidate == key)
+}
+
+/// Every widget key in slot order: the providers, the Fable column, then the
+/// agy external-models widget.
+pub(crate) fn widget_keys() -> impl Iterator<Item = &'static str> {
     DISPLAY_PROVIDER_KEYS
-        .iter()
-        .position(|candidate| *candidate == key)
-        .or_else(|| (key == "fable").then_some(FABLE_METRICS_INDEX))
+        .into_iter()
+        .chain([FABLE_KEY, AGY_EXTERNAL_KEY])
 }
 
 const COMPACT_PERCENT_WIDTH: f64 = 30.0;
@@ -1669,8 +1700,11 @@ pub struct DisplayMetrics {
     /// the line cannot be measured, so the theme's `max(bar, text_box.fable)`
     /// falls back to the bar width.
     fable: ProviderMetrics,
-    /// The agy external-models widget is shown; it shares agy's metrics.
+    /// The agy external-models widget is shown.
     agy_split: bool,
+    /// The agy external-models widget, measured and moded on its own. It is
+    /// only shown with pool O, so it always has a marker column.
+    agy_external: ProviderMetrics,
 }
 
 impl DisplayMetrics {
@@ -1696,6 +1730,7 @@ impl DisplayMetrics {
             widget_count,
             fable: ProviderMetrics::default(),
             agy_split: antigravity_split(None, runtime),
+            agy_external: ProviderMetrics::default(),
         };
         let dual = claude_dual(runtime);
         metrics.fable = fable_column(
@@ -1729,17 +1764,28 @@ impl DisplayMetrics {
                 row_width: compact_row_width(bar, text_box, COMPACT_PERCENT_WIDTH, origin, phases),
             };
         }
+        metrics.agy_external = agy_external_column(
+            bar,
+            COMPACT_TEXT_WIDTH,
+            COMPACT_PERCENT_WIDTH,
+            COMPACT_ORIGIN_LEGACY,
+            decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
+            COMPACT_MARKER_WIDTH,
+        );
         metrics.providers_width = metrics.providers_width(runtime);
         metrics
     }
 
-    /// Enabled provider columns plus the agy external-models widget, which
-    /// is as wide as the agy widget and follows its mode.
+    /// The agy external-models widget's geometry.
+    #[cfg(test)]
+    pub fn agy_external(&self) -> ProviderMetrics {
+        self.agy_external
+    }
+
+    /// Enabled provider columns plus the agy external-models widget, sized
+    /// by its own measurement and mode.
     fn providers_width(&self, runtime: ThemeRuntime) -> f64 {
-        let agy = DISPLAY_PROVIDER_KEYS
-            .iter()
-            .position(|key| *key == "antigravity")
-            .map_or(0.0, |index| self.providers[index].row_width);
+        let agy = self.agy_external.row_width;
         compact_providers_width(
             DISPLAY_PROVIDER_KEYS
                 .iter()
@@ -1756,6 +1802,26 @@ impl DisplayMetrics {
 }
 
 const COMPACT_ORIGIN_LEGACY: f64 = 12.0;
+
+/// The agy external-models widget: a provider-style column with a pool
+/// marker column (`a`/`o`) before the bars.
+fn agy_external_column(
+    bar_full_width: f64,
+    text_box: f64,
+    percent_box: f64,
+    origin: f64,
+    phases: ModePhases,
+    marker_box: f64,
+) -> ProviderMetrics {
+    ProviderMetrics {
+        text_box,
+        percent_box,
+        marker_box,
+        origin,
+        text_slide: -text_box * phases.text_collapse,
+        row_width: compact_row_width(bar_full_width, text_box, percent_box, origin, phases),
+    }
+}
 
 fn display_provider_id(key: &str) -> ProviderId {
     match key {
@@ -1836,17 +1902,21 @@ pub(crate) const ANTIGRAVITY_EXTERNAL_WIDGET: &str = "antigravity-external-provi
 
 /// Slot after the eight providers: the Fable column's text measurement.
 const FABLE_METRICS_INDEX: usize = DISPLAY_PROVIDER_KEYS.len();
+const FABLE_KEY: &str = "fable";
+/// Widget key (mode slot, settings key and `display.*.<key>` bindings) of the
+/// agy external-models widget; its container is `ANTIGRAVITY_EXTERNAL_WIDGET`.
+pub(crate) const AGY_EXTERNAL_KEY: &str = "agy_external";
+/// Slot after the Fable column: the agy external-models widget.
+const AGY_EXTERNAL_INDEX: usize = FABLE_METRICS_INDEX + 1;
+/// Providers, the Fable column and the agy external-models widget.
+pub(crate) const WIDGET_SLOTS: usize = AGY_EXTERNAL_INDEX + 1;
 
 fn display_provider_key(provider_id: &str) -> Option<&'static str> {
-    // The agy external-models widget is measured with, and as wide as, agy.
+    // The agy external-models widget is measured as its own widget.
     if provider_id.eq_ignore_ascii_case(ANTIGRAVITY_EXTERNAL_WIDGET) {
-        return Some("antigravity");
+        return Some(AGY_EXTERNAL_KEY);
     }
-    DISPLAY_PROVIDER_KEYS
-        .iter()
-        .copied()
-        .chain(std::iter::once("fable"))
-        .find(|key| provider_id.eq_ignore_ascii_case(&format!("{key}-provider")))
+    widget_keys().find(|key| provider_id.eq_ignore_ascii_case(&format!("{key}-provider")))
 }
 
 fn scene_provider_key<'a>(
@@ -1958,7 +2028,7 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
             for hover in [false, true] {
                 let mut variant = runtime;
                 variant.mode_phase = phase;
-                variant.widget_mode_phases = [None; 9];
+                variant.widget_mode_phases = [None; WIDGET_SLOTS];
                 variant.view_mode = view_mode;
                 let (claude, codex, antigravity, opencode, qoder) = if hover {
                     (1.0, 1.0, 0.0, 1.0, 1.0)
@@ -1972,6 +2042,7 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
                 variant.crossfade_opacity = antigravity;
                 variant.opencode_crossfade_opacity = opencode;
                 variant.qoder_crossfade_opacity = qoder;
+                variant.agy_external_crossfade_opacity = claude;
                 let mut context =
                     DataContext::from_usage_with_runtime(data, &Canvas::default(), variant);
                 context.insert("system.dark", f64::from(dark));
@@ -2073,14 +2144,7 @@ pub(crate) fn display_metrics(
         let Some(key) = scene_provider_key(object, &by_id) else {
             continue;
         };
-        let provider_index = if key == "fable" {
-            FABLE_METRICS_INDEX
-        } else {
-            DISPLAY_PROVIDER_KEYS
-                .iter()
-                .position(|candidate| *candidate == key)
-                .unwrap_or(0)
-        };
+        let provider_index = widget_mode_index(key).unwrap_or(0);
         let kind = if object.id.contains("-marker-") {
             MeasuredLineKind::Marker
         } else if object.id.ends_with("-pct") {
@@ -2137,9 +2201,9 @@ pub(crate) fn display_metrics(
     }
 
     let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
-    let mut text_advance = [None::<f64>; 9];
-    let mut percent_advance = [None::<f64>; 9];
-    let mut marker_advance = [None::<f64>; 9];
+    let mut text_advance = [None::<f64>; WIDGET_SLOTS];
+    let mut percent_advance = [None::<f64>; WIDGET_SLOTS];
+    let mut marker_advance = [None::<f64>; WIDGET_SLOTS];
     let mut advances = HashMap::new();
     for line in &lines {
         let advance = *advances
@@ -2184,6 +2248,18 @@ pub(crate) fn display_metrics(
         fable_origin,
         decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
         claude_dual,
+    );
+    let (external_marker_box, external_origin) =
+        marker_column(marker_advance[AGY_EXTERNAL_INDEX], legacy.agy_external);
+    metrics.agy_external = agy_external_column(
+        bar,
+        text_advance[AGY_EXTERNAL_INDEX]
+            .map_or(legacy.agy_external.text_box, |advance| advance + 2.0),
+        percent_advance[AGY_EXTERNAL_INDEX]
+            .map_or(legacy.agy_external.percent_box, |advance| advance + 2.0),
+        external_origin,
+        decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
+        external_marker_box,
     );
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
         let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
@@ -2247,6 +2323,15 @@ pub(crate) fn metrics_for_phase(
         decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
         claude_dual(runtime),
     );
+    let external = metrics.agy_external;
+    metrics.agy_external = agy_external_column(
+        bar,
+        external.text_box,
+        external.percent_box,
+        external.origin,
+        decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
+        external.marker_box,
+    );
     metrics.providers_width = metrics.providers_width(runtime);
     metrics
 }
@@ -2272,8 +2357,10 @@ fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
         return Some(metrics.providers_width);
     }
     let (prefix, key) = name.rsplit_once('.')?;
-    let provider = if key.eq_ignore_ascii_case("fable") {
+    let provider = if key.eq_ignore_ascii_case(FABLE_KEY) {
         metrics.fable
+    } else if key.eq_ignore_ascii_case(AGY_EXTERNAL_KEY) {
+        metrics.agy_external
     } else {
         let index = DISPLAY_PROVIDER_KEYS
             .iter()
@@ -2307,12 +2394,7 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, 
     context.insert("display.mode_text_progress", phases.text_collapse);
     context.insert("display.mode_bar_progress", phases.bar_collapse);
 
-    for (index, key) in DISPLAY_PROVIDER_KEYS
-        .iter()
-        .copied()
-        .chain(std::iter::once("fable"))
-        .enumerate()
-    {
+    for (index, key) in widget_keys().enumerate() {
         let phase = runtime.widget_mode_phase(index);
         let phases = decompose_mode_phase(phase);
         context.insert(&format!("display.mode_phase.{key}"), phase);
@@ -2356,12 +2438,7 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, 
     context.insert("display.text_slide_x_wide", wide.text_slide_x);
     context.insert("display.provider_width_wide", wide.provider_width);
     // Per-widget row bindings follow each widget's own mode phase.
-    for (index, key) in DISPLAY_PROVIDER_KEYS
-        .iter()
-        .copied()
-        .chain(std::iter::once("fable"))
-        .enumerate()
-    {
+    for (index, key) in widget_keys().enumerate() {
         let row = mode_row_bindings(
             runtime.widget_mode_phase(index),
             bar,
@@ -2395,6 +2472,10 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, 
         clamp(runtime.opencode_crossfade_opacity),
     );
     context.insert("qoder.hover_phase", clamp(runtime.qoder_crossfade_opacity));
+    context.insert(
+        "agy_external.hover_phase",
+        clamp(runtime.agy_external_crossfade_opacity),
+    );
 
     // Adaptive Compact columns. Legacy reserves are the base every context
     // sees; theme-aware resolvers overwrite them with measured values.
@@ -2597,6 +2678,7 @@ impl DataContext {
         };
         context.insert("qoder.hover_phase", qoder_phase);
         context.insert_hover_crossfade("qoder", qoder_phase);
+        context.insert_hover_crossfade(AGY_EXTERNAL_KEY, runtime.agy_external_crossfade_opacity);
         if let Some(data) = data {
             for account in &data.accounts {
                 let key = format!(
@@ -2711,10 +2793,15 @@ impl DataContext {
                     runtime.countdown,
                 );
             }
-            let pool_a = data.get(ProviderId::Antigravity);
             let pool_o_usage = data
                 .antigravity_x()
                 .and_then(|account| account.usage.as_ref());
+            // With pool A off, pool O fills the single-pool layout alone.
+            let pool_a = if runtime.antigravity_o_only() {
+                pool_o_usage
+            } else {
+                data.get(ProviderId::Antigravity)
+            };
             context.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
             if let Some(agy) = pool_a {
                 // Antigravity answered this poll; pool-level gaps are "no limit

@@ -58,9 +58,9 @@ fn widget_key_for_object<'a>(
     let mut current = Some(object_id);
     for _ in 0..=surface.children.len() {
         let id = current?;
-        // The agy external-models widget shares the agy widget's mode.
+        // The agy external-models widget has its own mode slot.
         if id == theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET {
-            return Some("antigravity");
+            return Some(theme_engine::AGY_EXTERNAL_KEY);
         }
         if let Some(key) =
             app_settings::widget_mode_keys().find(|key| id == format!("{key}-provider"))
@@ -79,7 +79,8 @@ fn widget_key_for_object<'a>(
 /// True when the surface has at least one `<key>-provider` container.
 fn surface_has_widgets(surface: &theme_engine::SceneObject) -> bool {
     surface.children.iter().any(|object| {
-        app_settings::widget_mode_keys().any(|key| object.id == format!("{key}-provider"))
+        object.id == theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET
+            || app_settings::widget_mode_keys().any(|key| object.id == format!("{key}-provider"))
     })
 }
 
@@ -174,6 +175,7 @@ pub(super) fn execute_mouse_action_source(
         let runtime =
             theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
         let metrics = state.prepared_metrics.clone();
+        let overrides_before = state.mouse_action_overrides.clone();
         let result = theme_engine::execute_mouse_actions_with_metrics(
             &theme,
             surface_index,
@@ -184,17 +186,28 @@ pub(super) fn execute_mouse_action_source(
             &mut state.mouse_action_overrides,
             metrics.as_ref(),
         );
-        invalidate_metrics(state);
-        result
+        let changed = state.mouse_action_overrides != overrides_before;
+        let needs_render = result
+            .as_ref()
+            .map_or(changed, |effects| action_needs_render(effects, changed));
+        if needs_render {
+            invalidate_metrics(state);
+        }
+        (result, needs_render)
     };
+    let (result, needs_render) = result;
     match result {
         Ok(effects) => {
-            render_layered();
             let owner = lock_state()
                 .as_ref()
                 .map(|state| state.hwnd.to_hwnd())
                 .unwrap_or_default();
-            sync_tray_icon(owner);
+            // A plain right-click only opens the menu: re-measuring and
+            // re-rendering first only delays it.
+            if needs_render {
+                render_layered();
+                sync_tray_icon(owner);
+            }
             for effect in effects {
                 match effect {
                     MouseActionEffect::ShowDashboard => {
@@ -222,6 +235,16 @@ pub(super) fn execute_mouse_action_source(
             false
         }
     }
+}
+
+/// An action changed what the widget shows unless it only opened a menu and
+/// left every override as it was.
+pub(super) fn action_needs_render(effects: &[MouseActionEffect], overrides_changed: bool) -> bool {
+    overrides_changed
+        || effects
+            .iter()
+            .any(|effect| !matches!(effect, MouseActionEffect::ShowContextMenu(_)))
+        || effects.is_empty()
 }
 
 pub(super) fn schedule_or_dispatch_click(hwnd: HWND, surface_index: usize, object_id: String) {
@@ -524,7 +547,8 @@ fn revalidate_active_hover_once() {
             || state.claude_hovered
             || state.codex_hovered
             || state.opencode_hovered
-            || state.qoder_hovered;
+            || state.qoder_hovered
+            || state.agy_external_hovered;
         let active =
             hover_needs_revalidation(provider_hovered, state.hovered_mouse_layer.is_some());
         let count = (state.mirror_hwnds.len() + 1).max(state.desktop_hwnds.len());
@@ -686,6 +710,7 @@ pub(super) const CLAUDE_HOVER_OBJECT: &str = "claude-provider";
 pub(super) const CODEX_HOVER_OBJECT: &str = "codex-provider";
 pub(super) const OPENCODE_HOVER_OBJECT: &str = "opencode-provider";
 pub(super) const QODER_HOVER_OBJECT: &str = "qoder-provider";
+pub(super) const AGY_EXTERNAL_HOVER_OBJECT: &str = theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET;
 
 fn tile_hover_at(
     state: &super::AppState,
@@ -743,7 +768,14 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     track_mouse_hover_with(hwnd, widget_tooltip::visible_for(hwnd), |tracking| unsafe {
         TrackMouseEvent(tracking)
     });
-    let (antigravity_hovered, claude_hovered, codex_hovered, opencode_hovered, qoder_hovered) = {
+    let (
+        antigravity_hovered,
+        claude_hovered,
+        codex_hovered,
+        opencode_hovered,
+        qoder_hovered,
+        agy_external_hovered,
+    ) = {
         let state = lock_state();
         if let Some(state) = state.as_ref() {
             (
@@ -752,9 +784,10 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
                 tile_hover_at(state, hwnd, lparam, state.codex_tile_rect),
                 tile_hover_at(state, hwnd, lparam, state.opencode_tile_rect),
                 tile_hover_at(state, hwnd, lparam, state.qoder_tile_rect),
+                tile_hover_at(state, hwnd, lparam, state.agy_external_tile_rect),
             )
         } else {
-            (false, false, false, false, false)
+            (false, false, false, false, false, false)
         }
     };
     set_antigravity_hover(hwnd, antigravity_hovered);
@@ -765,6 +798,7 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     // with the same cached `object_bounds` rect as the other three providers.
     super::set_opencode_hover(hwnd, opencode_hovered);
     super::set_qoder_hover(hwnd, qoder_hovered);
+    super::set_agy_external_hover(hwnd, agy_external_hovered);
     // No tick here: the animation timer drives every frame. Ticking on mouse
     // move could produce a second full render, and its throttle could swallow
     // real timer ticks.
@@ -836,6 +870,7 @@ pub(super) fn clear_mouse_hover(hwnd: HWND) {
     super::set_codex_hover(hwnd, false);
     super::set_opencode_hover(hwnd, false);
     super::set_qoder_hover(hwnd, false);
+    super::set_agy_external_hover(hwnd, false);
     let previous = {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {
@@ -954,6 +989,20 @@ unsafe fn surface_cursor_is_clickable(hwnd: HWND) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn opening_the_menu_alone_skips_the_re_render() {
+        use super::action_needs_render;
+        use crate::theme_engine::MouseActionEffect as Effect;
+        let menu = [Effect::ShowContextMenu(Some("classic-v1".into()))];
+        assert!(!action_needs_render(&menu, false));
+        assert!(action_needs_render(&menu, true));
+        assert!(action_needs_render(&[], false));
+        assert!(action_needs_render(
+            &[Effect::ShowContextMenu(None), Effect::ShowDashboard],
+            false
+        ));
+    }
+
+    #[test]
     fn built_in_widget_hit_test_finds_provider_containers() {
         use super::*;
         let mut theme: ThemeDocument =
@@ -1008,7 +1057,7 @@ mod tests {
         );
         assert_eq!(widget_key_for_object(&surface, "main"), None);
         assert_eq!(widget_key_for_object(&surface, "unknown"), None);
-        // The agy external-models widget changes the agy widget's mode.
+        // The agy external-models widget changes only its own mode.
         let mut external = theme_engine::SceneObject::object(
             theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET,
             "agy external models",
@@ -1019,7 +1068,11 @@ mod tests {
         surface.children.extend([external, gauge]);
         assert_eq!(
             widget_key_for_object(&surface, "antigravity-ext-a-5h"),
-            Some("antigravity")
+            Some(theme_engine::AGY_EXTERNAL_KEY)
+        );
+        assert_ne!(
+            app_settings::widget_mode_keys().position(|key| key == "antigravity"),
+            app_settings::widget_mode_keys().position(|key| key == theme_engine::AGY_EXTERNAL_KEY)
         );
         assert!(surface_has_widgets(&surface));
         // A custom theme without provider containers keeps the shared mode.

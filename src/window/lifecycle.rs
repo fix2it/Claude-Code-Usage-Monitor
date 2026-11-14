@@ -296,6 +296,10 @@ fn hosts_changed() -> bool {
 }
 
 pub(super) fn reconcile_surfaces() {
+    if window_context_menu::defer_while_menu_open(window_context_menu::DeferredMenuWork::Reconcile)
+    {
+        return;
+    }
     if RECONCILING.replace(true) {
         return;
     }
