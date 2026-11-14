@@ -5851,7 +5851,7 @@ fn dual_fable_pool_without_fable_shows_no_data_never_the_other_value() {
 }
 
 #[test]
-fn dual_fable_reserves_its_column_while_loading_and_keeps_the_width() {
+fn dual_fable_keeps_its_column_while_loading_and_sizes_to_real_text() {
     let theme = compact_theme();
     let loading = dual_fable_runtime().with_poll_state(false, false);
     let loaded = dual_fable_runtime();
@@ -5886,11 +5886,16 @@ fn dual_fable_reserves_its_column_while_loading_and_keeps_the_width() {
         (root - metrics.providers_width, metrics.fable.row_width)
     };
     let partial = dual_fable_data(Some(43.0), None);
+    // The column exists while loading; with data its width follows the real
+    // text like every other widget, so a short line takes less room.
+    let short = dual_fable_data(Some(5.0), Some(5.0));
     for phase in [0.0, 1.0, 2.0] {
-        let before = fable_share(None, loading.with_mode_phase(phase));
-        for usage in [&data, &partial] {
-            let after = fable_share(Some(usage), loaded.with_mode_phase(phase));
-            assert_eq!(before, after, "phase {phase}");
+        assert!(fable_share(None, loading.with_mode_phase(phase)).1 > 0.0);
+        let wide = fable_share(Some(&data), loaded.with_mode_phase(phase));
+        let narrow = fable_share(Some(&short), loaded.with_mode_phase(phase));
+        assert!(fable_share(Some(&partial), loaded.with_mode_phase(phase)).1 > 0.0);
+        if phase == 0.0 {
+            assert!(narrow.1 < wide.1, "{narrow:?} {wide:?}");
         }
     }
     // A failed first poll keeps the skeleton; so does a single pool.
@@ -5958,10 +5963,9 @@ fn dual_fable_rows_carry_pace_bindings_per_profile() {
 }
 
 #[test]
-fn fable_switches_between_row_and_separate_widget_without_data_width_changes() {
+fn fable_switches_between_row_and_separate_widget() {
     let theme = compact_theme();
     let full = dual_fable_data(Some(43.0), Some(81.0));
-    let before = dual_fable_data(None, None);
     for dual in [false, true] {
         let runtime = ThemeRuntime::new(true, false, false)
             .with_show_fable(true)
@@ -5973,10 +5977,6 @@ fn fable_switches_between_row_and_separate_widget_without_data_width_changes() {
             assert_eq!(empty.get("display.fable_separate"), Some(dual as u8 as f64));
             assert_eq!(empty.get("display.fable_row"), Some((!dual) as u8 as f64));
             assert_eq!(widget_count(None, runtime), 1 + dual as usize);
-            assert_eq!(
-                resolve_surface_size(&theme, 0, Some(&before), runtime),
-                resolve_surface_size(&theme, 0, Some(&full), runtime)
-            );
             assert_eq!(
                 evaluate(
                     &object(&theme, "claude-fable-segments-dark").render.0,

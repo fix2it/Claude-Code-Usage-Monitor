@@ -1750,13 +1750,6 @@ pub fn compact_providers_width(rows: impl IntoIterator<Item = f64>, count: usize
 /// Slot after the eight providers: the Fable column's text measurement.
 const FABLE_METRICS_INDEX: usize = DISPLAY_PROVIDER_KEYS.len();
 
-/// Widest usage line a two-pool Fable row is expected to show.
-const FABLE_DUAL_SAMPLE: &str = "100% · 6d 23h";
-
-/// Widest percent badge of a two-pool Fable row (the collapsed-bar mode), so
-/// the badge box does not change between the loading and the loaded state.
-const FABLE_DUAL_PERCENT_SAMPLE: &str = "100%";
-
 fn display_provider_key(provider_id: &str) -> Option<&'static str> {
     DISPLAY_PROVIDER_KEYS
         .iter()
@@ -2014,32 +2007,6 @@ pub(crate) fn display_metrics(
             if !scene_object_renders(object, &by_id, context) {
                 fingerprint.push_str("0;");
                 continue;
-            }
-            if kind != MeasuredLineKind::Marker
-                && (object.id.starts_with("fable-dual-")
-                    || object.id.starts_with("claude-fable-value-"))
-            {
-                // Reserve a representative Fable line while loading as well as
-                // after data arrives, in either Claude or the Fable column.
-                let sample_text = match kind {
-                    MeasuredLineKind::Percent => FABLE_DUAL_PERCENT_SAMPLE,
-                    _ => FABLE_DUAL_SAMPLE,
-                };
-                let sample_size = evaluate(&font_size.0, context).unwrap_or(13.0);
-                let sample_family = if context.force_segoe_ui {
-                    crate::widget_font::segoe_ui_family(weight.gdi_weight()).to_string()
-                } else {
-                    font_family.clone()
-                };
-                fingerprint.push_str(&format!("sample:{sample_family}:{sample_size};"));
-                lines.push(MeasuredLine {
-                    provider_index,
-                    kind,
-                    text: sample_text.into(),
-                    family: sample_family,
-                    font_size: sample_size,
-                    weight: weight.gdi_weight(),
-                });
             }
             let text = format_template(template, context);
             if kind != MeasuredLineKind::Marker && template_has_placeholder_usage(template, context)
