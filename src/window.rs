@@ -127,8 +127,8 @@ struct AppState {
     widget_modes: [(u8, f64); 9],
     /// +1 while the click cycle moves 1 -> 3, -1 while it moves back.
     /// The wheel overwrites this explicitly; clicks bounce off the ends.
-    mode_direction: i8,
-    mode_animation: Option<PhaseAnimation>,
+    widget_directions: [i8; 9],
+    widget_animations: [Option<PhaseAnimation>; 9],
     accounts: crate::accounts::AccountSettings,
 
     data: Option<AppUsageData>,
@@ -191,7 +191,7 @@ impl AppState {
             || self.codex_crossfade_animation.is_some()
             || self.opencode_crossfade_animation.is_some()
             || self.qoder_crossfade_animation.is_some()
-            || self.mode_animation.is_some()
+            || self.widget_animations.iter().any(Option::is_some)
     }
 
     pub(super) fn stop_crossfade_timer_if_idle(&self, hwnd: HWND) {
@@ -2454,7 +2454,7 @@ unsafe extern "system" fn mirror_wnd_proc(
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEHWHEEL | WM_APPCOMMAND | WM_CONTEXTMENU => LRESULT(0),
         // Same as the primary surface: wheel input over any mirror/desktop
-        // surface switches the one global view mode without parent forwarding.
+        // surface handles the widget mode without parent forwarding.
         WM_MOUSEWHEEL => {
             handle_mouse_wheel(hwnd, wparam);
             LRESULT(0)
@@ -2486,8 +2486,7 @@ unsafe extern "system" fn mirror_wnd_proc(
                 })
             };
             if !suppressed {
-                // Mirrors/desktop surfaces share the SAME global view mode as
-                // the primary surface, so route their plain clicks here too.
+                // Route mirror and desktop clicks through the same widget hit test.
                 handle_view_mode_click(hwnd, lparam);
             }
             LRESULT(0)
@@ -2793,8 +2792,8 @@ pub fn run() {
                 view_mode: settings.view_mode,
                 mode_phase: (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0),
                 widget_modes: widget_modes_from_settings(&settings),
-                mode_direction: 1,
-                mode_animation: None,
+                widget_directions: [1; 9],
+                widget_animations: [None; 9],
                 accounts: settings.accounts.clone(),
                 data: None,
                 prepared_metrics: None,
@@ -3004,10 +3003,10 @@ fn render_layered_impl(trigger: RenderTrigger) {
         // frames (whose geometry changes) still rebuild missing rects.
         if surface_index == 0 {
             let mut state = lock_state();
-            if let Some(state) = state
-                .as_mut()
-                .filter(|state| trigger == RenderTrigger::Full || state.mode_animation.is_some())
-            {
+            if let Some(state) = state.as_mut().filter(|state| {
+                trigger == RenderTrigger::Full
+                    || state.widget_animations.iter().any(Option::is_some)
+            }) {
                 if state.antigravity_tile_rect.is_none() {
                     state.antigravity_tile_rect = theme_engine::object_bounds_with_metrics(
                         &theme,
@@ -3793,7 +3792,7 @@ impl PhaseAnimation {
 }
 
 /// Bounce the view-mode cycle at the ends: `1 -> 2 -> 3 -> 2 -> 1 -> ...`.
-/// A click uses the direction stored in the global state, so reaching either
+/// A click uses the widget's stored direction, so reaching either
 /// end reverses the next click instead of stopping the cycle.
 pub(super) fn next_view_mode(current: u8, direction: i8) -> (u8, i8) {
     let next = i16::from(current) + i16::from(direction);
@@ -3884,27 +3883,68 @@ fn widget_mode_overrides(
         .collect()
 }
 
-fn set_view_mode(state: &mut AppState, mode: u8, direction: i8) {
-    state.view_mode = mode;
-    state.widget_modes.fill((mode, state.mode_phase));
-    invalidate_metrics(state);
-    state.mode_direction = direction;
-    state.mode_animation = Some(mode_phase_animation(state.mode_phase, mode));
-    invalidate_hover_tile_rects(state);
+/// Change the selected slots from their own current phases.
+fn change_widget_mode(state: &mut AppState, index: usize, shift: bool, wheel: Option<i8>) -> bool {
+    let Some(&(current, _)) = state.widget_modes.get(index) else {
+        return false;
+    };
+    // With Shift a wheel step at an end still brings the other widgets to
+    // the hit widget's mode, so Shift always means "all widgets in one mode".
+    let next = match wheel {
+        Some(toward) => {
+            wheel_view_mode(current, toward).or_else(|| shift.then_some((current, toward)))
+        }
+        None => Some(next_view_mode(current, state.widget_directions[index])),
+    };
+    let Some((mode, direction)) = next else {
+        return false;
+    };
+    let mut changed = false;
+    for i in 0..state.widget_modes.len() {
+        if !shift && i != index {
+            continue;
+        }
+        state.widget_directions[i] = direction;
+        if state.widget_modes[i].0 != mode {
+            state.widget_modes[i].0 = mode;
+            state.widget_animations[i] = Some(mode_phase_animation(state.widget_modes[i].1, mode));
+            changed = true;
+        }
+    }
+    // Once every widget is in one mode, it becomes the shared `view_mode`, so
+    // the saved file has no overrides and a restart restores the shared phase.
+    // The shared phase itself follows the widgets in `tick_animations`.
+    if state.widget_modes.iter().all(|&(other, _)| other == mode) {
+        state.view_mode = mode;
+    }
+    if changed {
+        // Prepared metrics do not depend on the mode (`metrics_for_phase`
+        // applies each phase), so only the hit-test rects are dropped.
+        invalidate_hover_tile_rects(state);
+    }
+    changed
 }
 
-/// Install and animate a view mode across all widget surfaces.
-pub(super) fn apply_view_mode(hwnd: HWND, mode: u8, direction: i8) {
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        let mode = mode.clamp(1, 3);
-        set_view_mode(state, mode, direction);
+/// Themes that read the shared `display.*` row bindings see one phase. While
+/// every widget is in the same mode it follows them (slot 0 as the source),
+/// so Shift input animates such themes as before.
+fn sync_shared_mode_phase(state: &mut AppState) {
+    let (mode, phase) = state.widget_modes[0];
+    if state.widget_modes.iter().all(|&(other, _)| other == mode) {
+        state.mode_phase = phase;
     }
-    // The first real WM_MOUSEMOVE after the transition must not be swallowed
-    // by the 8 ms duplicate-move coalescer.
+}
+
+pub(super) fn apply_widget_mode(hwnd: HWND, index: usize, shift: bool, wheel: Option<i8>) {
+    let changed = {
+        let mut state = lock_state();
+        state
+            .as_mut()
+            .is_some_and(|state| change_widget_mode(state, index, shift, wheel))
+    };
+    if !changed {
+        return;
+    }
     mouse::reset_mouse_move_throttle();
     save_state_settings();
     ensure_crossfade_timer(hwnd);
@@ -3932,7 +3972,7 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
         };
         let mut render = false;
         let mut active = false;
-        let mode_was_active = state.mode_animation.is_some();
+        let mode_was_active = state.widget_animations.iter().any(Option::is_some);
         for (slot, value) in [
             (&mut state.crossfade_animation, &mut state.crossfade_opacity),
             (
@@ -3951,21 +3991,25 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
                 &mut state.qoder_crossfade_animation,
                 &mut state.qoder_crossfade_opacity,
             ),
-            (&mut state.mode_animation, &mut state.mode_phase),
         ] {
             let (changed, more) = PhaseAnimation::tick_slot(slot, value, throttle);
             render |= changed;
             active |= more;
         }
-        if mode_was_active {
-            for (_, phase) in &mut state.widget_modes {
-                *phase = state.mode_phase;
-            }
+        for (slot, (_, phase)) in state
+            .widget_animations
+            .iter_mut()
+            .zip(state.widget_modes.iter_mut())
+        {
+            let (changed, more) = PhaseAnimation::tick_slot(slot, phase, throttle);
+            render |= changed;
+            active |= more;
         }
+        sync_shared_mode_phase(state);
         (
             render,
             active,
-            mode_was_active && state.mode_animation.is_none(),
+            mode_was_active && state.widget_animations.iter().all(Option::is_none),
         )
     };
     if !still_animating {
@@ -4171,7 +4215,8 @@ fn reload_external_settings(hwnd: HWND) {
         // An external settings reload replaces the transient view state too.
         state.view_mode = settings.view_mode;
         state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
-        state.mode_animation = None;
+        state.widget_animations = [None; 9];
+        state.widget_directions = [1; 9];
         state.widget_modes = widget_modes_from_settings(&settings);
         let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
             && state.providers.contains(ProviderId::Antigravity);
@@ -5194,7 +5239,8 @@ mod phase_animation_tests {
                 1 => state.claude_crossfade_animation = value,
                 2 => state.codex_crossfade_animation = value,
                 3 => state.opencode_crossfade_animation = value,
-                _ => state.mode_animation = value,
+                4 => state.qoder_crossfade_animation = value,
+                _ => state.widget_animations[index - 5] = value,
             }
         }
 
@@ -5202,7 +5248,7 @@ mod phase_animation_tests {
         assert!(!state.is_any_animation_active());
         let active = || Some(PhaseAnimation::linear(0.0, 1.0, Duration::from_millis(200)));
 
-        for index in 0..5 {
+        for index in 0..14 {
             set_slot(&mut state, index, active());
             assert!(state.is_any_animation_active(), "slot {index}");
             set_slot(&mut state, index, None);
@@ -5291,6 +5337,95 @@ mod phase_animation_tests {
             assert!((0.0..=1.0).contains(&hover), "{t}: {hover}");
             assert!(normal + hover <= 1.0 + 1e-9, "{t}: {normal} + {hover}");
         }
+    }
+
+    #[test]
+    fn widget_inputs_and_animation_are_independent() {
+        use super::placement_regression_tests::{placement, state_for};
+        let mut state = state_for(
+            crate::theme_engine::ThemeDocument::starter(),
+            placement("taskbar"),
+        );
+        assert!(super::change_widget_mode(&mut state, 0, false, None));
+        assert_eq!(state.widget_modes[0].0, 2);
+        assert!(state.widget_modes[1..].iter().all(|slot| slot.0 == 1));
+        assert!(super::change_widget_mode(&mut state, 1, false, Some(1)));
+        assert_eq!(state.widget_modes[1].0, 2);
+        assert!(super::change_widget_mode(&mut state, 0, false, None));
+        assert!(super::change_widget_mode(&mut state, 0, false, None));
+        assert_eq!(state.widget_directions[0], -1);
+        assert_eq!(state.widget_directions[1], 1);
+        assert_eq!(state.widget_modes[0].0, 2);
+        assert!(super::change_widget_mode(&mut state, 0, true, None));
+        assert!(state.widget_modes.iter().all(|slot| slot.0 == 1));
+        assert!(state
+            .widget_directions
+            .iter()
+            .all(|&direction| direction == -1));
+        assert_eq!(state.view_mode, 1);
+    }
+
+    #[test]
+    fn shift_wheel_uses_hit_widget_as_source() {
+        use super::placement_regression_tests::{placement, state_for};
+        let mut state = state_for(
+            crate::theme_engine::ThemeDocument::starter(),
+            placement("taskbar"),
+        );
+        state.widget_modes[1] = (2, 1.0);
+        assert!(super::change_widget_mode(&mut state, 1, true, Some(1)));
+        assert!(state.widget_modes.iter().all(|slot| slot.0 == 3));
+        assert_eq!(state.view_mode, 3);
+
+        // The hit widget is already at the end: Shift still aligns the rest.
+        state.widget_modes[4] = (1, 0.0);
+        assert!(super::change_widget_mode(&mut state, 1, true, Some(1)));
+        assert!(state.widget_modes.iter().all(|slot| slot.0 == 3));
+        assert!(state.widget_animations[4].is_some());
+        // Nothing left to change: no save, no render.
+        state.widget_animations = [None; 9];
+        assert!(!super::change_widget_mode(&mut state, 1, true, Some(1)));
+        assert!(!super::change_widget_mode(&mut state, 1, false, Some(1)));
+
+        // Individual changes that bring every widget to one mode make it the
+        // shared mode, so nothing is saved as an override.
+        state.view_mode = 1;
+        state.widget_modes = [(2, 1.0); 9];
+        state.widget_modes[3] = (1, 0.0);
+        assert!(super::change_widget_mode(&mut state, 3, false, Some(1)));
+        assert_eq!(state.view_mode, 2);
+        assert!(super::widget_mode_overrides(state.view_mode, &state.widget_modes).is_empty());
+    }
+
+    #[test]
+    fn shared_phase_follows_widgets_only_while_modes_agree() {
+        use super::placement_regression_tests::{placement, state_for};
+        let mut state = state_for(
+            crate::theme_engine::ThemeDocument::starter(),
+            placement("taskbar"),
+        );
+        state.widget_modes = [(3, 1.5); 9];
+        super::sync_shared_mode_phase(&mut state);
+        assert_eq!(state.mode_phase, 1.5);
+        state.widget_modes[2] = (1, 0.0);
+        state.widget_modes[0] = (3, 2.0);
+        super::sync_shared_mode_phase(&mut state);
+        assert_eq!(state.mode_phase, 1.5, "mixed modes keep the shared phase");
+    }
+
+    #[test]
+    fn tick_only_advances_animated_widget() {
+        let mut modes = [(1, 0.0); 9];
+        let mut animations = [None; 9];
+        animations[2] = Some(PhaseAnimation::linear(0.0, 1.0, Duration::ZERO));
+        for (animation, (_, phase)) in animations.iter_mut().zip(modes.iter_mut()) {
+            PhaseAnimation::tick_slot(animation, phase, false);
+        }
+        assert_eq!(modes[2].1, 1.0);
+        assert!(modes
+            .iter()
+            .enumerate()
+            .all(|(i, slot)| i == 2 || slot.1 == 0.0));
     }
 
     #[test]

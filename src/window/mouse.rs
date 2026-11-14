@@ -1,5 +1,7 @@
 use super::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_NONCLIENT, TME_QUERY};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, TME_NONCLIENT, TME_QUERY, VK_SHIFT,
+};
 
 pub(super) fn surface_index_for_window(state: &AppState, hwnd: HWND) -> Option<usize> {
     if state.hwnd.to_hwnd() == hwnd {
@@ -46,6 +48,73 @@ pub(super) fn mouse_target_at(hwnd: HWND, lparam: LPARAM) -> Option<(usize, Stri
         &metrics,
     )?;
     Some((surface_index, object_id))
+}
+
+/// Resolve the nearest <key>-provider ancestor in the selected surface.
+fn widget_key_for_object<'a>(
+    surface: &theme_engine::SceneObject,
+    object_id: &str,
+) -> Option<&'a str> {
+    let mut current = Some(object_id);
+    for _ in 0..=surface.children.len() {
+        let id = current?;
+        if let Some(key) =
+            app_settings::widget_mode_keys().find(|key| id == format!("{key}-provider"))
+        {
+            return Some(key);
+        }
+        current = surface
+            .children
+            .iter()
+            .find(|object| object.id == id)
+            .and_then(|object| object.parent.as_deref());
+    }
+    None
+}
+
+/// True when the surface has at least one `<key>-provider` container.
+fn surface_has_widgets(surface: &theme_engine::SceneObject) -> bool {
+    surface.children.iter().any(|object| {
+        app_settings::widget_mode_keys().any(|key| object.id == format!("{key}-provider"))
+    })
+}
+
+/// Which widgets an input changes: `(source slot, all widgets)`. A theme
+/// without `<key>-provider` containers keeps the old rule: any hit changes
+/// every widget, with slot 0 as the source.
+fn mode_target_at(lparam: LPARAM, surface_index: usize) -> Option<(usize, bool)> {
+    let mut guard = lock_state();
+    let state = guard.as_mut()?;
+    let theme = effective_theme_from_state(state)?;
+    let surface = theme.surfaces.get(surface_index)?;
+    if !surface_has_widgets(surface) {
+        return Some((0, true));
+    }
+    // One rule for every theme: the topmost visible provider container
+    // under the cursor owns the input, whatever object the event hit.
+    let scale = theme_surface_scale(&theme, surface_index).max(0.01);
+    let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
+    let primary = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let metrics =
+        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary), runtime);
+    let (x, y) = mouse_client_point(lparam);
+    let id = theme_engine::hit_test_widget_with_metrics(
+        &theme,
+        surface_index,
+        x / scale,
+        y / scale,
+        state.data.as_ref(),
+        runtime,
+        &metrics,
+    )?;
+    let key = widget_key_for_object(surface, &id)?;
+    app_settings::widget_mode_keys()
+        .position(|candidate| candidate == key)
+        .map(|index| (index, false))
+}
+
+fn shift_held() -> bool {
+    unsafe { GetKeyState(i32::from(VK_SHIFT.0)) < 0 }
 }
 
 pub(super) fn mouse_handler_exists(
@@ -205,40 +274,25 @@ pub(super) fn dispatch_double_click(hwnd: HWND, surface_index: usize, object_id:
 
 /// A theme-authored `click` action keeps its old routing (including the
 /// double-click delay). Only a click over an object with no click action
-/// bounces the global view mode; for such objects the wheel is the sole mode
-/// input. Keeping this decision pure makes the priority rule testable.
+/// changes the mode of the widget under the cursor. Keeping this decision pure makes the priority rule testable.
 pub(super) fn click_changes_view_mode(has_click_handler: bool) -> bool {
     !has_click_handler
 }
 
 /// Route a left-button release that did not start a drag. Both the primary
 /// surface and every mirror/desktop surface call this, so a click on any
-/// widget advances the ONE global view mode. Outside the widget the common
-/// hit-test returns `None` and nothing changes.
+/// widget advances that widget. A point outside all widgets changes nothing.
 pub(super) fn handle_view_mode_click(hwnd: HWND, lparam: LPARAM) {
     let Some((surface, object)) = mouse_target_at(hwnd, lparam) else {
         return;
     };
     let has_click = mouse_handler_exists(surface, &object, MouseEventKind::Click);
     if click_changes_view_mode(has_click) {
-        advance_view_mode_by_click(hwnd);
+        if let Some((index, all)) = mode_target_at(lparam, surface) {
+            super::apply_widget_mode(hwnd, index, all || shift_held(), None);
+        }
     } else {
         schedule_or_dispatch_click(hwnd, surface, object);
-    }
-}
-
-/// A click bounces `1 -> 2 -> 3 -> 2 -> 1` from the stored direction. It is
-/// handled directly in `WM_LBUTTONUP`, so there is no `GetDoubleClickTime()`
-/// wait before the mode changes.
-pub(super) fn advance_view_mode_by_click(hwnd: HWND) {
-    let next = {
-        let state = lock_state();
-        state
-            .as_ref()
-            .map(|state| super::next_view_mode(state.view_mode, state.mode_direction))
-    };
-    if let Some((mode, direction)) = next {
-        super::apply_view_mode(hwnd, mode, direction);
     }
 }
 
@@ -247,7 +301,7 @@ pub(super) fn advance_view_mode_by_click(hwnd: HWND) {
 const WHEEL_DELTA: i32 = 120;
 
 /// Accumulates partial wheel deltas so one physical notch advances the view
-/// mode exactly once. The state is global, like the view mode itself.
+/// mode exactly once. The accumulator is shared across surfaces.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct WheelAccumulator {
     remainder: i32,
@@ -301,24 +355,24 @@ fn wheel_notch_ready(delta: i32) -> bool {
 /// wheel delivered to this window while the pointer is elsewhere is ignored.
 pub(super) fn handle_mouse_wheel(hwnd: HWND, wparam: WPARAM) {
     let delta = ((wparam.0 >> 16) & 0xffff) as u16 as i16;
-    if delta == 0 || !cursor_over_widget(hwnd) {
+    if delta == 0 {
         return;
     }
-    // Partial deltas from a high-resolution wheel must not each advance a mode;
-    // only a complete accumulated notch may switch the view.
+    let Some(lparam) = cursor_client_lparam(hwnd) else {
+        return;
+    };
+    let Some((surface, _)) = mouse_target_at(hwnd, lparam) else {
+        return;
+    };
+    let Some((index, all)) = mode_target_at(lparam, surface) else {
+        return;
+    };
+    let shift = all || shift_held();
     if !wheel_notch_ready(i32::from(delta)) {
         return;
     }
-    let toward: i8 = if delta > 0 { -1 } else { 1 };
-    let next = {
-        let state = lock_state();
-        state
-            .as_ref()
-            .and_then(|state| super::wheel_view_mode(state.view_mode, toward))
-    };
-    if let Some((mode, direction)) = next {
-        super::apply_view_mode(hwnd, mode, direction);
-    }
+    let toward = if delta > 0 { -1 } else { 1 };
+    super::apply_widget_mode(hwnd, index, shift, Some(toward));
 }
 
 /// Rebuild a client-space `LPARAM` from the live cursor. `WM_MOUSEWHEEL`
@@ -335,14 +389,10 @@ fn cursor_client_lparam(hwnd: HWND) -> Option<LPARAM> {
     Some(LPARAM(packed as isize))
 }
 
-/// The root surface carries a non-empty `mouse_events` (the right-click menu),
-/// so a hit-test returning any object — including `"main"` — means the cursor
-/// is over the widget. That single fact is enough to gate a global switch.
 fn cursor_over_widget(hwnd: HWND) -> bool {
-    let Some(lparam) = cursor_client_lparam(hwnd) else {
-        return false;
-    };
-    mouse_target_at(hwnd, lparam).is_some()
+    cursor_client_lparam(hwnd)
+        .and_then(|point| mouse_target_at(hwnd, point))
+        .is_some()
 }
 
 /// A view-mode transition keeps the widget's right screen edge pinned and
@@ -899,6 +949,68 @@ unsafe fn surface_cursor_is_clickable(hwnd: HWND) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn built_in_widget_hit_test_finds_provider_containers() {
+        use super::*;
+        let mut theme: ThemeDocument =
+            serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+        theme.prepare_runtime();
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+            ProviderId::Claude,
+            ProviderId::Codex,
+        ]));
+        let metrics = theme_engine::display_metrics(&theme, None, runtime);
+        for id in ["claude-provider", "codex-provider"] {
+            let (x, y, width, height) =
+                theme_engine::object_bounds_with_metrics(&theme, 0, None, runtime, id, &metrics)
+                    .unwrap();
+            assert_eq!(
+                theme_engine::hit_test_widget_with_metrics(
+                    &theme,
+                    0,
+                    x + width / 2.0,
+                    y + height / 2.0,
+                    None,
+                    runtime,
+                    &metrics
+                )
+                .as_deref(),
+                Some(id)
+            );
+        }
+        assert_eq!(
+            theme_engine::hit_test_widget_with_metrics(
+                &theme, 0, -100.0, -100.0, None, runtime, &metrics
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn widget_key_uses_nearest_provider_ancestor() {
+        use super::*;
+        let mut surface = theme_engine::SceneObject::object("main", "main");
+        let mut provider = theme_engine::SceneObject::object("fable-provider", "Fable");
+        provider.parent = Some("main".into());
+        let mut child = theme_engine::SceneObject::object("fable-row", "row");
+        child.parent = Some("fable-provider".into());
+        let mut nested = theme_engine::SceneObject::object("label", "label");
+        nested.parent = Some("fable-row".into());
+        surface.children = vec![provider, child, nested];
+        assert_eq!(widget_key_for_object(&surface, "label"), Some("fable"));
+        assert_eq!(
+            widget_key_for_object(&surface, "fable-provider"),
+            Some("fable")
+        );
+        assert_eq!(widget_key_for_object(&surface, "main"), None);
+        assert_eq!(widget_key_for_object(&surface, "unknown"), None);
+        assert!(surface_has_widgets(&surface));
+        // A custom theme without provider containers keeps the shared mode.
+        let mut legacy = theme_engine::SceneObject::object("main", "main");
+        legacy.children = vec![theme_engine::SceneObject::object("bar", "bar")];
+        assert!(!surface_has_widgets(&legacy));
+    }
+
     use super::*;
 
     #[test]

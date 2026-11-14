@@ -2298,6 +2298,27 @@ fn insert_animation_bindings(context: &mut DataContext, runtime: &ThemeRuntime, 
     context.insert("display.text_width_wide", wide.text_width);
     context.insert("display.text_slide_x_wide", wide.text_slide_x);
     context.insert("display.provider_width_wide", wide.provider_width);
+    // Per-widget row bindings follow each widget's own mode phase.
+    for (index, key) in DISPLAY_PROVIDER_KEYS
+        .iter()
+        .copied()
+        .chain(std::iter::once("fable"))
+        .enumerate()
+    {
+        let row = mode_row_bindings(
+            runtime.widget_mode_phase(index),
+            bar,
+            COMPACT_TEXT_WIDTH,
+            COMPACT_MARKER_WIDTH,
+            COMPACT_ROW_GAP,
+        );
+        context.insert(&format!("display.bar_width.{key}"), row.bar_width);
+        context.insert(&format!("display.text_opacity.{key}"), row.text_opacity);
+        context.insert(
+            &format!("display.percent_opacity.{key}"),
+            row.percent_opacity,
+        );
+    }
 
     // Hover progress per provider. Antigravity's crossfade runs in the
     // opposite direction (1.0 = normal, 0.0 = hover), so invert it here to
@@ -4086,6 +4107,68 @@ impl Paint {
 
 mod theme_storage;
 pub use theme_storage::*;
+
+/// Hit the topmost rendered provider container, including its empty space.
+pub(crate) fn hit_test_widget_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    x: f64,
+    y: f64,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: &DisplayMetrics,
+) -> Option<String> {
+    let surface = theme.surfaces.get(surface_index)?;
+    if !surface_should_render_with_metrics(theme, surface_index, data, runtime, metrics) {
+        return None;
+    }
+    let (width, height) =
+        resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, metrics);
+    let canvas = Canvas {
+        width,
+        height,
+        width_expression: Some(surface.width.clone()),
+        height_expression: Some(surface.height.clone()),
+        background: surface.background.canvas_paint(),
+    };
+    let (resolved, _) = theme_rendering::resolve_objects_for_with_metrics(
+        surface,
+        &canvas,
+        &surface.children,
+        data,
+        runtime,
+        metrics,
+    );
+    let point = (
+        x - surface_horizontal_padding(theme, surface_index, runtime) as f64,
+        y,
+    );
+    resolved
+        .into_iter()
+        .rev()
+        .find(|object| {
+            crate::app_settings::widget_mode_keys()
+                .any(|key| object.source.id == format!("{key}-provider"))
+                && object.opacity > 0.0
+                && object.width > 0.0
+                && object.height > 0.0
+                && theme_rendering::point_in_clip(
+                    point,
+                    ClipRegion {
+                        x: object.x,
+                        y: object.y,
+                        width: object.width,
+                        height: object.height,
+                        rotation: object.rotation,
+                    },
+                )
+                && object
+                    .clip
+                    .iter()
+                    .all(|clip| theme_rendering::point_in_clip(point, *clip))
+        })
+        .map(|object| object.source.id.clone())
+}
 
 mod theme_rendering;
 pub use theme_rendering::*;

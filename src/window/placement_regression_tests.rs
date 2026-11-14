@@ -37,8 +37,8 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         view_mode: 1,
         mode_phase: 0.0,
         widget_modes: [(1, 0.0); 9],
-        mode_direction: 1,
-        mode_animation: None,
+        widget_directions: [1; 9],
+        widget_animations: [None; 9],
         accounts: Default::default(),
         data: None,
         prepared_metrics: None,
@@ -1143,12 +1143,13 @@ fn prepared_metrics_are_reused_and_invalidated() {
         crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
         2
     );
-    set_view_mode(&mut state, 2, 1);
+    // A mode change reuses the prepared metrics: phases apply on top.
+    change_widget_mode(&mut state, 0, true, None);
     let runtime = theme_runtime_from_state(&state);
     prepared_metrics(&mut state, &theme, runtime);
     assert_eq!(
         crate::theme_engine::METRICS_COMPUTATION_COUNT.with(|count| count.get()),
-        3
+        2
     );
 }
 

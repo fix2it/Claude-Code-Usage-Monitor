@@ -3471,6 +3471,21 @@ fn mode_phase_decomposition_is_exact_and_clamped() {
 }
 
 #[test]
+fn row_bindings_follow_each_widget_phase() {
+    let runtime = ThemeRuntime::default()
+        .with_mode_phase(0.0)
+        .with_widget_mode_phase("claude", 2.0);
+    let bar = compact_bar_full_width(runtime.provider_count());
+    let context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+    assert_eq!(context.get("display.bar_width.claude"), Some(0.0));
+    assert_eq!(context.get("display.text_opacity.claude"), Some(0.0));
+    assert_eq!(context.get("display.percent_opacity.claude"), Some(100.0));
+    assert_eq!(context.get("display.bar_width.codex"), Some(bar));
+    assert_eq!(context.get("display.text_opacity.codex"), Some(100.0));
+    assert_eq!(context.get("display.percent_opacity.codex"), Some(0.0));
+}
+
+#[test]
 fn animation_bindings_follow_the_mode_phase() {
     for (phase, view_mode) in [(0.0, 1u8), (0.5, 2), (1.0, 2), (1.5, 3), (2.0, 3)] {
         let runtime = ThemeRuntime::default()
@@ -3923,7 +3938,10 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
             // Gauge widths now come from a single precomputed binding rather
             // than from `providers.count`, so feed the row width for this count
             // the same way the render loop does.
-            context.insert("display.bar_width", compact_bar_full_width(count));
+            context.insert(
+                &format!("display.bar_width.{widget}"),
+                compact_bar_full_width(count),
+            );
             let start = evaluate(&gauge.x.0, &context).unwrap();
             let end = start + evaluate(&gauge.width.0, &context).unwrap();
             assert_eq!(evaluate(&tick.width.0, &context).unwrap(), 1.0);
@@ -4659,7 +4677,7 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
         let twin = by_id(&format!("{}-pct", label.id));
         twins += 1;
         assert!(
-            twin.render.0.contains("display.percent_opacity > 0.01"),
+            twin.render.0.contains("display.percent_opacity.") && twin.render.0.contains(" > 0.01"),
             "{} is not gated by the mode",
             twin.id
         );
@@ -4689,11 +4707,11 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
     let hover = by_id("claude-main-text-dark-hover-pct");
     assert_eq!(
         normal.visibility.0,
-        "display.percent_opacity * claude.normal.opacity"
+        "display.percent_opacity.claude * claude.normal.opacity"
     );
     assert_eq!(
         hover.visibility.0,
-        "display.percent_opacity * claude.hover.opacity"
+        "display.percent_opacity.claude * claude.hover.opacity"
     );
 
     let mut context = DataContext::from_usage(None, &Canvas::default());
@@ -4706,7 +4724,7 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
         (100.0, 0.0, 1.0, 0.0, 100.0), // mode 3, hovered
         (100.0, 0.4, 0.4, 40.0, 40.0), // mode 3, mid-crossfade
     ] {
-        context.insert("display.percent_opacity", percent_opacity);
+        context.insert("display.percent_opacity.claude", percent_opacity);
         context.insert("claude.normal.opacity", normal_opacity);
         context.insert("claude.hover.opacity", hover_opacity);
         assert_eq!(visibility(&context, normal), expect_normal, "normal layer");
@@ -4765,14 +4783,14 @@ fn compact_gauges_labels_and_percent_follow_the_mode_phase() {
     for phase in [0.0_f64, 0.5, 1.0, 1.5, 2.0] {
         let a = phase.min(1.0);
         let b = (phase - 1.0).clamp(0.0, 1.0);
-        context.insert("display.bar_width", bar * (1.0 - b));
-        context.insert("display.text_opacity", 100.0 * (1.0 - a));
-        context.insert("display.percent_opacity", 100.0 * b);
+        context.insert("display.bar_width.claude", bar * (1.0 - b));
+        context.insert("display.text_opacity.claude", 100.0 * (1.0 - a));
+        context.insert("display.percent_opacity.claude", 100.0 * b);
         context.insert("display.mode_bar_progress", b);
         context.insert("display.mode_bar_progress.claude", b);
 
         let gauge = by_id("claude-session-segments-dark");
-        assert_eq!(gauge.width.0, "display.bar_width");
+        assert_eq!(gauge.width.0, "display.bar_width.claude");
         assert_eq!(evaluate(&gauge.width.0, &context).unwrap(), bar * (1.0 - b));
 
         let label = by_id("claude-session-value-dark");
@@ -4903,9 +4921,9 @@ fn opencode_has_three_gauges_with_row_two_divided_into_two_horizontal_sub_bars()
     assert_eq!(session_gauge.y.0, "10");
     assert_eq!(week_gauge.y.0, "27");
     assert_eq!(monthly_gauge.y.0, "35 - 3 * opencode.hover_phase");
-    assert_eq!(session_gauge.width.0, "display.bar_width");
-    assert_eq!(week_gauge.width.0, "display.bar_width");
-    assert_eq!(monthly_gauge.width.0, "display.bar_width");
+    assert_eq!(session_gauge.width.0, "display.bar_width.opencode");
+    assert_eq!(week_gauge.width.0, "display.bar_width.opencode");
+    assert_eq!(monthly_gauge.width.0, "display.bar_width.opencode");
     assert_eq!(session_gauge.height.0, "9");
     assert_eq!(week_gauge.height.0, "6 - 3 * opencode.hover_phase");
     assert_eq!(monthly_gauge.height.0, "3 + 3 * opencode.hover_phase");
@@ -5077,7 +5095,7 @@ fn opencode_pace_ticks_stay_inside_their_gauges_at_fractional_bar_widths() {
                 // Collapsing below one pixel leaves no room for the tick; it
                 // parks at the gauge start and the mode fade hides it.
                 for bar_width in [0.0, 0.1, 0.4, 0.8, 0.99] {
-                    context.insert("display.bar_width", bar_width);
+                    context.insert("display.bar_width.opencode", bar_width);
                     let start = evaluate(&gauge.x.0, &context).unwrap();
                     assert_eq!(
                         evaluate(&tick.x.0, &context).unwrap(),
@@ -5087,7 +5105,7 @@ fn opencode_pace_ticks_stay_inside_their_gauges_at_fractional_bar_widths() {
                     );
                 }
                 for bar_width in [1.0, 1.6, 2.4, 10.0, 44.0] {
-                    context.insert("display.bar_width", bar_width);
+                    context.insert("display.bar_width.opencode", bar_width);
                     let start = evaluate(&gauge.x.0, &context).unwrap();
                     let end = start + evaluate(&gauge.width.0, &context).unwrap();
                     let x = evaluate(&tick.x.0, &context).unwrap();
