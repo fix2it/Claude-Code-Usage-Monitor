@@ -393,6 +393,7 @@ pub(super) fn context_menu_action_flags(
         ContextMenuAction::ToggleTaskbarLock => state.lock_taskbar,
         ContextMenuAction::ToggleShowPace => state.show_pace,
         ContextMenuAction::ToggleShowFable => state.show_fable,
+        ContextMenuAction::ToggleShowFableX => state.show_fable_x,
         ContextMenuAction::ToggleWidget => state
             .active_theme
             .as_ref()
@@ -571,6 +572,7 @@ fn context_menu_static_command(action: &ContextMenuAction) -> Option<u16> {
         ContextMenuAction::ToggleTaskbarLock => Some(IDM_LOCK_TASKBAR),
         ContextMenuAction::ToggleShowPace => Some(IDM_SHOW_PACE),
         ContextMenuAction::ToggleShowFable => Some(IDM_SHOW_FABLE),
+        ContextMenuAction::ToggleShowFableX => Some(IDM_SHOW_FABLE_X),
         ContextMenuAction::SetLanguage { language } => {
             if language.eq_ignore_ascii_case("system") {
                 Some(IDM_LANG_SYSTEM)
@@ -671,12 +673,17 @@ mod tests {
             context_menu_static_command(&ContextMenuAction::ToggleShowFable),
             Some(super::IDM_SHOW_FABLE)
         );
+        assert_eq!(
+            context_menu_static_command(&ContextMenuAction::ToggleShowFableX),
+            Some(super::IDM_SHOW_FABLE_X)
+        );
         for action in [
             ContextMenuAction::Refresh,
             ContextMenuAction::Exit,
             ContextMenuAction::OpenDashboard,
             ContextMenuAction::ToggleShowPace,
             ContextMenuAction::ToggleShowFable,
+            ContextMenuAction::ToggleShowFableX,
             ContextMenuAction::ToggleStartup,
             ContextMenuAction::ToggleTaskbarLock,
             ContextMenuAction::CheckForUpdates,

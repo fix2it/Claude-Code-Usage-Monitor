@@ -74,6 +74,7 @@ pub enum ContextMenuAction {
     ToggleTaskbarLock,
     ToggleShowPace,
     ToggleShowFable,
+    ToggleShowFableX,
     ToggleWidget,
     /// Accepted only so menus saved by older versions can be loaded and
     /// cleaned up. New menus cannot create or execute this legacy action.
@@ -404,12 +405,18 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "Claude Code (Main)",
                 Action::ToggleClaudeMain,
             ),
-            ContextMenuItem::action("provider-claude-x", "Claude Code X", Action::ToggleClaudeX),
             child(
                 "show-fable",
                 "Fable",
                 Action::ToggleShowFable,
-                "providers.claude.enabled",
+                "providers.claude.enabled && claude.main.enabled",
+            ),
+            ContextMenuItem::action("provider-claude-x", "Claude Code X", Action::ToggleClaudeX),
+            child(
+                "show-fable-x",
+                "Fable",
+                Action::ToggleShowFableX,
+                "providers.claude.enabled && claude.x.enabled",
             ),
             ContextMenuItem::action(
                 "provider-codex-main",
@@ -785,12 +792,35 @@ mod tests {
             .iter()
             .any(|item| item.id == "show-fable"));
         let providers = submenu("providers");
+        assert!(matches!(
+            providers[1].kind,
+            ContextMenuItemKind::Action {
+                action: ContextMenuAction::ToggleShowFable
+            }
+        ));
+        assert!(matches!(
+            providers[3].kind,
+            ContextMenuItemKind::Action {
+                action: ContextMenuAction::ToggleShowFableX
+            }
+        ));
+        assert_eq!(
+            serde_json::to_string(&ContextMenuAction::ToggleShowFableX).unwrap(),
+            r#"{"type":"toggle_show_fable_x"}"#
+        );
         let mut context = DataContext::from_usage(None, &theme_engine::Canvas::default());
+        context.insert("providers.claude.enabled", 1.0);
         for (parent, child, binding, label) in [
             (
-                "provider-claude-x",
+                "provider-claude-main",
                 "show-fable",
-                "providers.claude.enabled",
+                "claude.main.enabled",
+                "Fable",
+            ),
+            (
+                "provider-claude-x",
+                "show-fable-x",
+                "claude.x.enabled",
                 "Fable",
             ),
             (

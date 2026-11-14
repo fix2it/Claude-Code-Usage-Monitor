@@ -74,6 +74,7 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         use_windows_default_font: true,
         show_pace: true,
         show_fable: false,
+        show_fable_x: false,
         active_theme_path: None,
         active_theme: Some(theme),
         theme_clock_interval: None,

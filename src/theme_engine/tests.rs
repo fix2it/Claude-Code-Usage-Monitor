@@ -3772,6 +3772,71 @@ fn show_pace_binding_follows_the_setting() {
 }
 
 #[test]
+fn dual_fable_nodes_follow_their_own_pool_setting() {
+    let theme = compact_theme();
+    let mut counts = [0, 0];
+    for node in &theme.surfaces[0].children {
+        let pool = if node.id.starts_with("fable-dual-o-") {
+            0
+        } else if node.id.starts_with("fable-dual-x-") {
+            1
+        } else {
+            continue;
+        };
+        counts[pool] += 1;
+        for main in [false, true] {
+            for x in [false, true] {
+                for dark in [false, true] {
+                    let runtime = dual_fable_runtime()
+                        .with_show_fable(main)
+                        .with_show_fable_x(x);
+                    let mut context = dual_context(None, runtime);
+                    context.insert("system.dark", dark as u8 as f64);
+                    if !(if pool == 0 { main } else { x }) {
+                        assert_eq!(
+                            evaluate(&node.render.0, &context).unwrap(),
+                            0.0,
+                            "{}",
+                            node.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(counts.iter().all(|count| *count > 0));
+}
+
+#[test]
+fn fable_pool_bindings_follow_independent_settings_and_pool_visibility() {
+    for (main_on, x_on) in [(true, true), (true, false), (false, true), (false, false)] {
+        for main in [false, true] {
+            for x in [false, true] {
+                let runtime =
+                    ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+                        .with_claude_state(false, main_on, x_on, 0.0)
+                        .with_show_fable(main)
+                        .with_show_fable_x(x);
+                let context =
+                    DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+                let fable_main = main && main_on;
+                let fable_x = x && x_on;
+                assert_eq!(
+                    context.get("display.fable_main"),
+                    Some(fable_main as u8 as f64)
+                );
+                assert_eq!(context.get("display.fable_x"), Some(fable_x as u8 as f64));
+                assert_eq!(
+                    context.get("display.fable_visible"),
+                    Some((fable_main || fable_x) as u8 as f64)
+                );
+                assert_eq!(fable_visible(None, runtime), fable_main || fable_x);
+            }
+        }
+    }
+}
+
+#[test]
 fn show_fable_binding_defaults_to_off_and_follows_the_setting() {
     let defaults = crate::app_settings::SettingsFile::default();
     assert!(!defaults.show_fable);
@@ -5805,7 +5870,7 @@ fn fable_skeleton_is_drawn_before_data_whenever_fable_is_on() {
             }
         }
         // Fable off: no column at all.
-        let off = runtime.with_show_fable(false);
+        let off = runtime.with_show_fable(false).with_show_fable_x(false);
         assert!(!fable_visible(None, off));
         assert_eq!(
             dual_context(None, off).get("display.fable_visible"),
@@ -5856,6 +5921,7 @@ fn single_pool_fable_bar_matches_the_two_pool_rows_on_skeleton_and_pace() {
 fn dual_fable_runtime() -> ThemeRuntime {
     ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
         .with_show_fable(true)
+        .with_show_fable_x(true)
         .with_claude_state(false, true, true, 0.0)
 }
 

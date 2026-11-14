@@ -170,6 +170,7 @@ struct AppState {
     use_windows_default_font: bool,
     show_pace: bool,
     show_fable: bool,
+    show_fable_x: bool,
     active_theme_path: Option<PathBuf>,
     active_theme: Option<ThemeDocument>,
     theme_clock_interval: Option<Duration>,
@@ -291,6 +292,7 @@ const IDM_START_WITH_WINDOWS: u16 = 20;
 const IDM_LOCK_TASKBAR: u16 = 21;
 const IDM_SHOW_PACE: u16 = 22;
 const IDM_SHOW_FABLE: u16 = 23;
+const IDM_SHOW_FABLE_X: u16 = 24;
 const IDM_VERSION_ACTION: u16 = 31;
 const IDM_LANG_SYSTEM: u16 = 100;
 const IDM_LANG_FIRST: u16 = 101;
@@ -844,6 +846,7 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         .with_windows_default_font(state.use_windows_default_font)
         .with_show_pace(state.show_pace)
         .with_show_fable(state.show_fable)
+        .with_show_fable_x(state.show_fable_x)
         .with_view_mode(state.view_mode)
         .with_mode_phase(state.mode_phase)
         .with_opencode_state(state.opencode_crossfade_opacity)
@@ -1136,6 +1139,7 @@ fn save_state_settings() {
         persisted.custom_theme_enabled = s.custom_theme_enabled;
         persisted.show_pace = s.show_pace;
         persisted.show_fable = s.show_fable;
+        persisted.show_fable_x = Some(s.show_fable_x);
         persisted.view_mode = s.view_mode;
         persisted.widget_modes = widget_mode_overrides(s.view_mode, &s.widget_modes);
         persisted.active_theme_path = s
@@ -2828,6 +2832,7 @@ pub fn run() {
                 use_windows_default_font: settings.use_windows_default_font,
                 show_pace: settings.show_pace,
                 show_fable: settings.show_fable,
+                show_fable_x: settings.show_fable_x.unwrap_or(settings.show_fable),
                 active_theme_path,
                 active_theme,
                 theme_clock_interval,
@@ -3852,6 +3857,12 @@ fn invalidate_hover_tile_rects(state: &mut AppState) {
 /// cache. The column changes the root surface width in both built-in themes
 /// (between Claude and Codex in Compact, last in Classic), so enabling or
 /// disabling it shifts the provider hit-test rects.
+fn toggle_show_fable_x(state: &mut AppState) {
+    state.show_fable_x = !state.show_fable_x;
+    invalidate_metrics(state);
+    invalidate_hover_tile_rects(state);
+}
+
 fn toggle_show_fable(state: &mut AppState) {
     state.show_fable = !state.show_fable;
     invalidate_metrics(state);
@@ -4209,6 +4220,7 @@ fn reload_external_settings(hwnd: HWND) {
         state.use_windows_default_font = settings.use_windows_default_font;
         state.show_pace = settings.show_pace;
         state.show_fable = settings.show_fable;
+        state.show_fable_x = settings.show_fable_x.unwrap_or(settings.show_fable);
         // An external settings reload replaces the transient view state too.
         state.view_mode = settings.view_mode;
         state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
@@ -5309,6 +5321,13 @@ mod phase_animation_tests {
         super::toggle_show_fable(&mut state);
         assert_eq!(state.show_fable, before, "the toggle must be reversible");
         assert_rects_cleared(&state);
+
+        seed_rects(&mut state);
+        let before_x = state.show_fable_x;
+        super::toggle_show_fable_x(&mut state);
+        assert_ne!(state.show_fable_x, before_x);
+        assert_eq!(state.show_fable, before);
+        assert_rects_cleared(&state);
     }
 
     #[test]
@@ -5557,6 +5576,7 @@ mod menu_command_id_tests {
             IDM_LOCK_TASKBAR,
             IDM_SHOW_PACE,
             IDM_SHOW_FABLE,
+            IDM_SHOW_FABLE_X,
             IDM_VERSION_ACTION,
             IDM_DASHBOARD,
             IDM_PROVIDER_ANTIGRAVITY_GEMINI,

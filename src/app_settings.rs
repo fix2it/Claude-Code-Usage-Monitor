@@ -84,6 +84,8 @@ pub struct SettingsFile {
     /// limit; the column only appears when the user opts in.
     #[serde(default)]
     pub show_fable: bool,
+    #[serde(default)]
+    pub show_fable_x: Option<bool>,
     /// Widget view mode: 1 = full, 2 = bars only, 3 = compact percent.
     /// Persisted so the widget starts in the last selected view.
     #[serde(
@@ -165,6 +167,7 @@ impl Default for SettingsFile {
             use_windows_default_font: true,
             show_pace: true,
             show_fable: false,
+            show_fable_x: None,
             view_mode: default_view_mode(),
             widget_modes: BTreeMap::new(),
             active_theme_path: None,
@@ -185,6 +188,7 @@ pub struct LegacyPlacement {
 
 impl SettingsFile {
     pub fn normalize(&mut self) {
+        self.show_fable_x.get_or_insert(self.show_fable);
         self.accounts.claude.normalize();
         self.accounts.codex.normalize();
         if !(POLL_1_MIN..=MAX_POLL_MINUTES * POLL_1_MIN).contains(&self.poll_interval_ms)
@@ -771,6 +775,22 @@ mod tests {
         let counting_down = decode_settings(r#"{"usage_countdown":true}"#).unwrap();
         assert!(counting_down.usage_countdown);
         assert_eq!(settings_json(&counting_down)["usage_countdown"], true);
+    }
+
+    #[test]
+    fn fable_x_migrates_and_round_trips_independently() {
+        for main in [false, true] {
+            let mut legacy = decode_settings(&format!(r#"{{"show_fable":{main}}}"#)).unwrap();
+            assert_eq!(legacy.show_fable_x, None);
+            legacy.normalize();
+            assert_eq!(legacy.show_fable_x, Some(main));
+            for x in [false, true] {
+                legacy.show_fable_x = Some(x);
+                let mut loaded = decode_settings(&settings_json(&legacy).to_string()).unwrap();
+                loaded.normalize();
+                assert_eq!((loaded.show_fable, loaded.show_fable_x), (main, Some(x)));
+            }
+        }
     }
 
     #[test]

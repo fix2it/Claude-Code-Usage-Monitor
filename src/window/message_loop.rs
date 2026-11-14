@@ -857,6 +857,21 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     super::mouse::revalidate_mouse_hover(hwnd);
                     sync_tray_icon(hwnd);
                 }
+                IDM_SHOW_FABLE_X => {
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            super::toggle_show_fable_x(s);
+                        }
+                    }
+                    save_state_settings();
+                    render_layered();
+                    // The Fable column changes the root width: a right-pinned
+                    // window moves its left edge, so Win32 sends no
+                    // WM_MOUSELEAVE for a cursor it moved out from under.
+                    super::mouse::revalidate_mouse_hover(hwnd);
+                    sync_tray_icon(hwnd);
+                }
                 IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
                     let new_interval = match id {
                         IDM_FREQ_1MIN => POLL_1_MIN,
@@ -1019,7 +1034,9 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                     s.providers.set(ProviderId::Claude, true);
                                     should_reposition = true;
                                 }
-                                s.claude_tile_rect = None;
+                                // A pool switch can add or drop the Fable column,
+                                // which moves every widget's hover area.
+                                super::invalidate_hover_tile_rects(s);
                                 invalidate_metrics(s);
                             }
                         }
@@ -1029,6 +1046,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                         position_at_taskbar();
                     }
                     render_layered();
+                    super::mouse::revalidate_mouse_hover(hwnd);
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }

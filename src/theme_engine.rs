@@ -1181,6 +1181,7 @@ pub struct ThemeRuntime {
     pub show_pace: bool,
     /// Opt-in visibility for the Claude "Fable" promo quota column.
     pub show_fable: bool,
+    pub show_fable_x: bool,
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     pub view_mode: u8,
@@ -1216,6 +1217,7 @@ impl Default for ThemeRuntime {
             use_windows_default_font: true,
             show_pace: true,
             show_fable: false,
+            show_fable_x: false,
             view_mode: 1,
             mode_phase: 0.0,
             widget_mode_phases: [None; 9],
@@ -1266,6 +1268,7 @@ impl ThemeRuntime {
             use_windows_default_font: true,
             show_pace: true,
             show_fable: false,
+            show_fable_x: false,
             view_mode: 1,
             mode_phase: 0.0,
             widget_mode_phases: [None; 9],
@@ -1368,6 +1371,11 @@ impl ThemeRuntime {
 
     pub fn with_show_fable(mut self, show_fable: bool) -> Self {
         self.show_fable = show_fable;
+        self
+    }
+
+    pub fn with_show_fable_x(mut self, show_fable_x: bool) -> Self {
+        self.show_fable_x = show_fable_x;
         self
     }
 
@@ -1533,10 +1541,17 @@ fn claude_dual(runtime: ThemeRuntime) -> bool {
 
 /// Whether the Fable column is drawn.
 pub(crate) fn fable_visible(_data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
-    // Owner rule (2026-11-14): Fable on and Claude on means the Fable rows are
-    // always drawn. A pool without data shows the grey bar track (skeleton),
-    // whatever the number of pools, the poll state or the account list.
-    runtime.show_fable && runtime.provider_enabled(ProviderId::Claude)
+    let (main, x) = fable_pools(runtime);
+    main || x
+}
+
+/// Per-pool Fable rows: each pool's own toggle, while Claude and that pool are on.
+fn fable_pools(runtime: ThemeRuntime) -> (bool, bool) {
+    let claude = runtime.provider_enabled(ProviderId::Claude);
+    (
+        claude && runtime.show_fable && runtime.claude_main_enabled,
+        claude && runtime.show_fable_x && runtime.claude_x_enabled,
+    )
 }
 
 /// Geometry and visibility for one widget row at a given mode phase. Pure:
@@ -2449,6 +2464,9 @@ impl DataContext {
         context.insert("display.countdown", runtime.countdown as u8 as f64);
         context.insert("display.show_pace", runtime.show_pace as u8 as f64);
         context.insert("display.show_fable", runtime.show_fable as u8 as f64);
+        let (fable_main, fable_x) = fable_pools(runtime);
+        context.insert("display.fable_main", fable_main as u8 as f64);
+        context.insert("display.fable_x", fable_x as u8 as f64);
         context.insert(
             "display.fable_visible",
             fable_visible(data, runtime) as u8 as f64,
