@@ -5,6 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::providers::ProviderId;
 use crate::theme_engine::{self, DataContext, Expression};
 
+const CHILD_INDENT: &str = "    ";
+
 pub const CONTEXT_MENU_SCHEMA_VERSION: u32 = 1;
 pub const CLASSIC_CONTEXT_MENU_ID: &str = "classic-v1";
 pub const DASHBOARD_V2_CONTEXT_MENU_ID: &str = "dashboard-v2";
@@ -307,6 +309,10 @@ pub fn rendered_label(
     label: &str,
     context: &crate::theme_engine::DataContext,
 ) -> String {
+    let (indent, label) = match label.strip_prefix(CHILD_INDENT) {
+        Some(label) => (CHILD_INDENT, label),
+        None => ("", label),
+    };
     let translated = match label {
         "Settings" => language.text("Settings"),
         "Update frequency" => language.text("Update frequency"),
@@ -340,7 +346,10 @@ pub fn rendered_label(
         "Show Fable" => language.text("Show Fable"),
         _ => label,
     };
-    crate::theme_engine::format_template(translated, context)
+    format!(
+        "{indent}{}",
+        crate::theme_engine::format_template(translated, context)
+    )
 }
 
 pub fn classic_context_menu() -> ContextMenuDocument {
@@ -381,6 +390,11 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             ),
         ],
     );
+    let child = |id, label, action, render: &str| {
+        let mut item = ContextMenuItem::action(id, &format!("{CHILD_INDENT}{label}"), action);
+        item.render = Expression(render.into());
+        item
+    };
     let providers = ContextMenuItem::submenu(
         "providers",
         "Providers",
@@ -391,6 +405,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::ToggleClaudeMain,
             ),
             ContextMenuItem::action("provider-claude-x", "Claude Code X", Action::ToggleClaudeX),
+            child(
+                "show-fable",
+                "Fable",
+                Action::ToggleShowFable,
+                "providers.claude.enabled",
+            ),
             ContextMenuItem::action(
                 "provider-codex-main",
                 "Codex (Main)",
@@ -399,13 +419,14 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             ContextMenuItem::action("provider-codex-x", "Codex X", Action::ToggleCodexX),
             ContextMenuItem::action(
                 "provider-antigravity-gemini",
-                "Antigravity (Gemini)",
+                "Antigravity",
                 Action::ToggleAntigravityGemini,
             ),
-            ContextMenuItem::action(
+            child(
                 "provider-antigravity-external",
-                "Antigravity (Claude + GPT)",
+                "External models",
                 Action::ToggleAntigravityExternal,
+                "antigravity.gemini.enabled",
             ),
             ContextMenuItem::action(
                 "provider-opencode",
@@ -476,7 +497,6 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             ),
             ContextMenuItem::action("lock-taskbar", "Lock in taskbar", Action::ToggleTaskbarLock),
             ContextMenuItem::action("show-pace", "Show pace", Action::ToggleShowPace),
-            ContextMenuItem::action("show-fable", "Show Fable", Action::ToggleShowFable),
             ContextMenuItem::submenu("language", "Language", languages),
             ContextMenuItem::separator("settings-separator"),
             ContextMenuItem::action(
@@ -749,6 +769,46 @@ mod tests {
         let mut legacy = menu.clone();
         legacy.id = LEGACY_CLASSIC_CONTEXT_MENU_ID.into();
         assert!(legacy.is_builtin());
+    }
+
+    #[test]
+    fn classic_provider_children_follow_their_parents() {
+        let menu = classic_context_menu();
+        let submenu = |id: &str| {
+            let item = menu.items.iter().find(|item| item.id == id).unwrap();
+            let ContextMenuItemKind::Submenu { items } = &item.kind else {
+                panic!("expected submenu")
+            };
+            items
+        };
+        assert!(!submenu("settings")
+            .iter()
+            .any(|item| item.id == "show-fable"));
+        let providers = submenu("providers");
+        let mut context = DataContext::from_usage(None, &theme_engine::Canvas::default());
+        for (parent, child, binding, label) in [
+            (
+                "provider-claude-x",
+                "show-fable",
+                "providers.claude.enabled",
+                "Fable",
+            ),
+            (
+                "provider-antigravity-gemini",
+                "provider-antigravity-external",
+                "antigravity.gemini.enabled",
+                "External models",
+            ),
+        ] {
+            let index = providers.iter().position(|item| item.id == parent).unwrap();
+            let item = &providers[index + 1];
+            assert_eq!(item.id, child);
+            assert_eq!(item.label, format!("{CHILD_INDENT}{label}"));
+            context.insert(binding, 0.0);
+            assert!(!item.should_render(&context));
+            context.insert(binding, 1.0);
+            assert!(item.should_render(&context));
+        }
     }
 
     #[test]

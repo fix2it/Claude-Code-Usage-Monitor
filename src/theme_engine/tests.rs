@@ -3097,60 +3097,6 @@ fn compact_fluent_quad_antigravity_dual_and_solo_modes() {
         );
     }
 
-    // 1c. Solo External while hovered: Gemini fades in
-    {
-        let runtime =
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
-                .with_antigravity_pools(false, true, 0.0);
-        let context =
-            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
-        assert_eq!(
-            evaluate("antigravity.gemini.opacity", &context).unwrap(),
-            1.0
-        );
-        assert_eq!(
-            evaluate("antigravity.external.opacity", &context).unwrap(),
-            0.0
-        );
-    }
-
-    // 2. Solo External
-    {
-        let runtime =
-            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
-                .with_antigravity_pools(false, true, 1.0);
-        let mut context =
-            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
-        context.insert("system.dark", 1.0);
-        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 0.0);
-        assert_eq!(
-            evaluate("antigravity.gemini.enabled", &context).unwrap(),
-            0.0
-        );
-        assert_eq!(
-            evaluate("antigravity.external.enabled", &context).unwrap(),
-            1.0
-        );
-
-        let find_render = |id: &str| {
-            theme.surfaces[0]
-                .children
-                .iter()
-                .find(|o| o.id == id)
-                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
-                .unwrap_or(false)
-        };
-
-        assert!(!find_render("antigravity-session-gemini-solo-dark"));
-        assert!(find_render("antigravity-session-external-solo-dark"));
-        assert!(!find_render("antigravity-gemini-5h-dark-normal"));
-        assert!(!find_render("antigravity-gemini-5h-dark-hover"));
-        assert!(!find_render("antigravity-external-5h-dark-normal"));
-        assert!(!find_render("antigravity-external-5h-dark-hover"));
-        assert!(!find_render("antigravity-session-gemini-value-dark"));
-        assert!(find_render("antigravity-session-external-value-dark"));
-    }
-
     // 3. Dual Mode Crossfade (Variant A)
     {
         // At opacity 1.0 (Normal: Gemini 6px, External 3px, Gemini text)
@@ -6153,5 +6099,23 @@ fn fable_switches_between_row_and_separate_widget() {
                 dual as u8 as f64
             );
         }
+    }
+}
+
+#[test]
+fn antigravity_external_runtime_follows_gemini_and_stored_choice() {
+    for (gemini, external, effective) in [
+        (false, true, false),
+        (true, true, true),
+        (true, false, false),
+    ] {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(gemini, external, 1.0);
+        let context = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        assert_eq!(
+            evaluate("antigravity.external.enabled", &context).unwrap(),
+            effective as u8 as f64
+        );
     }
 }

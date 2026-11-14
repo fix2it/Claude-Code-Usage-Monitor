@@ -1324,7 +1324,7 @@ impl ThemeRuntime {
         crossfade_opacity: f64,
     ) -> Self {
         self.antigravity_gemini_enabled = gemini;
-        self.antigravity_external_enabled = external;
+        self.antigravity_external_enabled = gemini && external;
         self.crossfade_opacity = crossfade_opacity;
         self
     }

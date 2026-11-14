@@ -1131,11 +1131,8 @@ fn save_state_settings() {
             .map(|language| language.code().to_string());
         persisted.last_update_check_unix = s.last_update_check_unix;
         persisted.set_enabled_providers(s.providers);
-        // Pool flags are only meaningful while Antigravity is enabled; persisting
-        // them as on for a disabled provider would re-enable it on the next load.
-        let antigravity_on = s.providers.contains(ProviderId::Antigravity);
-        persisted.show_antigravity_gemini = Some(antigravity_on && s.show_antigravity_gemini);
-        persisted.show_antigravity_external = Some(antigravity_on && s.show_antigravity_external);
+        persisted.show_antigravity_gemini = Some(s.show_antigravity_gemini);
+        persisted.show_antigravity_external = Some(s.show_antigravity_external);
         persisted.custom_theme_enabled = s.custom_theme_enabled;
         persisted.show_pace = s.show_pace;
         persisted.show_fable = s.show_fable;

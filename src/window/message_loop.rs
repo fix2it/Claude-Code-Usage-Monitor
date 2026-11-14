@@ -886,31 +886,19 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             } else {
                                 s.show_antigravity_external
                             };
-                            let other = if is_gemini {
-                                s.show_antigravity_external
-                            } else {
-                                s.show_antigravity_gemini
-                            };
                             let target = !current;
-                            // Guard: cannot disable both if Antigravity is the only active provider
-                            if !target
-                                && !other
+                            // Only the parent controls provider membership and the last-provider guard.
+                            if !(is_gemini
+                                && !target
                                 && s.providers.len() <= 1
-                                && s.providers.contains(ProviderId::Antigravity)
+                                && s.providers.contains(ProviderId::Antigravity))
                             {
-                                // Keep at least one provider active
-                            } else {
                                 if is_gemini {
                                     s.show_antigravity_gemini = target;
+                                    s.providers.set(ProviderId::Antigravity, target);
+                                    should_reposition = true;
                                 } else {
                                     s.show_antigravity_external = target;
-                                }
-                                if !target && !other {
-                                    s.providers.set(ProviderId::Antigravity, false);
-                                    should_reposition = true;
-                                } else if !s.providers.contains(ProviderId::Antigravity) {
-                                    s.providers.set(ProviderId::Antigravity, true);
-                                    should_reposition = true;
                                 }
                                 invalidate_metrics(s);
                                 let any_pool = (s.show_antigravity_gemini
@@ -1175,8 +1163,8 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             }
                             if provider == ProviderId::Antigravity && changed {
                                 let enabled = s.providers.contains(ProviderId::Antigravity);
+                                // The child External choice survives parent toggles.
                                 s.show_antigravity_gemini = enabled;
-                                s.show_antigravity_external = enabled;
                                 if !enabled {
                                     s.antigravity_hovered = false;
                                     s.crossfade_opacity = 1.0;
