@@ -124,6 +124,7 @@ struct AppState {
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     view_mode: u8,
     mode_phase: f64,
+    widget_modes: [(u8, f64); 9],
     /// +1 while the click cycle moves 1 -> 3, -1 while it moves back.
     /// The wheel overwrites this explicitly; clicks bounce off the ends.
     mode_direction: i8,
@@ -836,7 +837,7 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         SurfaceNest::Taskbar
     };
     let opacity = state.floating_card_opacity.unwrap_or(85);
-    ThemeRuntime::from_providers(state.providers)
+    let runtime = ThemeRuntime::from_providers(state.providers)
         .with_poll_state(poll_ok, has_error)
         .with_language(state.language)
         .with_countdown(state.usage_countdown)
@@ -865,7 +866,12 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
             state.is_account_profile_enabled(ProviderId::Codex, "default", true),
             state.is_account_profile_enabled(ProviderId::Codex, "codex_x", false),
             state.codex_crossfade_opacity,
-        )
+        );
+    app_settings::widget_mode_keys()
+        .zip(state.widget_modes.iter())
+        .fold(runtime, |runtime, (key, &(_, phase))| {
+            runtime.with_widget_mode_phase(key, phase)
+        })
 }
 
 /// A transient outage can keep presenting the last real reading while its
@@ -1134,6 +1140,7 @@ fn save_state_settings() {
         persisted.show_pace = s.show_pace;
         persisted.show_fable = s.show_fable;
         persisted.view_mode = s.view_mode;
+        persisted.widget_modes = widget_mode_overrides(s.view_mode, &s.widget_modes);
         persisted.active_theme_path = s
             .active_theme_path
             .as_ref()
@@ -2785,6 +2792,7 @@ pub fn run() {
                 qoder_crossfade_animation: None,
                 view_mode: settings.view_mode,
                 mode_phase: (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0),
+                widget_modes: widget_modes_from_settings(&settings),
                 mode_direction: 1,
                 mode_animation: None,
                 accounts: settings.accounts.clone(),
@@ -3854,8 +3862,31 @@ fn toggle_show_fable(state: &mut AppState) {
     invalidate_hover_tile_rects(state);
 }
 
+fn widget_modes_from_settings(settings: &SettingsFile) -> [(u8, f64); 9] {
+    let mut modes = [(settings.view_mode, f64::from(settings.view_mode) - 1.0); 9];
+    for (slot, key) in modes.iter_mut().zip(app_settings::widget_mode_keys()) {
+        let mode = settings.widget_mode(key);
+        *slot = (mode, f64::from(mode) - 1.0);
+    }
+    modes
+}
+
+/// Only modes that differ from `view_mode` are saved, so widgets without an
+/// override keep following the shared default.
+fn widget_mode_overrides(
+    view_mode: u8,
+    modes: &[(u8, f64); 9],
+) -> std::collections::BTreeMap<String, u8> {
+    app_settings::widget_mode_keys()
+        .zip(modes.iter())
+        .filter(|(_, &(mode, _))| mode != view_mode)
+        .map(|(key, &(mode, _))| (key.to_owned(), mode))
+        .collect()
+}
+
 fn set_view_mode(state: &mut AppState, mode: u8, direction: i8) {
     state.view_mode = mode;
+    state.widget_modes.fill((mode, state.mode_phase));
     invalidate_metrics(state);
     state.mode_direction = direction;
     state.mode_animation = Some(mode_phase_animation(state.mode_phase, mode));
@@ -3925,6 +3956,11 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
             let (changed, more) = PhaseAnimation::tick_slot(slot, value, throttle);
             render |= changed;
             active |= more;
+        }
+        if mode_was_active {
+            for (_, phase) in &mut state.widget_modes {
+                *phase = state.mode_phase;
+            }
         }
         (
             render,
@@ -4136,6 +4172,7 @@ fn reload_external_settings(hwnd: HWND) {
         state.view_mode = settings.view_mode;
         state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
         state.mode_animation = None;
+        state.widget_modes = widget_modes_from_settings(&settings);
         let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
             && state.providers.contains(ProviderId::Antigravity);
         if !any_pool {
@@ -5254,6 +5291,24 @@ mod phase_animation_tests {
             assert!((0.0..=1.0).contains(&hover), "{t}: {hover}");
             assert!(normal + hover <= 1.0 + 1e-9, "{t}: {normal} + {hover}");
         }
+    }
+
+    #[test]
+    fn widget_mode_overrides_keep_only_differences() {
+        let mut modes = [(2, 1.0); 9];
+        assert!(super::widget_mode_overrides(2, &modes).is_empty());
+        modes[0] = (3, 2.0);
+        let saved = super::widget_mode_overrides(2, &modes);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved.get("cursor"), Some(&3));
+        let mut settings = crate::app_settings::SettingsFile::default();
+        settings.view_mode = 2;
+        settings.widget_modes = saved;
+        assert_eq!(super::widget_modes_from_settings(&settings), modes);
+        settings.view_mode = 1;
+        let reloaded = super::widget_modes_from_settings(&settings);
+        assert_eq!(reloaded[0], (3, 2.0));
+        assert!(reloaded[1..].iter().all(|&slot| slot == (1, 0.0)));
     }
 
     #[test]

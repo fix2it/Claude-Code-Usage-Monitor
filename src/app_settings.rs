@@ -1,5 +1,6 @@
 //! Shared, atomically persisted state used by the widget and studio processes.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -90,6 +91,9 @@ pub struct SettingsFile {
         deserialize_with = "deserialize_view_mode"
     )]
     pub view_mode: u8,
+    /// Per-widget overrides; missing entries inherit `view_mode`.
+    #[serde(default, deserialize_with = "deserialize_widget_modes")]
+    pub widget_modes: BTreeMap<String, u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_theme_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +166,7 @@ impl Default for SettingsFile {
             show_pace: true,
             show_fable: false,
             view_mode: default_view_mode(),
+            widget_modes: BTreeMap::new(),
             active_theme_path: None,
             dashboard_width: None,
             dashboard_height: None,
@@ -211,6 +216,17 @@ impl SettingsFile {
         if !(1..=3).contains(&self.view_mode) {
             self.view_mode = default_view_mode();
         }
+        self.widget_modes.retain(|key, mode| {
+            widget_mode_keys().any(|known| known == key) && (1..=3).contains(mode)
+        });
+    }
+
+    pub fn widget_mode(&self, key: &str) -> u8 {
+        self.widget_modes
+            .get(key)
+            .copied()
+            .filter(|mode| (1..=3).contains(mode))
+            .unwrap_or(self.view_mode)
     }
 
     pub fn legacy_placement(&self) -> Option<LegacyPlacement> {
@@ -527,6 +543,30 @@ fn default_poll_interval() -> u32 {
 fn default_true() -> bool {
     true
 }
+pub(crate) fn widget_mode_keys() -> impl Iterator<Item = &'static str> {
+    crate::theme_engine::DISPLAY_PROVIDER_KEYS
+        .into_iter()
+        .chain(std::iter::once("fable"))
+}
+
+fn deserialize_widget_modes<'de, D>(deserializer: D) -> Result<BTreeMap<String, u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, value)| {
+            let mode = value.as_u64().filter(|mode| (1..=3).contains(mode))? as u8;
+            widget_mode_keys()
+                .any(|known| known == key)
+                .then(|| (key.clone(), mode))
+        })
+        .collect())
+}
+
 fn default_view_mode() -> u8 {
     1
 }
@@ -786,6 +826,25 @@ mod tests {
             let loaded = decode_settings(&json.to_string()).unwrap();
             assert_eq!(loaded.show_pace, show_pace);
         }
+    }
+
+    #[test]
+    fn widget_modes_migrate_filter_and_round_trip() {
+        let legacy = decode_settings(r#"{"view_mode":2}"#).unwrap();
+        assert!(legacy.widget_modes.is_empty());
+        for key in widget_mode_keys() {
+            assert_eq!(legacy.widget_mode(key), 2);
+        }
+        let loaded = decode_settings(r#"{"view_mode":2,"widget_modes":{"claude":3,"codex":0,"cursor":4,"fable":"bad","grok":null,"unknown":1}}"#).unwrap();
+        assert_eq!(loaded.widget_modes.len(), 1);
+        assert_eq!(loaded.widget_mode("claude"), 3);
+        for key in ["codex", "cursor", "fable", "grok"] {
+            assert_eq!(loaded.widget_mode(key), 2);
+        }
+        let encoded = serde_json::to_string(&loaded).unwrap();
+        let restored = decode_settings(&encoded).unwrap();
+        assert_eq!(restored.view_mode, 2);
+        assert_eq!(restored.widget_modes, loaded.widget_modes);
     }
 
     #[test]

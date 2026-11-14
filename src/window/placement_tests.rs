@@ -1092,3 +1092,31 @@ fn can_redock_at_tray(free_space: i32, width: i32) -> bool {
     };
     occupancy.can_restore(widget, 20)
 }
+
+#[test]
+fn widget_frame_width_tracks_individual_modes() {
+    let mut theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    theme.prepare_runtime();
+    let providers = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
+    let base = ThemeRuntime::from_providers(providers);
+    let width = |runtime| positioning::widget_frame(&theme, None, runtime, 1.0).width;
+    let full = width(base.with_view_mode(1).with_mode_phase(0.0));
+    let compact = width(base.with_view_mode(3).with_mode_phase(2.0));
+    let mixed = width(
+        base.with_widget_mode_phase("claude", 0.0)
+            .with_widget_mode_phase("codex", 2.0),
+    );
+    assert!(
+        full > mixed && mixed > compact,
+        "full={full}, mixed={mixed}, compact={compact}"
+    );
+    for mode in 1..=3 {
+        let phase = f64::from(mode) - 1.0;
+        let global = base.with_view_mode(mode).with_mode_phase(phase);
+        let individual = app_settings::widget_mode_keys().fold(global, |runtime, key| {
+            runtime.with_widget_mode_phase(key, phase)
+        });
+        assert_eq!(width(global), width(individual), "mode={mode}");
+    }
+}

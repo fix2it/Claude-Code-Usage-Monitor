@@ -36,6 +36,7 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         qoder_crossfade_animation: None,
         view_mode: 1,
         mode_phase: 0.0,
+        widget_modes: [(1, 0.0); 9],
         mode_direction: 1,
         mode_animation: None,
         accounts: Default::default(),
