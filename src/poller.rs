@@ -86,6 +86,8 @@ pub struct PollFailure {
 pub fn account_source_signature(provider: ProviderId, path: &std::path::Path) -> String {
     match provider {
         ProviderId::Claude => claude::account_watch_signature(path),
+        // Pool O: OpenCode's database file metadata; the file is not opened.
+        ProviderId::Antigravity => antigravity::opencode_watch_signature(path),
         _ => crate::accounts::file_signature(path),
     }
 }
@@ -97,9 +99,12 @@ pub fn poll(
     force: bool,
     on_progress: impl FnMut(AppUsageData),
 ) -> Result<AppUsageData, PollFailure> {
-    if enabled_providers
-        .iter()
-        .any(|provider| settings.get(provider).is_some())
+    let antigravity_x =
+        enabled_providers.contains(ProviderId::Antigravity) && settings.antigravity_x().is_some();
+    if antigravity_x
+        || enabled_providers
+            .iter()
+            .any(|provider| settings.get(provider).is_some())
     {
         accounts::poll_accounts(enabled_providers, settings, previous, force, on_progress)
     } else {
@@ -153,15 +158,13 @@ pub fn carry_forward_failures(
     let mut merged = fresh;
     accounts::carry_accounts(&mut merged, previous);
     for provider in enabled.iter() {
-        if merged
-            .accounts
-            .iter()
-            .any(|account| account.provider == provider)
-            || previous
-                .accounts
+        // A side pool (agy OpenCode) does not replace the provider's own reading.
+        let has_account = |data: &AppUsageData| {
+            data.accounts
                 .iter()
-                .any(|account| account.provider == provider)
-        {
+                .any(|account| account.provider == provider && !account.is_side_pool())
+        };
+        if has_account(&merged) || has_account(previous) {
             continue;
         }
         if merged.get(provider).is_some() {

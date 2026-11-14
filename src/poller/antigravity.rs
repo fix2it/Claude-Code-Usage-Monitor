@@ -796,6 +796,83 @@ pub(super) fn is_antigravity_display_model(model: &str) -> bool {
         || model.starts_with("imagen")
 }
 
+/// OpenCode's Google login: `credential.value` for the `google` integration.
+#[derive(Deserialize)]
+struct OpenCodeGoogleCredential {
+    access: String,
+    /// Epoch milliseconds.
+    expires: Option<f64>,
+}
+
+const OPENCODE_GOOGLE_QUERY: &str =
+    "SELECT value FROM credential WHERE integration_id = ?1 AND active = 1 LIMIT 1";
+
+/// Read the access token of the second pool (OpenCode). The database is opened
+/// read-only and the refresh token is never used: refreshing would rotate it
+/// and sign OpenCode out. Missing database, row, bad JSON and expired tokens
+/// all mean "no usable token".
+fn read_opencode_access_token(path: &std::path::Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    match crate::winsqlite::query_optional_text(path, OPENCODE_GOOGLE_QUERY, "google") {
+        Ok(value) => opencode_access_token(value.as_deref()?, SystemTime::now()),
+        Err(error) => {
+            diagnose::log(format!("OpenCode credential read failed: {error}"));
+            None
+        }
+    }
+}
+
+fn opencode_access_token(value: &str, now: SystemTime) -> Option<String> {
+    let credential: OpenCodeGoogleCredential = serde_json::from_str(value).ok()?;
+    if credential.access.is_empty() {
+        return None;
+    }
+    let now_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs_f64()
+        * 1000.0;
+    // A token without a known expiry cannot be told apart from a stale one.
+    let expires = credential.expires?;
+    (expires > now_ms).then_some(credential.access)
+}
+
+/// The second pool shows only data it can read itself; every way of not
+/// having a usable token (or a rejected one) is "no data", never an error.
+/// `Err(NoCredentials)` is kept for one case: the OpenCode login is the same
+/// account as the first pool, so the second pool must not be shown at all.
+pub(super) fn poll_opencode_account(path: &std::path::Path) -> Result<UsageData, PollError> {
+    let primary = read_antigravity_credentials().map(|creds| creds.access_token);
+    poll_opencode_with(
+        read_opencode_access_token(path),
+        primary.as_deref(),
+        fetch_antigravity_usage,
+    )
+}
+
+fn poll_opencode_with(
+    token: Option<String>,
+    primary_token: Option<&str>,
+    fetch: impl Fn(&str) -> Result<UsageData, PollError>,
+) -> Result<UsageData, PollError> {
+    let Some(token) = token else {
+        return Ok(UsageData::default());
+    };
+    if primary_token.is_some_and(|primary| primary == token) {
+        return Err(PollError::NoCredentials);
+    }
+    match fetch(&token) {
+        Err(error) if error.is_auth() => Ok(UsageData::default()),
+        result => result,
+    }
+}
+
+pub(super) fn opencode_watch_signature(path: &std::path::Path) -> String {
+    format!("opencode|{}", crate::accounts::file_signature(path))
+}
+
 fn read_antigravity_credentials() -> Option<AntigravityTokenData> {
     let content = windows_credentials::read_generic(ANTIGRAVITY_CREDENTIAL_TARGET)?;
     let auth: AntigravityAuthFile = serde_json::from_str(&content).ok()?;
@@ -1002,6 +1079,131 @@ mod auth_tests {
         bytes.extend_from_slice(b"GOCSPX-");
         bytes.resize(bytes.len() + 28, b'1');
         assert_eq!(oauth_clients_from_binary(&bytes).len(), 1);
+    }
+
+    fn opencode_value(access: &str, expires_ms: f64) -> String {
+        serde_json::json!({"access": access, "refresh": "r-fixture", "expires": expires_ms})
+            .to_string()
+    }
+
+    fn now_ms() -> f64 {
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            * 1000.0
+    }
+
+    #[test]
+    fn opencode_token_parses_and_expired_or_bad_values_are_no_token() {
+        let now = SystemTime::now();
+        let future = now_ms() + 3_600_000.0;
+        assert_eq!(
+            opencode_access_token(&opencode_value("a-fixture", future), now),
+            Some("a-fixture".into())
+        );
+        assert_eq!(
+            opencode_access_token(&opencode_value("a-fixture", now_ms() - 1.0), now),
+            None
+        );
+        for bad in ["not json", "{}", r#"{"access":""}"#, r#"{"access":"a"}"#] {
+            assert_eq!(opencode_access_token(bad, now), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn opencode_pool_without_token_or_with_rejected_token_is_no_data() {
+        let fetches = Cell::new(0);
+        let no_data = poll_opencode_with(None, None, |_| {
+            fetches.set(fetches.get() + 1);
+            Err(PollError::AuthRequired)
+        })
+        .unwrap();
+        assert!(!no_data.session.available && !no_data.weekly.available);
+        assert_eq!(fetches.get(), 0);
+        for error in [
+            PollError::AuthRequired,
+            PollError::HttpStatus(401),
+            PollError::HttpStatus(403),
+        ] {
+            let result = poll_opencode_with(Some("o-fixture".into()), None, |_| Err(error));
+            assert_eq!(result, Ok(UsageData::default()));
+        }
+        assert_eq!(
+            poll_opencode_with(Some("o-fixture".into()), None, |_| Err(
+                PollError::NetworkError
+            )),
+            Err(PollError::NetworkError)
+        );
+    }
+
+    #[test]
+    fn opencode_pool_never_refreshes_and_uses_its_own_token() {
+        // There is no refresh path at all: the fetch sees the stored token once.
+        let calls = Cell::new(0);
+        let result = poll_opencode_with(Some("o-fixture".into()), Some("a-fixture"), |token| {
+            calls.set(calls.get() + 1);
+            assert_eq!(token, "o-fixture");
+            Err(PollError::AuthRequired)
+        });
+        assert_eq!(result, Ok(UsageData::default()));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn opencode_pool_with_the_first_pools_token_is_suppressed() {
+        let result = poll_opencode_with(Some("same-fixture".into()), Some("same-fixture"), |_| {
+            panic!("a duplicate of pool A must not be polled")
+        });
+        assert_eq!(result, Err(PollError::NoCredentials));
+    }
+
+    #[test]
+    fn opencode_database_missing_or_without_row_is_no_token() {
+        let directory = std::env::temp_dir().join(format!(
+            "usage-opencode-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("opencode.db");
+        assert_eq!(read_opencode_access_token(&path), None);
+        assert!(!path.exists(), "a read must never create the database");
+        crate::winsqlite::exec_test_sql(
+            &path,
+            &format!(
+                "CREATE TABLE credential (integration_id TEXT, active INTEGER, value TEXT);\
+                 INSERT INTO credential VALUES ('google', 0, '{}');\
+                 INSERT INTO credential VALUES ('other', 1, '{}');",
+                opencode_value("inactive-fixture", now_ms() + 3_600_000.0),
+                opencode_value("other-fixture", now_ms() + 3_600_000.0)
+            ),
+        );
+        assert_eq!(read_opencode_access_token(&path), None);
+        crate::winsqlite::exec_test_sql(
+            &path,
+            &format!(
+                "INSERT INTO credential VALUES ('google', 1, '{}');",
+                opencode_value("active-fixture", now_ms() + 3_600_000.0)
+            ),
+        );
+        assert_eq!(
+            read_opencode_access_token(&path),
+            Some("active-fixture".into())
+        );
+        crate::winsqlite::exec_test_sql(
+            &path,
+            &format!(
+                "UPDATE credential SET value = '{}' WHERE value LIKE '%active-fixture%';",
+                opencode_value("expired-fixture", now_ms() - 1_000.0)
+            ),
+        );
+        assert_eq!(read_opencode_access_token(&path), None);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
     }
 
     #[test]

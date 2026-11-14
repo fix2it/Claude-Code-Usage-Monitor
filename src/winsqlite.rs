@@ -233,6 +233,36 @@ pub(crate) fn query_optional_text(
     statement.optional_text(0)
 }
 
+/// Test helper: run SQL against a (new or existing) synthetic database file.
+#[cfg(test)]
+pub(crate) fn exec_test_sql(path: &Path, sql: &str) {
+    const SQLITE_OPEN_READ_WRITE: c_int = 0x0000_0002;
+    const SQLITE_OPEN_CREATE: c_int = 0x0000_0004;
+    let filename = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    let mut database = ptr::null_mut();
+    let result = unsafe {
+        sqlite3_open_v2(
+            filename.as_ptr(),
+            &mut database,
+            SQLITE_OPEN_READ_WRITE | SQLITE_OPEN_CREATE,
+            ptr::null(),
+        )
+    };
+    assert_eq!(result, SQLITE_OK);
+    let sql = CString::new(sql).unwrap();
+    let result = unsafe {
+        sqlite3_exec(
+            database,
+            sql.as_ptr(),
+            None,
+            ptr::null_mut(),
+            ptr::null_mut(),
+        )
+    };
+    assert_eq!(result, SQLITE_OK);
+    assert_eq!(unsafe { sqlite3_close(database) }, SQLITE_OK);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

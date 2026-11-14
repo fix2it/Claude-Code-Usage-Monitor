@@ -209,7 +209,27 @@ pub struct AccountUsage {
     pub selected: bool,
 }
 
+impl AccountUsage {
+    /// Pool A of Antigravity, polled as an account while pool O is on.
+    pub fn is_antigravity_pool_a(&self) -> bool {
+        self.provider == ProviderId::Antigravity
+            && self.profile == crate::accounts::AccountSettings::antigravity_a_profile()
+    }
+
+    /// The OpenCode pool of Antigravity: an extra pool next to the provider's
+    /// own reading, never its selected account.
+    pub fn is_side_pool(&self) -> bool {
+        self.provider == ProviderId::Antigravity
+            && self.profile.id == crate::accounts::ANTIGRAVITY_X_ID
+    }
+}
+
 impl AppUsageData {
+    /// The second Antigravity pool (OpenCode), if it was polled.
+    pub fn antigravity_x(&self) -> Option<&AccountUsage> {
+        self.accounts.iter().find(|account| account.is_side_pool())
+    }
+
     /// Authentication failures stay paused until this source changes or the
     /// user explicitly asks to retry. Other accounts remain independently live.
     pub fn auth_error_for_source(
@@ -290,10 +310,17 @@ impl AppUsageData {
             }) {
                 account.profile = profile.clone();
             }
+            if let Some(profile) = settings
+                .antigravity_x()
+                .filter(|profile| account.is_side_pool() && profile.same_source(&account.profile))
+            {
+                account.profile = profile.clone();
+            }
             account.selected = settings
                 .get(account.provider)
                 .and_then(|configured| configured.selected())
-                .is_some_and(|selected| *selected == account.profile);
+                .is_some_and(|selected| *selected == account.profile)
+                || (account.is_antigravity_pool_a() && settings.antigravity_x().is_some());
         }
         for provider in [ProviderId::Claude, ProviderId::Codex] {
             let configured = settings.get(provider).unwrap();
@@ -317,7 +344,30 @@ impl AppUsageData {
                 }
             }
         }
+        // Pool A as an account stands for the provider, like a selected
+        // Claude profile: a failing pool A never borrows an old reading here.
+        if settings.antigravity_x().is_some() {
+            if let Some(pool_a) = self
+                .accounts
+                .iter()
+                .find(|account| account.is_antigravity_pool_a())
+            {
+                let usage = pool_a.usage.clone();
+                self.providers.remove(&ProviderId::Antigravity);
+                if let Some(usage) = usage {
+                    self.providers.insert(ProviderId::Antigravity, usage);
+                }
+            }
+        }
         self.accounts.retain(|account| {
+            if account.is_antigravity_pool_a() {
+                return settings.antigravity_x().is_some();
+            }
+            if account.is_side_pool() {
+                return settings
+                    .antigravity_x()
+                    .is_some_and(|profile| *profile == account.profile);
+            }
             settings.get(account.provider).is_some_and(|configured| {
                 configured
                     .profiles
@@ -356,7 +406,10 @@ impl AppUsageData {
             if changed {
                 account.usage = None;
                 account.error = None;
-                self.providers.remove(&account.provider);
+                // A side pool never stands for its provider's own reading.
+                if !account.is_side_pool() {
+                    self.providers.remove(&account.provider);
+                }
             }
         }
     }
@@ -475,6 +528,100 @@ pub fn limit_slug(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn agy_pool_o_fixture(enabled: bool) -> (AppUsageData, crate::accounts::AccountSettings) {
+        let section = |percentage| UsageSection {
+            available: true,
+            percentage,
+            resets_at: None,
+        };
+        let mut data = AppUsageData::default();
+        data.insert(
+            ProviderId::Antigravity,
+            UsageData {
+                session: section(15.0),
+                external_pool: Some(Box::new(UsageData {
+                    session: section(60.0),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        );
+        let mut settings = crate::accounts::AccountSettings::default();
+        let mut profile = crate::accounts::AccountSettings::antigravity_x_profile();
+        profile.credentials_path = std::env::temp_dir()
+            .join("usage-monitor-fixture-opencode.db")
+            .to_string_lossy()
+            .into_owned();
+        profile.enabled = enabled;
+        settings.antigravity.profiles.push(profile.clone());
+        profile.enabled = true;
+        data.accounts.push(AccountUsage {
+            provider: ProviderId::Antigravity,
+            profile,
+            source_signature: "fixture".into(),
+            source_path: None,
+            usage: Some(UsageData {
+                session: section(70.0),
+                ..Default::default()
+            }),
+            error: None,
+            selected: false,
+        });
+        (data, settings)
+    }
+
+    #[test]
+    fn agy_pool_o_round_trips_under_accounts_and_leaves_pool_a_keys_alone() {
+        let (mut data, settings) = agy_pool_o_fixture(true);
+        data.select_accounts(&settings);
+        let json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["antigravity_gemini"]["session"]["percentage"], 15.0);
+        assert_eq!(json["antigravity_external"]["session"]["percentage"], 60.0);
+        assert_eq!(json["antigravity"]["session"]["percentage"], 60.0);
+        assert!(json.get("antigravity_x").is_none());
+        assert_eq!(json["accounts"][0]["profile"]["id"], "antigravity_x");
+        assert_eq!(json["accounts"][0]["provider"], "antigravity");
+        let mut reloaded: AppUsageData = serde_json::from_value(json).unwrap();
+        assert_eq!(reloaded, data);
+        reloaded.select_accounts(&settings);
+        let pool_o = reloaded.antigravity_x().unwrap();
+        assert!(!pool_o.selected, "pool O never stands for pool A");
+        assert_eq!(pool_o.usage.as_ref().unwrap().session.percentage, 70.0);
+        assert_eq!(
+            reloaded
+                .get(ProviderId::Antigravity)
+                .unwrap()
+                .session
+                .percentage,
+            15.0
+        );
+        assert_eq!(
+            reloaded.selected_account_name(ProviderId::Antigravity),
+            None
+        );
+    }
+
+    #[test]
+    fn agy_pool_o_turned_off_drops_only_its_own_reading() {
+        let (mut data, settings) = agy_pool_o_fixture(false);
+        data.select_accounts(&settings);
+        assert!(data.antigravity_x().is_none());
+        assert_eq!(
+            data.get(ProviderId::Antigravity)
+                .unwrap()
+                .session
+                .percentage,
+            15.0
+        );
+        // A changed OpenCode database clears pool O, never pool A.
+        let (mut data, _) = agy_pool_o_fixture(true);
+        data.accounts[0].source_path =
+            Some(std::env::temp_dir().join("usage-monitor-missing-opencode.db"));
+        data.invalidate_changed_credentials();
+        assert!(data.accounts[0].usage.is_none());
+        assert!(data.get(ProviderId::Antigravity).is_some());
+    }
 
     #[test]
     fn usage_cache_preserves_session_labels_and_reads_older_caches() {

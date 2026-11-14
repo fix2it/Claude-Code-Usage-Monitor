@@ -300,6 +300,7 @@ const IDM_DASHBOARD: u16 = 71;
 // 62 stays the whole-provider Antigravity toggle used by saved custom menus.
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_GEMINI: u16 = 68;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_EXTERNAL: u16 = 67;
+pub(super) const IDM_PROVIDER_ANTIGRAVITY_X: u16 = 75;
 pub(super) const IDM_PROVIDER_CODEX_MAIN: u16 = 69;
 pub(super) const IDM_PROVIDER_CODEX_X: u16 = 70;
 pub(super) const IDM_PROVIDER_CLAUDE_MAIN: u16 = 72;
@@ -858,6 +859,11 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
             state.show_antigravity_external,
             state.crossfade_opacity,
         )
+        .with_antigravity_x(
+            state.providers.contains(ProviderId::Antigravity)
+                && state.show_antigravity_gemini
+                && state.accounts.antigravity_x().is_some(),
+        )
         .with_claude_state(
             state.claude_hovered,
             state.is_account_profile_enabled(ProviderId::Claude, "default", true),
@@ -1388,6 +1394,9 @@ fn tray_error_lines(
             providers.contains(account.provider)
                 && account.profile.enabled
                 && account.error.is_some()
+                // A hidden duplicate of agy pool A is not a failure.
+                && !(account.is_side_pool()
+                    && account.error == Some(poller::PollError::NoCredentials))
         })
         .collect();
     // Windows truncates tray tooltips: put the selected account's error first.
@@ -1405,9 +1414,11 @@ fn tray_error_lines(
         .collect();
     if let Some(failure) = failure.filter(|failure| providers.contains(failure.provider)) {
         if !data.is_some_and(|data| {
-            data.accounts
-                .iter()
-                .any(|account| account.provider == failure.provider && account.error.is_some())
+            data.accounts.iter().any(|account| {
+                account.provider == failure.provider
+                    && !account.is_side_pool()
+                    && account.error.is_some()
+            })
         }) {
             lines.push(format!(
                 "{}: {}",
@@ -3283,7 +3294,9 @@ fn partial_poll_retry_delay_ms(
     cooldown_ms: u32,
 ) -> Option<u32> {
     let needs_retry = enabled.iter().any(|provider| {
-        if accounts.get(provider).is_some() {
+        let agy_accounts =
+            provider == ProviderId::Antigravity && accounts.antigravity_x().is_some();
+        if accounts.get(provider).is_some() || agy_accounts {
             data.accounts.iter().any(|account| {
                 account.provider == provider
                     && account.profile.enabled
@@ -3861,6 +3874,27 @@ fn toggle_show_fable_x(state: &mut AppState) {
     state.show_fable_x = !state.show_fable_x;
     invalidate_metrics(state);
     invalidate_hover_tile_rects(state);
+}
+
+/// Turn the OpenCode agy pool on or off. The profile is created on first use
+/// and keeps its place in settings when turned off, like `claude_x`.
+fn toggle_antigravity_x(accounts: &mut crate::accounts::AccountSettings) {
+    let id = crate::accounts::ANTIGRAVITY_X_ID;
+    if !accounts.antigravity.profiles.iter().any(|p| p.id == id) {
+        accounts
+            .antigravity
+            .profiles
+            .push(crate::accounts::AccountSettings::antigravity_x_profile());
+        accounts.antigravity.used_ids.insert(id.into());
+    }
+    if let Some(profile) = accounts
+        .antigravity
+        .profiles
+        .iter_mut()
+        .find(|p| p.id == id)
+    {
+        profile.enabled = !profile.enabled;
+    }
 }
 
 fn toggle_show_fable(state: &mut AppState) {
@@ -5581,6 +5615,7 @@ mod menu_command_id_tests {
             IDM_DASHBOARD,
             IDM_PROVIDER_ANTIGRAVITY_GEMINI,
             IDM_PROVIDER_ANTIGRAVITY_EXTERNAL,
+            IDM_PROVIDER_ANTIGRAVITY_X,
             IDM_PROVIDER_CODEX_MAIN,
             IDM_PROVIDER_CODEX_X,
             IDM_PROVIDER_CLAUDE_MAIN,
@@ -5592,5 +5627,89 @@ mod menu_command_id_tests {
             assert!(!fixed.contains(&id), "{provider:?} reuses command id {id}");
             assert!(id != 1 && id < IDM_LANG_FIRST, "{provider:?} id {id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod antigravity_x_tests {
+    use super::toggle_antigravity_x;
+    use crate::accounts::{AccountSettings, ANTIGRAVITY_X_ID};
+
+    #[test]
+    fn the_opencode_pool_toggle_creates_its_profile_once_and_keeps_it_when_off() {
+        let mut accounts = AccountSettings::default();
+        assert!(accounts.antigravity_x().is_none());
+        toggle_antigravity_x(&mut accounts);
+        let profile = accounts.antigravity_x().unwrap();
+        assert_eq!(profile.id, ANTIGRAVITY_X_ID);
+        assert!(profile.config_dir.is_empty());
+        assert!(accounts.antigravity.used_ids.contains(ANTIGRAVITY_X_ID));
+        toggle_antigravity_x(&mut accounts);
+        assert!(accounts.antigravity_x().is_none());
+        assert_eq!(accounts.antigravity.profiles.len(), 1);
+        toggle_antigravity_x(&mut accounts);
+        assert_eq!(accounts.antigravity.profiles.len(), 1);
+        assert!(accounts.antigravity_x().is_some());
+        // Claude and Codex profiles are untouched.
+        assert_eq!(accounts.claude, AccountSettings::default().claude);
+        assert_eq!(accounts.codex, AccountSettings::default().codex);
+    }
+
+    #[test]
+    fn a_hidden_duplicate_opencode_pool_adds_no_tray_error() {
+        use crate::localization::LanguageId;
+        use crate::models::{AccountUsage, AppUsageData};
+        use crate::poller::{PollError, PollFailure};
+        use crate::providers::{ProviderId, ProviderSet};
+        let mut profile = AccountSettings::antigravity_x_profile();
+        profile.enabled = true;
+        let mut data = AppUsageData::default();
+        data.accounts.push(AccountUsage {
+            provider: ProviderId::Antigravity,
+            profile,
+            source_signature: "fixture".into(),
+            source_path: None,
+            usage: None,
+            error: Some(PollError::NoCredentials),
+            selected: false,
+        });
+        let providers = ProviderSet::from_enabled([ProviderId::Antigravity]);
+        assert!(
+            super::tray_error_lines(Some(&data), None, providers, LanguageId::English).is_empty()
+        );
+        // Pool A's own failure is still reported next to pool O.
+        let failure = PollFailure {
+            provider: ProviderId::Antigravity,
+            error: PollError::AuthRequired,
+        };
+        assert_eq!(
+            super::tray_error_lines(Some(&data), Some(failure), providers, LanguageId::English)
+                .len(),
+            1
+        );
+        // Pool A polled as an account while pool O is on: its error is listed
+        // and a transient one schedules the usual partial retry.
+        data.accounts.push(AccountUsage {
+            provider: ProviderId::Antigravity,
+            profile: AccountSettings::antigravity_a_profile(),
+            source_signature: "fixture".into(),
+            source_path: None,
+            usage: None,
+            error: Some(PollError::NetworkError),
+            selected: true,
+        });
+        let lines = super::tray_error_lines(Some(&data), None, providers, LanguageId::English);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("agy (A)"), "{lines:?}");
+        let mut accounts = AccountSettings::default();
+        accounts
+            .antigravity
+            .profiles
+            .push(AccountSettings::antigravity_x_profile());
+        accounts.antigravity.profiles[0].enabled = true;
+        assert!(
+            super::partial_poll_retry_delay_ms(&data, providers, &accounts, 0, 900_000, 0)
+                .is_some()
+        );
     }
 }

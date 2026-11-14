@@ -58,6 +58,10 @@ fn widget_key_for_object<'a>(
     let mut current = Some(object_id);
     for _ in 0..=surface.children.len() {
         let id = current?;
+        // The agy external-models widget shares the agy widget's mode.
+        if id == theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET {
+            return Some("antigravity");
+        }
         if let Some(key) =
             app_settings::widget_mode_keys().find(|key| id == format!("{key}-provider"))
         {
@@ -1004,6 +1008,19 @@ mod tests {
         );
         assert_eq!(widget_key_for_object(&surface, "main"), None);
         assert_eq!(widget_key_for_object(&surface, "unknown"), None);
+        // The agy external-models widget changes the agy widget's mode.
+        let mut external = theme_engine::SceneObject::object(
+            theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET,
+            "agy external models",
+        );
+        external.parent = Some("main".into());
+        let mut gauge = theme_engine::SceneObject::object("antigravity-ext-a-5h", "gauge");
+        gauge.parent = Some(theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET.into());
+        surface.children.extend([external, gauge]);
+        assert_eq!(
+            widget_key_for_object(&surface, "antigravity-ext-a-5h"),
+            Some("antigravity")
+        );
         assert!(surface_has_widgets(&surface));
         // A custom theme without provider containers keeps the shared mode.
         let mut legacy = theme_engine::SceneObject::object("main", "main");

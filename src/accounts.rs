@@ -172,14 +172,67 @@ impl ProviderAccounts {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Profile id of the second Antigravity pool, whose token lives only in OpenCode.
+pub const ANTIGRAVITY_X_ID: &str = "antigravity_x";
+/// OpenCode keeps its Google login in this SQLite file under the home folder.
+pub const OPENCODE_DB_PATH: &str = "~/.local/share/opencode/opencode.db";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountSettings {
     pub claude: ProviderAccounts,
     pub codex: ProviderAccounts,
+    /// Side pools of Antigravity. The first pool stays the provider itself
+    /// (Credential Manager target), so this list starts empty and only ever
+    /// holds the `antigravity_x` profile. Older settings load it as empty.
+    pub antigravity: ProviderAccounts,
+}
+
+impl Default for AccountSettings {
+    fn default() -> Self {
+        Self {
+            claude: ProviderAccounts::default(),
+            codex: ProviderAccounts::default(),
+            antigravity: ProviderAccounts {
+                profiles: Vec::new(),
+                selected: String::new(),
+                used_ids: Default::default(),
+            },
+        }
+    }
 }
 
 impl AccountSettings {
+    /// The enabled second Antigravity pool, if the user turned it on.
+    pub fn antigravity_x(&self) -> Option<&AccountProfile> {
+        self.antigravity
+            .profiles
+            .iter()
+            .find(|profile| profile.enabled && profile.id == ANTIGRAVITY_X_ID)
+    }
+
+    /// Pool A (Credential Manager target) as an account while pool O is on.
+    /// Never stored in settings; it reads the provider's own credentials.
+    pub fn antigravity_a_profile() -> AccountProfile {
+        AccountProfile {
+            id: "default".into(),
+            name: "agy (A)".into(),
+            config_dir: String::new(),
+            credentials_path: String::new(),
+            enabled: true,
+        }
+    }
+
+    pub fn antigravity_x_profile() -> AccountProfile {
+        AccountProfile {
+            id: ANTIGRAVITY_X_ID.into(),
+            name: "agy (O = OpenCode)".into(),
+            config_dir: String::new(),
+            credentials_path: OPENCODE_DB_PATH.into(),
+            enabled: false,
+        }
+    }
+
     pub fn get(&self, provider: ProviderId) -> Option<&ProviderAccounts> {
         match provider {
             ProviderId::Claude => Some(&self.claude),
@@ -333,6 +386,32 @@ mod tests {
                 .credential_path(ProviderId::Claude)
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn old_settings_load_without_an_antigravity_pool_and_the_x_profile_reads_opencode() {
+        let old: AccountSettings =
+            serde_json::from_str(r#"{"claude":{"profiles":[]},"codex":{}}"#).unwrap();
+        assert!(old.antigravity.profiles.is_empty());
+        assert!(old.antigravity_x().is_none());
+        let mut settings = AccountSettings::default();
+        settings
+            .antigravity
+            .profiles
+            .push(AccountSettings::antigravity_x_profile());
+        assert!(settings.antigravity_x().is_none());
+        settings.antigravity.profiles[0].enabled = true;
+        let profile = settings.antigravity_x().unwrap();
+        let path = profile
+            .credential_path(ProviderId::Antigravity)
+            .unwrap()
+            .unwrap();
+        assert!(path.ends_with(".local/share/opencode/opencode.db"));
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AccountSettings>(&json).unwrap(),
+            settings
         );
     }
 

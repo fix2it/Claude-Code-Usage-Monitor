@@ -270,3 +270,19 @@
 `cargo fmt --all -- --check`, `cargo test --locked`, `cargo build --locked --release`
 — запускает оркестратор сам (в песочнице Codex нет сети). Push и слияние —
 только по команде владельца.
+
+## Поправка 2026-11-14: второй agy — это OpenCode
+
+Папки `~/.gemini_x` не будет: второй Google-аккаунт agy не пускает по региону, он
+живёт только в OpenCode. Токен: `%USERPROFILE%\.local\share\opencode\opencode.db`,
+`SELECT value FROM credential WHERE integration_id='google' AND active=1 LIMIT 1`,
+`value` = JSON `{access, refresh, expires(ms)}`. Профиль — `antigravity_x`, чтение
+через `src/winsqlite.rs`, только чтение, refresh не делаем (сломает сессию OpenCode);
+нет базы / записи / токен истёк — «нет данных». Проба владельца: `loadCodeAssist` 200
+без `project`, `fetchAvailableModels` 200, квотная сводка без project недоступна.
+Этап 5 идёт, только если `fetchAvailableModels` отдаёт остаток квоты по моделям
+(шаг 0, флаг `--schema` в `s9-agy-opencode-probe.py`).
+
+Подписи пулов agy (решение владельца): первый аккаунт (`gemini:antigravity`) — «A»,
+второй (OpenCode) — «O». В виджете строки пулов помечаются этими буквами. Пункт меню
+второго пула: «agy (O = OpenCode)» — чтобы буква была понятна; переводы на 14 языков.

@@ -104,6 +104,7 @@ fn is_provider_toggle(action: &ContextMenuAction) -> bool {
         ContextMenuAction::ToggleProvider { .. }
             | ContextMenuAction::ToggleAntigravityGemini
             | ContextMenuAction::ToggleAntigravityExternal
+            | ContextMenuAction::ToggleAntigravityX
             | ContextMenuAction::ToggleClaudeMain
             | ContextMenuAction::ToggleClaudeX
             | ContextMenuAction::ToggleCodexMain
@@ -345,6 +346,7 @@ pub(super) fn context_menu_action_flags(
         ContextMenuAction::ToggleProvider { provider } => state.providers.contains(*provider),
         ContextMenuAction::ToggleAntigravityGemini => state.show_antigravity_gemini,
         ContextMenuAction::ToggleAntigravityExternal => state.show_antigravity_external,
+        ContextMenuAction::ToggleAntigravityX => state.accounts.antigravity_x().is_some(),
         ContextMenuAction::ToggleClaudeMain => {
             state.providers.contains(ProviderId::Claude)
                 && state
@@ -564,6 +566,7 @@ fn context_menu_static_command(action: &ContextMenuAction) -> Option<u16> {
         }
         ContextMenuAction::ToggleAntigravityGemini => Some(IDM_PROVIDER_ANTIGRAVITY_GEMINI),
         ContextMenuAction::ToggleAntigravityExternal => Some(IDM_PROVIDER_ANTIGRAVITY_EXTERNAL),
+        ContextMenuAction::ToggleAntigravityX => Some(IDM_PROVIDER_ANTIGRAVITY_X),
         ContextMenuAction::ToggleClaudeMain => Some(IDM_PROVIDER_CLAUDE_MAIN),
         ContextMenuAction::ToggleClaudeX => Some(IDM_PROVIDER_CLAUDE_X),
         ContextMenuAction::ToggleCodexMain => Some(IDM_PROVIDER_CODEX_MAIN),
@@ -657,6 +660,7 @@ mod tests {
             },
             ContextMenuAction::ToggleAntigravityGemini,
             ContextMenuAction::ToggleAntigravityExternal,
+            ContextMenuAction::ToggleAntigravityX,
             ContextMenuAction::ToggleClaudeMain,
             ContextMenuAction::ToggleClaudeX,
             ContextMenuAction::ToggleCodexMain,

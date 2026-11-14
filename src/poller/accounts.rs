@@ -17,6 +17,7 @@ impl Target {
         }
         match &self.path {
             Ok(Some(path)) => account_source_signature(self.provider, path),
+            Ok(None) if self.provider == ProviderId::Antigravity => antigravity_pool_a_signature(),
             Ok(None) => fingerprint(&format!(
                 "{:?}",
                 credential_watch_snapshot(CredentialWatchMode::ActiveSource(self.provider))
@@ -24,6 +25,21 @@ impl Target {
             Err(error) => fingerprint(error),
         }
     }
+}
+
+/// Pool A's source: its Credential Manager target. Tests never read the real
+/// credential store, so they see one fixed source.
+#[cfg(not(test))]
+fn antigravity_pool_a_signature() -> String {
+    fingerprint(&format!(
+        "{:?}",
+        credential_watch_snapshot(CredentialWatchMode::ActiveSource(ProviderId::Antigravity))
+    ))
+}
+
+#[cfg(test)]
+fn antigravity_pool_a_signature() -> String {
+    "agy-pool-a-fixture".into()
 }
 
 pub(super) fn poll_accounts(
@@ -42,6 +58,7 @@ pub(super) fn poll_accounts(
             Some(path) => match provider {
                 ProviderId::Claude => claude::poll_account(path),
                 ProviderId::Codex => codex::poll_account(path),
+                ProviderId::Antigravity => antigravity::poll_opencode_account(path),
                 _ => poll_provider(provider),
             },
             None => poll_provider(provider),
@@ -106,12 +123,31 @@ where
                     path,
                 });
             }
+        } else if provider == ProviderId::Antigravity && settings.antigravity_x().is_some() {
+            // With pool O on, pool A is polled as an account of its own, the
+            // way two Claude or Codex profiles are: each keeps its own error,
+            // stale reading and login pause while the other keeps updating.
+            targets.push(Target {
+                provider,
+                profile: Some(AccountSettings::antigravity_a_profile()),
+                path: Ok(None),
+            });
         } else {
             targets.push(Target {
                 provider,
                 profile: None,
                 path: Ok(None),
             });
+        }
+        // The OpenCode pool is an extra account next to pool A.
+        if provider == ProviderId::Antigravity {
+            if let Some(profile) = settings.antigravity_x() {
+                targets.push(Target {
+                    provider,
+                    profile: Some(profile.clone()),
+                    path: profile.credential_path(provider),
+                });
+            }
         }
     }
     // Profiles sharing a source must not race token refresh or credit writes.
@@ -283,7 +319,7 @@ pub(super) fn carry_accounts(fresh: &mut AppUsageData, previous: &AppUsageData) 
         if !account.error.is_some_and(PollError::is_transient) {
             continue;
         }
-        if let Some(last) = previous
+        let last_account = previous
             .accounts
             .iter()
             .find(|last| {
@@ -291,8 +327,17 @@ pub(super) fn carry_accounts(fresh: &mut AppUsageData, previous: &AppUsageData) 
                     && last.profile.same_source(&account.profile)
                     && last.source_signature == account.source_signature
             })
-            .and_then(|last| last.usage.as_ref())
-        {
+            .and_then(|last| last.usage.as_ref());
+        // Pool A turned into an account when pool O was switched on: its last
+        // reading is still the provider's own one.
+        let last_pool_a = (account.is_antigravity_pool_a()
+            && !previous
+                .accounts
+                .iter()
+                .any(AccountUsage::is_antigravity_pool_a))
+        .then(|| previous.get(ProviderId::Antigravity))
+        .flatten();
+        if let Some(last) = last_account.or(last_pool_a) {
             let mut carried = last.clone();
             carried.stale = true;
             account.usage = Some(carried);
@@ -397,6 +442,193 @@ mod tests {
             context.get("accounts.claude.claude_x.model.fable.percentage"),
             Some(81.0)
         );
+    }
+
+    #[test]
+    fn agy_pool_o_is_polled_next_to_pool_a_without_replacing_it() {
+        let mut settings = AccountSettings::default();
+        let mut profile = AccountSettings::antigravity_x_profile();
+        profile.credentials_path = "C:\\account-tests\\opencode.db".into();
+        profile.enabled = true;
+        settings.antigravity.profiles.push(profile);
+        let calls = std::sync::Mutex::new(Vec::new());
+        let data = poll_accounts_with(
+            ProviderSet::from_enabled([ProviderId::Antigravity]),
+            &settings,
+            |provider, path| {
+                assert_eq!(provider, ProviderId::Antigravity, "only agy is enabled");
+                calls
+                    .lock()
+                    .unwrap()
+                    .push(path.map(|path| path.to_path_buf()));
+                Ok(usage(if path.is_some() { 70.0 } else { 15.0 }))
+            },
+        )
+        .unwrap();
+        let mut calls = calls.into_inner().unwrap();
+        calls.sort();
+        assert_eq!(
+            calls,
+            [None, Some(PathBuf::from("C:\\account-tests\\opencode.db"))]
+        );
+        assert_eq!(
+            data.get(ProviderId::Antigravity)
+                .unwrap()
+                .session
+                .percentage,
+            15.0
+        );
+        let pool_o = data.antigravity_x().unwrap();
+        assert!(!pool_o.selected);
+        assert_eq!(pool_o.usage.as_ref().unwrap().session.percentage, 70.0);
+
+        // Pool O failing alone does not hide pool A's reading.
+        let ok = poll_accounts_with(
+            ProviderSet::from_enabled([ProviderId::Antigravity]),
+            &settings,
+            |_, path| match path {
+                Some(_) => Err(PollError::NetworkError),
+                None => Ok(usage(15.0)),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            ok.get(ProviderId::Antigravity).unwrap().session.percentage,
+            15.0
+        );
+
+        // Turned off: only pool A is polled, exactly as before.
+        settings.antigravity.profiles[0].enabled = false;
+        let data = poll_accounts_with(
+            ProviderSet::from_enabled([ProviderId::Antigravity]),
+            &settings,
+            |_, path| {
+                assert!(path.is_none());
+                Ok(usage(15.0))
+            },
+        )
+        .unwrap();
+        assert!(data.antigravity_x().is_none());
+    }
+
+    fn agy_pool_o_settings() -> AccountSettings {
+        let mut settings = AccountSettings::default();
+        let mut profile = AccountSettings::antigravity_x_profile();
+        profile.credentials_path = "C:\\account-tests\\opencode.db".into();
+        profile.enabled = true;
+        settings.antigravity.profiles.push(profile);
+        settings
+    }
+
+    fn agy_only() -> ProviderSet {
+        ProviderSet::from_enabled([ProviderId::Antigravity])
+    }
+
+    #[test]
+    fn agy_only_pool_a_login_failure_keeps_pool_o_live_and_shows_pool_a_error() {
+        let settings = agy_pool_o_settings();
+        let first = poll_accounts_with(agy_only(), &settings, |_, path| match path {
+            Some(_) => Ok(usage(70.0)),
+            None => Err(PollError::AuthRequired),
+        })
+        .unwrap();
+        // Pool O's reading is published; pool A shows its own error.
+        assert_eq!(
+            first
+                .antigravity_x()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .session
+                .percentage,
+            70.0
+        );
+        let pool_a = first
+            .accounts
+            .iter()
+            .find(|account| account.is_antigravity_pool_a())
+            .unwrap();
+        assert_eq!(pool_a.error, Some(PollError::AuthRequired));
+        assert!(pool_a.selected);
+        assert!(first.get(ProviderId::Antigravity).is_none());
+        let failures = first.new_auth_failures(None, false);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].is_antigravity_pool_a());
+        let context = crate::theme_engine::DataContext::from_usage(
+            Some(&first),
+            &crate::theme_engine::Canvas::default(),
+        );
+        assert_eq!(context.get("antigravity.has_error"), Some(1.0));
+
+        // Next cycle: pool A stays paused (no new login), pool O is polled.
+        let calls = std::sync::Mutex::new(Vec::new());
+        let second =
+            poll_accounts_with_history(agy_only(), &settings, Some(&first), false, |_, path| {
+                calls.lock().unwrap().push(path.is_some());
+                assert!(path.is_some(), "paused pool A must not refresh its token");
+                Ok(usage(72.0))
+            })
+            .unwrap();
+        assert_eq!(calls.into_inner().unwrap(), [true]);
+        assert_eq!(
+            second
+                .antigravity_x()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .session
+                .percentage,
+            72.0
+        );
+        assert!(second.new_auth_failures(Some(&first), false).is_empty());
+        assert_eq!(
+            second
+                .accounts
+                .iter()
+                .find(|account| account.is_antigravity_pool_a())
+                .unwrap()
+                .error,
+            Some(PollError::AuthRequired)
+        );
+    }
+
+    #[test]
+    fn agy_only_pool_a_transient_failure_keeps_pool_o_and_a_stale_pool_a_reading() {
+        let settings = agy_pool_o_settings();
+        // The last reading before pool O was on: pool A as the provider.
+        let mut before = AppUsageData::default();
+        before.insert(ProviderId::Antigravity, usage(15.0));
+        for previous in [before, {
+            poll_accounts_with(agy_only(), &settings, |_, path| {
+                Ok(usage(if path.is_some() { 60.0 } else { 15.0 }))
+            })
+            .unwrap()
+        }] {
+            let fresh = poll_accounts_with(agy_only(), &settings, |_, path| match path {
+                Some(_) => Ok(usage(70.0)),
+                None => Err(PollError::NetworkError),
+            })
+            .unwrap();
+            let mut merged = carry_forward_failures(fresh, &previous, agy_only());
+            merged.select_accounts(&settings);
+            let pool_a = merged.get(ProviderId::Antigravity).unwrap();
+            assert!(pool_a.stale);
+            assert_eq!(pool_a.session.percentage, 15.0);
+            assert_eq!(
+                merged
+                    .accounts
+                    .iter()
+                    .find(|account| account.is_antigravity_pool_a())
+                    .unwrap()
+                    .error,
+                Some(PollError::NetworkError)
+            );
+            let pool_o = merged.antigravity_x().unwrap().usage.as_ref().unwrap();
+            assert!(!pool_o.stale);
+            assert_eq!(pool_o.session.percentage, 70.0);
+        }
     }
 
     #[test]

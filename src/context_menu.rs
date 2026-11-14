@@ -66,6 +66,8 @@ pub enum ContextMenuAction {
     },
     ToggleAntigravityGemini,
     ToggleAntigravityExternal,
+    /// Second agy pool, read from OpenCode's login.
+    ToggleAntigravityX,
     ToggleClaudeMain,
     ToggleClaudeX,
     ToggleCodexMain,
@@ -346,6 +348,7 @@ pub fn rendered_label(
         "Show pace" => language.text("Show pace"),
         "Fable" => language.text("Fable"),
         "External models" => language.text("External models"),
+        "agy (O = OpenCode)" => language.text("agy (O = OpenCode)"),
         _ => label,
     };
     format!(
@@ -434,6 +437,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "provider-antigravity-external",
                 "External models",
                 Action::ToggleAntigravityExternal,
+                "antigravity.gemini.enabled",
+            ),
+            child(
+                "provider-antigravity-x",
+                "agy (O = OpenCode)",
+                Action::ToggleAntigravityX,
                 "antigravity.gemini.enabled",
             ),
             ContextMenuItem::action(
@@ -830,10 +839,26 @@ mod tests {
                 "antigravity.gemini.enabled",
                 "External models",
             ),
+            (
+                "provider-antigravity-gemini",
+                "provider-antigravity-x",
+                "antigravity.gemini.enabled",
+                "agy (O = OpenCode)",
+            ),
         ] {
             let index = providers.iter().position(|item| item.id == parent).unwrap();
-            let item = &providers[index + 1];
-            assert_eq!(item.id, child);
+            let item = providers
+                .iter()
+                .skip(index + 1)
+                .find(|item| item.id == child)
+                .unwrap();
+            assert!(
+                providers[index + 1..]
+                    .iter()
+                    .take_while(|item| item.id != child)
+                    .all(|item| item.label.starts_with(CHILD_INDENT)),
+                "{child} must stay nested under {parent}"
+            );
             assert_eq!(item.label, format!("{CHILD_INDENT}{label}"));
             context.insert(binding, 0.0);
             assert!(!item.should_render(&context));

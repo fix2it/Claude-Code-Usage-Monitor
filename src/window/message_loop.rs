@@ -941,6 +941,23 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }
+                IDM_PROVIDER_ANTIGRAVITY_X => {
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            super::toggle_antigravity_x(&mut s.accounts);
+                            // Pool O adds a marker column and a second row.
+                            super::invalidate_hover_tile_rects(s);
+                            invalidate_metrics(s);
+                        }
+                    }
+                    save_state_settings();
+                    position_at_taskbar();
+                    render_layered();
+                    super::mouse::revalidate_mouse_hover(hwnd);
+                    sync_tray_icon(hwnd);
+                    request_poll(hwnd);
+                }
                 IDM_PROVIDER_CLAUDE_MAIN | IDM_PROVIDER_CLAUDE_X => {
                     let mut should_reposition = false;
                     {

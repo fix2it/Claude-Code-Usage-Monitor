@@ -1417,6 +1417,26 @@
           }
         },
         {
+          "id": "antigravity-external-provider",
+          "name": "Antigravity external models (pools A and O)",
+          "render": "display.agy_split",
+          "visibility": "100",
+          "parent": "provider-row",
+          "width": "display.row_width.antigravity",
+          "height": "46",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "none"
+          }
+        },
+        {
           "id": "antigravity-session-gemini-solo-dark",
           "name": "dark Antigravity Gemini solo session segments",
           "render": "system.dark && !antigravity.dual_mode && antigravity.gemini.opacity > 0.01",
@@ -1666,6 +1686,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "8",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -1701,7 +1722,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "(100) * antigravity.gemini.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -1724,6 +1745,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "8",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -1737,7 +1759,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.gemini.session.display",
+            "value": "antigravity.row1h.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#5EEAD4FF",
@@ -1757,9 +1779,9 @@
           "id": "antigravity-gemini-5h-dark-hover-pace",
           "name": "dark Antigravity Gemini 5h hover pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.gemini.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row1h.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row1h.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -1782,6 +1804,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "8",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -1817,7 +1840,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "(100) * antigravity.gemini.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -1840,6 +1863,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "8",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -1853,7 +1877,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.gemini.session.display",
+            "value": "antigravity.row1h.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#007A6CFF",
@@ -1873,9 +1897,9 @@
           "id": "antigravity-gemini-5h-light-hover-pace",
           "name": "light Antigravity Gemini 5h hover pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.gemini.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row1h.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row1h.session.expected_display, 0, 100) / 100)",
           "y": "7",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -1898,6 +1922,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "16 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -1933,7 +1958,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "(100) * antigravity.gemini.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -1956,6 +1981,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "16 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -1969,7 +1995,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.gemini.weekly.display",
+            "value": "antigravity.row1h.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#0D9488FF",
@@ -1989,9 +2015,9 @@
           "id": "antigravity-gemini-weekly-dark-hover-pace",
           "name": "dark Antigravity Gemini weekly hover pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.gemini.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row1h.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row1h.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2014,6 +2040,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "16 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2049,7 +2076,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "(100) * antigravity.gemini.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2072,6 +2099,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "16 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2085,7 +2113,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.gemini.weekly.display",
+            "value": "antigravity.row1h.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#004D40FF",
@@ -2105,9 +2133,9 @@
           "id": "antigravity-gemini-weekly-light-hover-pace",
           "name": "light Antigravity Gemini weekly hover pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.gemini.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row1h.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.gemini.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row1h.weekly.expected_display, 0, 100) / 100)",
           "y": "15 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2177,7 +2205,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.gemini.weekly.display:usage_line}",
+            "template": "{antigravity.row1h.weekly.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -2243,7 +2271,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.gemini.weekly.display:usage_line}",
+            "template": "{antigravity.row1h.weekly.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -2262,6 +2290,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "27",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -2275,7 +2304,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.session.display",
+            "value": "antigravity.row2.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#98D0E0FF",
@@ -2295,9 +2324,9 @@
           "id": "antigravity-external-5h-dark-normal-pace",
           "name": "dark Antigravity External 5h normal pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -2320,6 +2349,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "27",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -2333,7 +2363,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.session.display",
+            "value": "antigravity.row2h.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#98D0E0FF",
@@ -2353,9 +2383,9 @@
           "id": "antigravity-external-5h-dark-hover-pace",
           "name": "dark Antigravity External 5h hover pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2h.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2h.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -2378,6 +2408,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "27",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -2391,7 +2422,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.session.display",
+            "value": "antigravity.row2.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#2D6F82FF",
@@ -2411,9 +2442,9 @@
           "id": "antigravity-external-5h-light-normal-pace",
           "name": "light Antigravity External 5h normal pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -2436,6 +2467,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "27",
           "width": "display.bar_width.antigravity",
           "height": "6 - 3 * antigravity.hover_phase",
@@ -2449,7 +2481,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.session.display",
+            "value": "antigravity.row2h.session.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#2D6F82FF",
@@ -2469,9 +2501,9 @@
           "id": "antigravity-external-5h-light-hover-pace",
           "name": "light Antigravity External 5h hover pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2h.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2h.session.expected_display, 0, 100) / 100)",
           "y": "26",
           "width": "1",
           "height": "8 - 3 * antigravity.hover_phase",
@@ -2494,6 +2526,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "35 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2507,7 +2540,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.weekly.display",
+            "value": "antigravity.row2.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#4A8B9EFF",
@@ -2527,9 +2560,9 @@
           "id": "antigravity-external-weekly-dark-normal-pace",
           "name": "dark Antigravity External weekly normal pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2552,6 +2585,7 @@
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "35 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2565,7 +2599,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.weekly.display",
+            "value": "antigravity.row2h.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#4A8B9EFF",
@@ -2585,9 +2619,9 @@
           "id": "antigravity-external-weekly-dark-hover-pace",
           "name": "dark Antigravity External weekly hover pace",
           "render": "(system.dark) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2h.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2h.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2610,6 +2644,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
           "visibility": "100 * antigravity.normal.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "35 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2623,7 +2658,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.weekly.display",
+            "value": "antigravity.row2.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#1F4E5BFF",
@@ -2643,9 +2678,9 @@
           "id": "antigravity-external-weekly-light-normal-pace",
           "name": "light Antigravity External weekly normal pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.normal.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2668,6 +2703,7 @@
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
           "visibility": "100 * antigravity.hover.opacity",
           "parent": "antigravity-provider",
+          "x": "display.origin.antigravity",
           "y": "35 - 3 * antigravity.hover_phase",
           "width": "display.bar_width.antigravity",
           "height": "3 + 3 * antigravity.hover_phase",
@@ -2681,7 +2717,7 @@
           "gap": "0",
           "content": {
             "type": "progress",
-            "value": "antigravity.external.weekly.display",
+            "value": "antigravity.row2h.weekly.display",
             "direction": "left_to_right",
             "fill": {
               "color": "#1F4E5BFF",
@@ -2701,9 +2737,9 @@
           "id": "antigravity-external-weekly-light-hover-pace",
           "name": "light Antigravity External weekly hover pace",
           "render": "((1 - system.dark)) && (antigravity.dual_mode) && (antigravity.hover.opacity > 0.01)",
-          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "visibility": "(100) * antigravity.row2h.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
           "parent": "antigravity-provider",
-          "x": "round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.row2h.weekly.expected_display, 0, 100) / 100)",
           "y": "34 - 3 * antigravity.hover_phase",
           "width": "1",
           "height": "5 + 3 * antigravity.hover_phase",
@@ -2740,7 +2776,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.session.display:usage_line}",
+            "template": "{antigravity.row2.session.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -2773,7 +2809,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.weekly.display:usage_line}",
+            "template": "{antigravity.row2h.weekly.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -2806,7 +2842,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.session.display:usage_line}",
+            "template": "{antigravity.row2.session.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
             "weight": "medium",
@@ -2839,6 +2875,808 @@
           "gap": "0",
           "content": {
             "type": "text",
+            "template": "{antigravity.row2h.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-a-marker-dark-normal",
+          "name": "dark Antigravity pool A marker normal",
+          "render": "(system.dark) && (antigravity.pool_o) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#5EEAD4FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-a-marker-dark-hover",
+          "name": "dark Antigravity pool A marker hover",
+          "render": "(system.dark) && (antigravity.pool_o) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#0D9488FF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-a-marker-light-normal",
+          "name": "light Antigravity pool A marker normal",
+          "render": "((1 - system.dark)) && (antigravity.pool_o) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#007A6CFF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-a-marker-light-hover",
+          "name": "light Antigravity pool A marker hover",
+          "render": "((1 - system.dark)) && (antigravity.pool_o) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#004D40FF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-o-marker-dark-normal",
+          "name": "dark Antigravity pool O marker normal",
+          "render": "(system.dark) && (antigravity.pool_o) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-o-marker-dark-hover",
+          "name": "dark Antigravity pool O marker hover",
+          "render": "(system.dark) && (antigravity.pool_o) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-o-marker-light-normal",
+          "name": "light Antigravity pool O marker normal",
+          "render": "((1 - system.dark)) && (antigravity.pool_o) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-o-marker-light-hover",
+          "name": "light Antigravity pool O marker hover",
+          "render": "((1 - system.dark)) && (antigravity.pool_o) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-5h-dark-normal",
+          "name": "dark Antigravity External 5h normal (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#98D0E0FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#444444FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-5h-dark-normal-pace",
+          "name": "dark Antigravity External 5h normal pace (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "y": "7",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-5h-dark-hover",
+          "name": "dark Antigravity External 5h hover (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#98D0E0FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#444444FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-5h-dark-hover-pace",
+          "name": "dark Antigravity External 5h hover pace (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "y": "7",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-5h-light-normal",
+          "name": "light Antigravity External 5h normal (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2D6F82FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#AAAAAAFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-5h-light-normal-pace",
+          "name": "light Antigravity External 5h normal pace (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "y": "7",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-5h-light-hover",
+          "name": "light Antigravity External 5h hover (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2D6F82FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#AAAAAAFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-5h-light-hover-pace",
+          "name": "light Antigravity External 5h hover pace (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
+          "y": "7",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-weekly-dark-normal",
+          "name": "dark Antigravity External weekly normal (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "16 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4A8B9EFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#333333FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-weekly-dark-normal-pace",
+          "name": "dark Antigravity External weekly normal pace (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "y": "15 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-weekly-dark-hover",
+          "name": "dark Antigravity External weekly hover (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "16 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4A8B9EFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#333333FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-weekly-dark-hover-pace",
+          "name": "dark Antigravity External weekly hover pace (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "y": "15 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-weekly-light-normal",
+          "name": "light Antigravity External weekly normal (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "16 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F4E5BFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#CCCCCCFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-weekly-light-normal-pace",
+          "name": "light Antigravity External weekly normal pace (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "y": "15 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-weekly-light-hover",
+          "name": "light Antigravity External weekly hover (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "16 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F4E5BFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#CCCCCCFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-a-weekly-light-hover-pace",
+          "name": "light Antigravity External weekly hover pace (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
+          "y": "15 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-a-text-dark-normal",
+          "name": "dark Antigravity External text normal (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "8",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-dark-hover",
+          "name": "dark Antigravity External text hover (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "8",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
             "template": "{antigravity.external.weekly.display:usage_line}",
             "font_family": "Segoe UI",
             "font_size": "12",
@@ -2846,6 +3684,1204 @@
             "rendering": "clear_type",
             "contrast": "1",
             "align": "left",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-light-normal",
+          "name": "light Antigravity External text normal (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "8",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-light-hover",
+          "name": "light Antigravity External text hover (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "8",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-dark-normal-pct",
+          "name": "dark Antigravity External text normal compact percent (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01)",
+          "visibility": "display.percent_opacity.antigravity * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.session.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-dark-hover-pct",
+          "name": "dark Antigravity External text hover compact percent (external widget, pool A)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01)",
+          "visibility": "display.percent_opacity.antigravity * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.weekly.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-light-normal-pct",
+          "name": "light Antigravity External text normal compact percent (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01)",
+          "visibility": "display.percent_opacity.antigravity * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.session.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-text-light-hover-pct",
+          "name": "light Antigravity External text hover compact percent (external widget, pool A)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01)",
+          "visibility": "display.percent_opacity.antigravity * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "8",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external.weekly.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-marker-dark-normal",
+          "name": "dark Antigravity external widget pool A marker normal",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-marker-dark-hover",
+          "name": "dark Antigravity external widget pool A marker hover",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-marker-light-normal",
+          "name": "light Antigravity external widget pool A marker normal",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-a-marker-light-hover",
+          "name": "light Antigravity external widget pool A marker hover",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01)",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "8",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-5h-dark-normal",
+          "name": "dark Antigravity External 5h normal (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "27",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#98D0E0FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#444444FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-5h-dark-normal-pace",
+          "name": "dark Antigravity External 5h normal pace (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
+          "y": "26",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-5h-dark-hover",
+          "name": "dark Antigravity External 5h hover (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "27",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#98D0E0FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#444444FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-5h-dark-hover-pace",
+          "name": "dark Antigravity External 5h hover pace (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
+          "y": "26",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-5h-light-normal",
+          "name": "light Antigravity External 5h normal (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "27",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2D6F82FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#AAAAAAFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-5h-light-normal-pace",
+          "name": "light Antigravity External 5h normal pace (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
+          "y": "26",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-5h-light-hover",
+          "name": "light Antigravity External 5h hover (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "27",
+          "width": "display.bar_width.antigravity",
+          "height": "6 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2D6F82FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#AAAAAAFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-5h-light-hover-pace",
+          "name": "light Antigravity External 5h hover pace (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
+          "y": "26",
+          "width": "1",
+          "height": "8 - 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-weekly-dark-normal",
+          "name": "dark Antigravity External weekly normal (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "35 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4A8B9EFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#333333FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-weekly-dark-normal-pace",
+          "name": "dark Antigravity External weekly normal pace (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
+          "y": "34 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-weekly-dark-hover",
+          "name": "dark Antigravity External weekly hover (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "35 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4A8B9EFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#333333FF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-weekly-dark-hover-pace",
+          "name": "dark Antigravity External weekly hover pace (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
+          "y": "34 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-weekly-light-normal",
+          "name": "light Antigravity External weekly normal (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "35 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F4E5BFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#CCCCCCFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-weekly-light-normal-pace",
+          "name": "light Antigravity External weekly normal pace (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * antigravity.normal.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
+          "y": "34 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-weekly-light-hover",
+          "name": "light Antigravity External weekly hover (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100 * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "35 - 3 * antigravity.hover_phase",
+          "width": "display.bar_width.antigravity",
+          "height": "3 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.external_o.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F4E5BFF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#CCCCCCFF",
+              "opacity": "1"
+            },
+            "corner_radius": "1.5",
+            "segments": 10,
+            "segments_expression": "min(5, ceil(10 / max(1, display.widget_count)))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-ext-o-weekly-light-hover-pace",
+          "name": "light Antigravity External weekly hover pace (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * antigravity.hover.opacity * (1 - display.mode_bar_progress.antigravity)",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + round((display.bar_width.antigravity - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
+          "y": "34 - 3 * antigravity.hover_phase",
+          "width": "1",
+          "height": "5 + 3 * antigravity.hover_phase",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF",
+              "opacity": "0.9"
+            }
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0"
+        },
+        {
+          "id": "antigravity-ext-o-text-dark-normal",
+          "name": "dark Antigravity External text normal (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "25",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-dark-hover",
+          "name": "dark Antigravity External text hover (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "25",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-light-normal",
+          "name": "light Antigravity External text normal (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "25",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-light-hover",
+          "name": "light Antigravity External text hover (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.text_opacity.antigravity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity + display.bar_width.antigravity + 4 + display.text_slide.antigravity",
+          "y": "25",
+          "width": "display.text_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-dark-normal-pct",
+          "name": "dark Antigravity External text normal compact percent (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.percent_opacity.antigravity * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "25",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.session.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-dark-hover-pct",
+          "name": "dark Antigravity External text hover compact percent (external widget, pool O)",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.percent_opacity.antigravity * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "25",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.weekly.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-light-normal-pct",
+          "name": "light Antigravity External text normal compact percent (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.percent_opacity.antigravity * antigravity.normal.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "25",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.session.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-text-light-hover-pct",
+          "name": "light Antigravity External text hover compact percent (external widget, pool O)",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && (display.percent_opacity.antigravity > 0.01) && antigravity.external_o.shown",
+          "visibility": "display.percent_opacity.antigravity * antigravity.hover.opacity",
+          "parent": "antigravity-external-provider",
+          "x": "display.origin.antigravity",
+          "y": "25",
+          "width": "display.percent_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.external_o.weekly.display:usage_badge}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F4E5BFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-marker-dark-normal",
+          "name": "dark Antigravity external widget pool O marker normal",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#98D0E0FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-marker-dark-hover",
+          "name": "dark Antigravity external widget pool O marker hover",
+          "render": "(system.dark) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#4A8B9EFF",
+              "opacity": "antigravity.hover.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-marker-light-normal",
+          "name": "light Antigravity external widget pool O marker normal",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.normal.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
+            "color": {
+              "color": "#2D6F82FF",
+              "opacity": "antigravity.normal.opacity"
+            }
+          }
+        },
+        {
+          "id": "antigravity-ext-o-marker-light-hover",
+          "name": "light Antigravity external widget pool O marker hover",
+          "render": "((1 - system.dark)) && (display.agy_split) && (antigravity.hover.opacity > 0.01) && antigravity.external_o.shown",
+          "visibility": "100",
+          "parent": "antigravity-external-provider",
+          "x": "0",
+          "y": "25",
+          "width": "display.marker_box.antigravity",
+          "height": "13",
+          "background": {
+            "type": "none"
+          },
+          "border": null,
+          "corner_radius": "0",
+          "layout": "freeform",
+          "align": "start",
+          "gap": "0",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "center",
             "color": {
               "color": "#1F4E5BFF",
               "opacity": "antigravity.hover.opacity"
@@ -8353,7 +10389,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.gemini.weekly.display:usage_badge}",
+            "template": "{antigravity.row1h.weekly.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
@@ -8419,7 +10455,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.gemini.weekly.display:usage_badge}",
+            "template": "{antigravity.row1h.weekly.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
@@ -8452,7 +10488,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.session.display:usage_badge}",
+            "template": "{antigravity.row2.session.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
@@ -8485,7 +10521,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.weekly.display:usage_badge}",
+            "template": "{antigravity.row2h.weekly.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
@@ -8518,7 +10554,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.session.display:usage_badge}",
+            "template": "{antigravity.row2.session.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
@@ -8551,7 +10587,7 @@
           "gap": "0",
           "content": {
             "type": "text",
-            "template": "{antigravity.external.weekly.display:usage_badge}",
+            "template": "{antigravity.row2h.weekly.display:usage_badge}",
             "font_family": "Segoe UI",
             "font_size": "11",
             "weight": "medium",
