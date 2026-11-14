@@ -2800,7 +2800,8 @@ impl DataContext {
             let pool_a = if runtime.antigravity_o_only() {
                 pool_o_usage
             } else {
-                data.get(ProviderId::Antigravity)
+                // Never pool O's stand-in reading under pool A's label.
+                data.antigravity_pool_a_reading()
             };
             context.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
             if let Some(agy) = pool_a {

@@ -6046,6 +6046,80 @@ mod antigravity_pool_toggle_tests {
     }
 
     #[test]
+    fn pool_o_reading_is_never_shown_or_carried_as_pool_a_after_a_settings_reload() {
+        use crate::poller::PollError;
+        let mut o_only = crate::accounts::AccountSettings::default();
+        let mut profile = crate::accounts::AccountSettings::antigravity_x_profile();
+        profile.credentials_path = "C:\\account-tests\\opencode.db".into();
+        profile.enabled = true;
+        o_only.antigravity.profiles.push(profile);
+        o_only.set_antigravity_a_enabled(false);
+        let agy = ProviderSet::from_enabled([ProviderId::Antigravity]);
+        let fixture = |percentage: f64| crate::models::UsageData {
+            session: crate::models::UsageSection {
+                available: true,
+                percentage,
+                resets_at: None,
+            },
+            ..Default::default()
+        };
+        let shown =
+            crate::poller::poll_accounts_for_test(agy, &o_only, |_, _| Ok(fixture(70.0))).unwrap();
+        assert!(shown.antigravity_from_pool_o());
+        // The marker survives the usage cache.
+        let cached: crate::models::AppUsageData =
+            serde_json::from_str(&serde_json::to_string(&shown).unwrap()).unwrap();
+        assert_eq!(cached, shown);
+        // A settings reload (not the menu) turns pool A back on next to pool O.
+        let mut both = o_only.clone();
+        both.set_antigravity_a_enabled(true);
+        for reselect in [true, false] {
+            let mut previous = cached.clone();
+            if reselect {
+                // What `reload_external_settings` does with the new accounts.
+                previous.select_accounts(&both);
+                assert!(previous.get(ProviderId::Antigravity).is_none());
+            }
+            assert!(previous.antigravity_pool_a_reading().is_none());
+            // Pool A fails transiently; pool O answers again.
+            let fresh = crate::poller::poll_accounts_for_test(agy, &both, |_, path| match path {
+                Some(_) => Ok(fixture(70.0)),
+                None => Err(PollError::NetworkError),
+            })
+            .unwrap();
+            let merged = crate::poller::merge_poll_progress(fresh, &previous, &both);
+            let pool_a = merged
+                .accounts
+                .iter()
+                .find(|account| account.is_antigravity_pool_a())
+                .unwrap();
+            assert!(pool_a.usage.is_none(), "reselect={reselect}");
+            assert!(
+                merged.get(ProviderId::Antigravity).is_none(),
+                "pool A shows pool O's figures (reselect={reselect})"
+            );
+            assert!(!merged.antigravity_from_pool_o());
+            assert_eq!(
+                merged
+                    .antigravity_x()
+                    .unwrap()
+                    .usage
+                    .as_ref()
+                    .unwrap()
+                    .session
+                    .percentage,
+                70.0
+            );
+            let carried = crate::poller::carry_forward_failures(
+                crate::models::AppUsageData::default(),
+                &previous,
+                agy,
+            );
+            assert!(carried.get(ProviderId::Antigravity).is_none());
+        }
+    }
+
+    #[test]
     fn agy_pool_switches_reselect_the_shown_reading_at_once() {
         let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
         state.providers = ProviderSet::from_enabled([ProviderId::Antigravity, ProviderId::Claude]);

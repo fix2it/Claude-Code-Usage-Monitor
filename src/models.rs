@@ -194,6 +194,9 @@ pub struct CodexCreditsState {
 pub struct AppUsageData {
     providers: BTreeMap<ProviderId, UsageData>,
     pub accounts: Vec<AccountUsage>,
+    /// agy's provider reading came from pool O (pool A switched off). Such a
+    /// reading is never shown or carried forward as pool A's.
+    antigravity_from_pool_o: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -284,12 +287,31 @@ impl AppUsageData {
     }
 
     pub fn insert(&mut self, provider: ProviderId, usage: UsageData) -> Option<UsageData> {
+        if provider == ProviderId::Antigravity {
+            // Any reading stored here directly is pool A's own.
+            self.antigravity_from_pool_o = false;
+        }
         self.providers.insert(provider, usage)
+    }
+
+    /// agy's provider reading is pool O's, standing in while pool A is off.
+    pub fn antigravity_from_pool_o(&self) -> bool {
+        self.antigravity_from_pool_o && self.providers.contains_key(&ProviderId::Antigravity)
+    }
+
+    /// agy's provider reading as pool A's own, never pool O's stand-in.
+    pub fn antigravity_pool_a_reading(&self) -> Option<&UsageData> {
+        (!self.antigravity_from_pool_o())
+            .then(|| self.get(ProviderId::Antigravity))
+            .flatten()
     }
 
     /// Drop a provider's reading, e.g. when the pool it came from is switched
     /// off, so it is never shown as another pool's figures.
     pub fn remove(&mut self, provider: ProviderId) -> Option<UsageData> {
+        if provider == ProviderId::Antigravity {
+            self.antigravity_from_pool_o = false;
+        }
         self.providers.remove(&provider)
     }
 
@@ -367,10 +389,16 @@ impl AppUsageData {
             // reading is never shown in its place.
             let usage = self.antigravity_x().and_then(|pool_o| pool_o.usage.clone());
             self.providers.remove(&ProviderId::Antigravity);
+            self.antigravity_from_pool_o = usage.is_some();
             if let Some(usage) = usage {
                 self.providers.insert(ProviderId::Antigravity, usage);
             }
-        } else if settings.antigravity_x().is_some() {
+        } else if self.antigravity_from_pool_o() {
+            // Pool A is back on (menu or settings reload): pool O's stand-in
+            // reading is dropped until pool A answers for itself.
+            self.remove(ProviderId::Antigravity);
+        }
+        if !settings.antigravity_o_only() && settings.antigravity_x().is_some() {
             if let Some(pool_a) = self
                 .accounts
                 .iter()
@@ -444,9 +472,14 @@ impl FromIterator<(ProviderId, UsageData)> for AppUsageData {
         Self {
             providers: iter.into_iter().collect(),
             accounts: Vec::new(),
+            antigravity_from_pool_o: false,
         }
     }
 }
+
+/// Cache key marking agy's provider reading as pool O's stand-in.
+const ANTIGRAVITY_SOURCE_KEY: &str = "antigravity_source";
+const ANTIGRAVITY_SOURCE_POOL_O: &str = "pool_o";
 
 impl Serialize for AppUsageData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -471,6 +504,9 @@ impl Serialize for AppUsageData {
         if !self.accounts.is_empty() {
             map.serialize_entry("accounts", &self.accounts)?;
         }
+        if self.antigravity_from_pool_o() {
+            map.serialize_entry(ANTIGRAVITY_SOURCE_KEY, ANTIGRAVITY_SOURCE_POOL_O)?;
+        }
         map.end()
     }
 }
@@ -488,6 +524,9 @@ impl<'de> Deserialize<'de> for AppUsageData {
             .map_err(serde::de::Error::custom)?
             .unwrap_or_default();
 
+        let from_pool_o = values
+            .remove(ANTIGRAVITY_SOURCE_KEY)
+            .is_some_and(|source| source == ANTIGRAVITY_SOURCE_POOL_O);
         let gemini_val = values.remove("antigravity_gemini");
         let external_val = values.remove("antigravity_external");
         let legacy_agy_val = values.remove("antigravity");
@@ -528,6 +567,8 @@ impl<'de> Deserialize<'de> for AppUsageData {
         }
 
         data.accounts = accounts;
+        // `insert` above cleared it; restore the cached source last.
+        data.antigravity_from_pool_o = from_pool_o;
         Ok(data)
     }
 }

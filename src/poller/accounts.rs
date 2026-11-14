@@ -352,7 +352,8 @@ pub(super) fn carry_accounts(fresh: &mut AppUsageData, previous: &AppUsageData) 
                 .accounts
                 .iter()
                 .any(AccountUsage::is_antigravity_pool_a))
-        .then(|| previous.get(ProviderId::Antigravity))
+        // Pool O's stand-in reading (pool A was off) is never pool A's.
+        .then(|| previous.antigravity_pool_a_reading())
         .flatten();
         if let Some(last) = last_account.or(last_pool_a) {
             let mut carried = last.clone();

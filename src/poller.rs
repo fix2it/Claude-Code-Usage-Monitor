@@ -170,7 +170,13 @@ pub fn carry_forward_failures(
         if merged.get(provider).is_some() {
             continue;
         }
-        if let Some(last) = previous.get(provider) {
+        // Pool O's stand-in for agy is never carried as pool A's reading.
+        let last = if provider == ProviderId::Antigravity {
+            previous.antigravity_pool_a_reading()
+        } else {
+            previous.get(provider)
+        };
+        if let Some(last) = last {
             let mut carried = last.clone();
             carried.mark_stale();
             merged.insert(provider, carried);
