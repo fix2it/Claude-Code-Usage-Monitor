@@ -344,7 +344,8 @@ pub fn rendered_label(
         "Lock in taskbar" => language.text("Lock in taskbar"),
         "Show widget" => language.text("Show widget"),
         "Show pace" => language.text("Show pace"),
-        "Show Fable" => language.text("Show Fable"),
+        "Fable" => language.text("Fable"),
+        "External models" => language.text("External models"),
         _ => label,
     };
     format!(
