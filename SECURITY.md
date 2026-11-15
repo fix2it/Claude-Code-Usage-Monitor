@@ -2,20 +2,18 @@
 
 ## Report a vulnerability privately
 
-This repository is a fork maintained by
-[fix2it](https://github.com/fix2it); it has no security email address, and
-GitHub private vulnerability reporting is not currently enabled for it.
-
-To report a vulnerability, open a short public issue titled
-`[Security] Private contact request` that contains **no** technical details,
-and the maintainer will arrange a private channel. Do **not** describe
-suspected vulnerabilities in public issues, pull requests, or discussions.
+This repository is a fork maintained by [fix2it](https://github.com/fix2it).
+Report vulnerabilities through GitHub private vulnerability reporting:
+[open a private report](https://github.com/fix2it/Claude-Code-Usage-Monitor/security/advisories/new) (or **Security > Report a vulnerability** on the
+repository page). Only the maintainer and you can see the report. Do **not**
+describe suspected vulnerabilities in public issues, pull requests, or
+discussions.
 
 Vulnerabilities that also affect the original project
 ([CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor))
 should be reported to its author through that project's own security policy.
 
-Once the private channel is set up, include what you can safely share:
+Include what you can safely share:
 
 - A description of the vulnerability and its potential impact.
 - The app version or commit, Windows version, and affected provider or feature.
@@ -46,8 +44,8 @@ the affected version, and check the latest release when it is safe to do so.
 
 Maintainers review reports privately and may ask for additional reproduction
 details. Response and fix times depend on severity and maintainer availability;
-there is no guaranteed response deadline. If nobody replies, comment on the same issue
-(still without details) to ask again.
+there is no guaranteed response deadline. If nobody replies, add a comment to
+your private report.
 
 Please coordinate public disclosure with the maintainers so a fix or mitigation
 can be made available before publishing exploit details. Reporter credit should
