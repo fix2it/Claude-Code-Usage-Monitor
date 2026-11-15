@@ -110,7 +110,7 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
             state.language,
             state.usage_countdown,
             state.show_antigravity_gemini,
-            state.show_antigravity_external,
+            super::effective_antigravity_external(state),
             Some(SystemTime::now()),
         )
         .join("\n")
