@@ -42,4 +42,4 @@ Maintainers may edit or remove inappropriate content, issue a warning, restrict
 participation temporarily, or permanently exclude participants, depending on the
 severity and repetition of the behavior. Where practical, they will explain the
 reason for an action privately to the affected participant. Requests to review
-an enforcement decision can be sent to the same contact address.
+an enforcement decision follow the same reporting process.

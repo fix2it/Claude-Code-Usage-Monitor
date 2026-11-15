@@ -1,12 +1,11 @@
 # Updater verification
 
-Update checks use the running executable's installation channel. Standalone
-executables query GitHub only; executables in the recognized WinGet package
-directories query only the `winget` source with `winget show --versions`.
-WinGet checks offer the newest published stable version newer than the running
-version, even when GitHub has a later release. An equal or older source version
-means the installation is up to date. Source failures remain errors and never
-trigger a fallback to the other channel. WinGet upgrades use that same source.
+Fork builds always update through the portable channel: they query this
+fork's GitHub Releases (`fix2it/Claude-Code-Usage-Monitor`) only, wherever the
+executable is installed. The WinGet channel code inherited from the original
+project is kept but inactive, so the upstream WinGet package can never replace
+a fork build. An equal or older release means the installation is up to date,
+and a failed check is reported as an error.
 
 The portable updater accepts only the exact `claude-code-usage-monitor.exe`
 asset from the configured repository's latest stable GitHub release. It rejects
@@ -29,7 +28,7 @@ arguments are errors; the old helper invocation without a digest is rejected.
 
 ## Trust boundary
 
-The digest comes from the authenticated GitHub API over TLS. This detects corrupt
+The digest comes from the GitHub API over TLS (no GitHub credentials are sent). This detects corrupt
 or substituted downloads relative to that metadata. It is **not a publisher
 signature** and does not protect against a compromised GitHub repository or
 release account. There is no Authenticode or detached-signature verification in
@@ -39,8 +38,7 @@ Code already running as the same Windows user is outside this trust boundary.
 GitHub computes asset digests for uploaded release assets; see the
 [GitHub release asset API](https://docs.github.com/en/rest/releases/assets).
 Releases without a digest cannot be installed through the portable updater.
-The release workflow does not need a separate checksum upload. WinGet continues
-to perform installation through its own upgrade command.
+The release workflow does not need a separate checksum upload.
 
 ## Tests
 
@@ -49,6 +47,5 @@ SemVer precedence, streamed size limits, known SHA-256 vectors, corrupt and
 truncated bodies, interrupted and failed I/O, partial-file cleanup, helper
 arguments, and Windows file locking. Tests do not download or execute updates.
 The release workflow runs these tests before building a release.
-Channel tests also cover source isolation, WinGet version parsing, and source
-errors. To verify the live WinGet listing without installing an update, run
-`cargo test --locked winget_lists_published_versions_from_the_live_source -- --ignored`.
+Channel tests also cover source isolation and the inactive WinGet code
+(version parsing and source errors).

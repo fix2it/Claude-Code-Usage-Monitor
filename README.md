@@ -123,6 +123,7 @@ In the default theme, left-click a provider tray icon to show or hide the widget
 | Google Antigravity | Sign in to Antigravity, then enable it in **Providers**. |
 | OpenCode Go | Connect an OpenCode Go account, configure the credentials described below, then enable OpenCode in **Providers**. |
 | Cursor | Sign in to Cursor, then enable it in **Providers**. The local session is detected automatically. |
+| Qoder | Install `qodercli`, sign in with `/login`, then enable Qoder in **Providers**. The provider stays off while `qodercli` is missing; usage is read at most every 15 minutes. See [Qoder provider](docs/qoder-provider.md). |
 | Grok Build | Run `grok login` in the Grok Build CLI, then enable Grok in **Providers**. The signed-in session is detected automatically. |
 | GitHub Copilot | Sign in with the Copilot CLI (`copilot`, then `/login`) or the GitHub CLI (`gh auth login`), then enable Copilot in **Providers**. The stored login is detected automatically. |
 
