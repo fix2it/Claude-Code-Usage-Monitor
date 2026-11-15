@@ -357,6 +357,7 @@ pub fn rendered_label(
         "External models" => language.text("External models"),
         "Antigravity (Main)" => language.text("Antigravity (Main)"),
         "Antigravity (OpenCode)" => language.text("Antigravity (OpenCode)"),
+        "Pools on one widget" => language.text("Pools on one widget"),
         _ => label,
     };
     format!(
