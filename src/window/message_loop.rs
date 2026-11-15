@@ -918,6 +918,20 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }
+                IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X => {
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            super::toggle_antigravity_external_x(s);
+                        }
+                    }
+                    save_state_settings();
+                    // The external-models widget can appear or go away.
+                    position_at_taskbar();
+                    render_layered();
+                    super::mouse::revalidate_mouse_hover(hwnd);
+                    sync_tray_icon(hwnd);
+                }
                 IDM_PROVIDER_ANTIGRAVITY_A => {
                     let mut should_reposition = false;
                     {

@@ -1195,6 +1195,9 @@ pub struct ThemeRuntime {
     pub antigravity_x_enabled: bool,
     /// The first agy pool (Antigravity's own login) is switched on.
     pub antigravity_a_enabled: bool,
+    /// Pool o's External models toggle (pool a's is
+    /// `antigravity_external_enabled` while both pools are on).
+    pub antigravity_external_x_enabled: bool,
     pub crossfade_opacity: f64,
     pub claude_crossfade_opacity: f64,
     pub claude_hovered: bool,
@@ -1234,6 +1237,7 @@ impl Default for ThemeRuntime {
             antigravity_external_enabled: false,
             antigravity_x_enabled: false,
             antigravity_a_enabled: true,
+            antigravity_external_x_enabled: false,
             crossfade_opacity: 1.0,
             claude_crossfade_opacity: 0.0,
             claude_hovered: false,
@@ -1288,6 +1292,7 @@ impl ThemeRuntime {
             antigravity_external_enabled: false,
             antigravity_x_enabled: false,
             antigravity_a_enabled: true,
+            antigravity_external_x_enabled: false,
             crossfade_opacity: 1.0,
             claude_crossfade_opacity: 0.0,
             claude_hovered: false,
@@ -1348,6 +1353,12 @@ impl ThemeRuntime {
     /// The OpenCode pool follows its parent: it is on only while agy is.
     pub fn with_antigravity_x(mut self, enabled: bool) -> Self {
         self.antigravity_x_enabled = enabled;
+        self
+    }
+
+    /// Pool o's own External models toggle.
+    pub fn with_antigravity_external_x(mut self, enabled: bool) -> Self {
+        self.antigravity_external_x_enabled = enabled;
         self
     }
 
@@ -1574,7 +1585,8 @@ pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -
 /// External models on with pool O shown: the external models get their own
 /// widget next to the Gemini one, each with a row per pool (A and O).
 pub(crate) fn antigravity_split(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
-    runtime.antigravity_external_enabled && antigravity_pool_o(data, runtime)
+    antigravity_pool_o(data, runtime)
+        && (runtime.antigravity_external_enabled || runtime.antigravity_external_x_enabled)
 }
 
 /// The OpenCode agy pool has its own row: it is switched on (with agy) and is
@@ -2618,6 +2630,10 @@ impl DataContext {
         );
         context.insert("antigravity.pool_o", pool_o as u8 as f64);
         context.insert(
+            "antigravity.a.enabled",
+            runtime.antigravity_a_enabled as u8 as f64,
+        );
+        context.insert(
             "display.agy_split",
             antigravity_split(data, runtime) as u8 as f64,
         );
@@ -2863,17 +2879,25 @@ impl DataContext {
         self.insert_provider("antigravity.row2", row2, false, runtime.countdown);
         self.insert_provider("antigravity.row1h", pool_a, false, runtime.countdown);
         self.insert_provider("antigravity.row2h", row2, false, runtime.countdown);
-        // Pool O's row in the external-models widget; its models-only reading
-        // has no external pool, and then only pool A's row is shown.
+        // Pool O's row in the external-models widget. A missing or failed
+        // reading leaves the row in place with no data ("--", empty gauge),
+        // like any provider without data, so the widget is never empty.
         self.insert_provider(
             "antigravity.external_o",
             o_external,
             false,
             runtime.countdown,
         );
+        // One external-models row per pool whose own toggle is on.
+        let split = pool_o_on
+            && (runtime.antigravity_external_enabled || runtime.antigravity_external_x_enabled);
+        self.insert(
+            "antigravity.external_a.shown",
+            (split && runtime.antigravity_external_enabled) as u8 as f64,
+        );
         self.insert(
             "antigravity.external_o.shown",
-            o_external.is_some() as u8 as f64,
+            (split && runtime.antigravity_external_x_enabled) as u8 as f64,
         );
     }
 

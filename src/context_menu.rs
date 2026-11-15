@@ -70,6 +70,8 @@ pub enum ContextMenuAction {
     ToggleAntigravityA,
     /// Second agy pool, read from OpenCode's login.
     ToggleAntigravityX,
+    /// External models of the second (OpenCode) agy pool.
+    ToggleAntigravityExternalX,
     ToggleClaudeMain,
     ToggleClaudeX,
     ToggleCodexMain,
@@ -350,8 +352,8 @@ pub fn rendered_label(
         "Show pace" => language.text("Show pace"),
         "Fable" => language.text("Fable"),
         "External models" => language.text("External models"),
-        "agy (Main)" => language.text("agy (Main)"),
-        "agy (o = OpenCode)" => language.text("agy (o = OpenCode)"),
+        "Antigravity (Main)" => language.text("Antigravity (Main)"),
+        "Antigravity (OpenCode)" => language.text("Antigravity (OpenCode)"),
         _ => label,
     };
     format!(
@@ -432,27 +434,26 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             ),
             ContextMenuItem::action("provider-codex-x", "Codex X", Action::ToggleCodexX),
             ContextMenuItem::action(
-                "provider-antigravity-gemini",
-                "Antigravity",
-                Action::ToggleAntigravityGemini,
+                "provider-antigravity-a",
+                "Antigravity (Main)",
+                Action::ToggleAntigravityA,
             ),
             child(
                 "provider-antigravity-external",
                 "External models",
                 Action::ToggleAntigravityExternal,
-                "antigravity.gemini.enabled",
+                "providers.antigravity.enabled && antigravity.a.enabled",
             ),
-            child(
-                "provider-antigravity-a",
-                "agy (Main)",
-                Action::ToggleAntigravityA,
-                "antigravity.gemini.enabled",
-            ),
-            child(
+            ContextMenuItem::action(
                 "provider-antigravity-x",
-                "agy (o = OpenCode)",
+                "Antigravity (OpenCode)",
                 Action::ToggleAntigravityX,
-                "antigravity.gemini.enabled",
+            ),
+            child(
+                "provider-antigravity-external-x",
+                "External models",
+                Action::ToggleAntigravityExternalX,
+                "providers.antigravity.enabled && antigravity.x.enabled",
             ),
             ContextMenuItem::action(
                 "provider-opencode",
@@ -829,6 +830,20 @@ mod tests {
         );
         let mut context = DataContext::from_usage(None, &theme_engine::Canvas::default());
         context.insert("providers.claude.enabled", 1.0);
+        context.insert("providers.antigravity.enabled", 1.0);
+        // agy mirrors Claude: two first-level pool items, each with its own
+        // External models child; no separate agy parent any more.
+        for (id, label) in [
+            ("provider-antigravity-a", "Antigravity (Main)"),
+            ("provider-antigravity-x", "Antigravity (OpenCode)"),
+        ] {
+            let item = providers.iter().find(|item| item.id == id).unwrap();
+            assert_eq!(item.label, label);
+            assert!(item.should_render(&context));
+        }
+        assert!(providers
+            .iter()
+            .all(|item| item.id != "provider-antigravity-gemini" && !item.label.contains("agy (")));
         for (parent, child, binding, label) in [
             (
                 "provider-claude-main",
@@ -843,22 +858,16 @@ mod tests {
                 "Fable",
             ),
             (
-                "provider-antigravity-gemini",
+                "provider-antigravity-a",
                 "provider-antigravity-external",
-                "antigravity.gemini.enabled",
+                "antigravity.a.enabled",
                 "External models",
             ),
             (
-                "provider-antigravity-gemini",
-                "provider-antigravity-a",
-                "antigravity.gemini.enabled",
-                "agy (Main)",
-            ),
-            (
-                "provider-antigravity-gemini",
                 "provider-antigravity-x",
-                "antigravity.gemini.enabled",
-                "agy (o = OpenCode)",
+                "provider-antigravity-external-x",
+                "antigravity.x.enabled",
+                "External models",
             ),
         ] {
             let index = providers.iter().position(|item| item.id == parent).unwrap();

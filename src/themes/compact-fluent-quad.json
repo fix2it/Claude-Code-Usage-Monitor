@@ -3759,7 +3759,7 @@
         {
           "id": "antigravity-ext-a-5h-dark-normal",
           "name": "dark Antigravity External 5h normal (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -3795,7 +3795,7 @@
         {
           "id": "antigravity-ext-a-5h-dark-normal-pace",
           "name": "dark Antigravity External 5h normal pace (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
@@ -3818,7 +3818,7 @@
         {
           "id": "antigravity-ext-a-5h-dark-hover",
           "name": "dark Antigravity External 5h hover (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -3854,7 +3854,7 @@
         {
           "id": "antigravity-ext-a-5h-dark-hover-pace",
           "name": "dark Antigravity External 5h hover pace (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
@@ -3877,7 +3877,7 @@
         {
           "id": "antigravity-ext-a-5h-light-normal",
           "name": "light Antigravity External 5h normal (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -3913,7 +3913,7 @@
         {
           "id": "antigravity-ext-a-5h-light-normal-pace",
           "name": "light Antigravity External 5h normal pace (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
@@ -3936,7 +3936,7 @@
         {
           "id": "antigravity-ext-a-5h-light-hover",
           "name": "light Antigravity External 5h hover (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -3972,7 +3972,7 @@
         {
           "id": "antigravity-ext-a-5h-light-hover-pace",
           "name": "light Antigravity External 5h hover pace (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.session.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.session.expected_display, 0, 100) / 100)",
@@ -3995,7 +3995,7 @@
         {
           "id": "antigravity-ext-a-weekly-dark-normal",
           "name": "dark Antigravity External weekly normal (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4031,7 +4031,7 @@
         {
           "id": "antigravity-ext-a-weekly-dark-normal-pace",
           "name": "dark Antigravity External weekly normal pace (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
@@ -4054,7 +4054,7 @@
         {
           "id": "antigravity-ext-a-weekly-dark-hover",
           "name": "dark Antigravity External weekly hover (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4090,7 +4090,7 @@
         {
           "id": "antigravity-ext-a-weekly-dark-hover-pace",
           "name": "dark Antigravity External weekly hover pace (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
@@ -4113,7 +4113,7 @@
         {
           "id": "antigravity-ext-a-weekly-light-normal",
           "name": "light Antigravity External weekly normal (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4149,7 +4149,7 @@
         {
           "id": "antigravity-ext-a-weekly-light-normal-pace",
           "name": "light Antigravity External weekly normal pace (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
@@ -4172,7 +4172,7 @@
         {
           "id": "antigravity-ext-a-weekly-light-hover",
           "name": "light Antigravity External weekly hover (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4208,7 +4208,7 @@
         {
           "id": "antigravity-ext-a-weekly-light-hover-pace",
           "name": "light Antigravity External weekly hover pace (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "(100) * antigravity.external.weekly.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external.weekly.expected_display, 0, 100) / 100)",
@@ -4231,7 +4231,7 @@
         {
           "id": "antigravity-ext-a-text-dark-normal",
           "name": "dark Antigravity External text normal (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
@@ -4264,7 +4264,7 @@
         {
           "id": "antigravity-ext-a-text-dark-hover",
           "name": "dark Antigravity External text hover (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
@@ -4297,7 +4297,7 @@
         {
           "id": "antigravity-ext-a-text-light-normal",
           "name": "light Antigravity External text normal (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
@@ -4330,7 +4330,7 @@
         {
           "id": "antigravity-ext-a-text-light-hover",
           "name": "light Antigravity External text hover (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
@@ -4363,7 +4363,7 @@
         {
           "id": "antigravity-ext-a-text-dark-normal-pct",
           "name": "dark Antigravity External text normal compact percent (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.percent_opacity.agy_external * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4396,7 +4396,7 @@
         {
           "id": "antigravity-ext-a-text-dark-hover-pct",
           "name": "dark Antigravity External text hover compact percent (external widget, pool A)",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.percent_opacity.agy_external * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4429,7 +4429,7 @@
         {
           "id": "antigravity-ext-a-text-light-normal-pct",
           "name": "light Antigravity External text normal compact percent (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.percent_opacity.agy_external * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4462,7 +4462,7 @@
         {
           "id": "antigravity-ext-a-text-light-hover-pct",
           "name": "light Antigravity External text hover compact percent (external widget, pool A)",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01) && (display.percent_opacity.agy_external > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "display.percent_opacity.agy_external * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
@@ -4495,7 +4495,7 @@
         {
           "id": "antigravity-ext-a-marker-dark-normal",
           "name": "dark Antigravity external widget pool A marker normal",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
@@ -4528,7 +4528,7 @@
         {
           "id": "antigravity-ext-a-marker-dark-hover",
           "name": "dark Antigravity external widget pool A marker hover",
-          "render": "(system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "((system.dark) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
@@ -4561,7 +4561,7 @@
         {
           "id": "antigravity-ext-a-marker-light-normal",
           "name": "light Antigravity external widget pool A marker normal",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.normal.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
@@ -4594,7 +4594,7 @@
         {
           "id": "antigravity-ext-a-marker-light-hover",
           "name": "light Antigravity external widget pool A marker hover",
-          "render": "((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)",
+          "render": "(((1 - system.dark)) && (display.agy_split) && (agy_external.hover.opacity > 0.01)) && (antigravity.external_a.shown)",
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
@@ -4631,7 +4631,7 @@
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "27",
+          "y": "antigravity.external_a.shown * (27) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.bar_width.agy_external",
           "height": "6 - 3 * agy_external.hover_phase",
           "background": {
@@ -4667,7 +4667,7 @@
           "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
-          "y": "26",
+          "y": "antigravity.external_a.shown * (26) + (1 - antigravity.external_a.shown) * (7)",
           "width": "1",
           "height": "8 - 3 * agy_external.hover_phase",
           "background": {
@@ -4690,7 +4690,7 @@
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "27",
+          "y": "antigravity.external_a.shown * (27) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.bar_width.agy_external",
           "height": "6 - 3 * agy_external.hover_phase",
           "background": {
@@ -4726,7 +4726,7 @@
           "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
-          "y": "26",
+          "y": "antigravity.external_a.shown * (26) + (1 - antigravity.external_a.shown) * (7)",
           "width": "1",
           "height": "8 - 3 * agy_external.hover_phase",
           "background": {
@@ -4749,7 +4749,7 @@
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "27",
+          "y": "antigravity.external_a.shown * (27) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.bar_width.agy_external",
           "height": "6 - 3 * agy_external.hover_phase",
           "background": {
@@ -4785,7 +4785,7 @@
           "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
-          "y": "26",
+          "y": "antigravity.external_a.shown * (26) + (1 - antigravity.external_a.shown) * (7)",
           "width": "1",
           "height": "8 - 3 * agy_external.hover_phase",
           "background": {
@@ -4808,7 +4808,7 @@
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "27",
+          "y": "antigravity.external_a.shown * (27) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.bar_width.agy_external",
           "height": "6 - 3 * agy_external.hover_phase",
           "background": {
@@ -4844,7 +4844,7 @@
           "visibility": "(100) * antigravity.external_o.session.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.session.expected_display, 0, 100) / 100)",
-          "y": "26",
+          "y": "antigravity.external_a.shown * (26) + (1 - antigravity.external_a.shown) * (7)",
           "width": "1",
           "height": "8 - 3 * agy_external.hover_phase",
           "background": {
@@ -4867,7 +4867,7 @@
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "35 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (35 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (16 - 3 * agy_external.hover_phase)",
           "width": "display.bar_width.agy_external",
           "height": "3 + 3 * agy_external.hover_phase",
           "background": {
@@ -4903,7 +4903,7 @@
           "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
-          "y": "34 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (34 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (15 - 3 * agy_external.hover_phase)",
           "width": "1",
           "height": "5 + 3 * agy_external.hover_phase",
           "background": {
@@ -4926,7 +4926,7 @@
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "35 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (35 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (16 - 3 * agy_external.hover_phase)",
           "width": "display.bar_width.agy_external",
           "height": "3 + 3 * agy_external.hover_phase",
           "background": {
@@ -4962,7 +4962,7 @@
           "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
-          "y": "34 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (34 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (15 - 3 * agy_external.hover_phase)",
           "width": "1",
           "height": "5 + 3 * agy_external.hover_phase",
           "background": {
@@ -4985,7 +4985,7 @@
           "visibility": "100 * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "35 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (35 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (16 - 3 * agy_external.hover_phase)",
           "width": "display.bar_width.agy_external",
           "height": "3 + 3 * agy_external.hover_phase",
           "background": {
@@ -5021,7 +5021,7 @@
           "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * agy_external.normal.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
-          "y": "34 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (34 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (15 - 3 * agy_external.hover_phase)",
           "width": "1",
           "height": "5 + 3 * agy_external.hover_phase",
           "background": {
@@ -5044,7 +5044,7 @@
           "visibility": "100 * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "35 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (35 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (16 - 3 * agy_external.hover_phase)",
           "width": "display.bar_width.agy_external",
           "height": "3 + 3 * agy_external.hover_phase",
           "background": {
@@ -5080,7 +5080,7 @@
           "visibility": "(100) * antigravity.external_o.weekly.expected_available * display.show_pace * agy_external.hover.opacity * (1 - display.mode_bar_progress.agy_external)",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + round((display.bar_width.agy_external - 1) * clamp(antigravity.external_o.weekly.expected_display, 0, 100) / 100)",
-          "y": "34 - 3 * agy_external.hover_phase",
+          "y": "antigravity.external_a.shown * (34 - 3 * agy_external.hover_phase) + (1 - antigravity.external_a.shown) * (15 - 3 * agy_external.hover_phase)",
           "width": "1",
           "height": "5 + 3 * agy_external.hover_phase",
           "background": {
@@ -5103,7 +5103,7 @@
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.text_box.agy_external",
           "height": "13",
           "background": {
@@ -5136,7 +5136,7 @@
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.text_box.agy_external",
           "height": "13",
           "background": {
@@ -5169,7 +5169,7 @@
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.text_box.agy_external",
           "height": "13",
           "background": {
@@ -5202,7 +5202,7 @@
           "visibility": "display.text_opacity.agy_external",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external + display.bar_width.agy_external + 4 + display.text_slide.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.text_box.agy_external",
           "height": "13",
           "background": {
@@ -5235,7 +5235,7 @@
           "visibility": "display.percent_opacity.agy_external * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.percent_box.agy_external",
           "height": "13",
           "background": {
@@ -5268,7 +5268,7 @@
           "visibility": "display.percent_opacity.agy_external * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.percent_box.agy_external",
           "height": "13",
           "background": {
@@ -5301,7 +5301,7 @@
           "visibility": "display.percent_opacity.agy_external * agy_external.normal.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.percent_box.agy_external",
           "height": "13",
           "background": {
@@ -5334,7 +5334,7 @@
           "visibility": "display.percent_opacity.agy_external * agy_external.hover.opacity",
           "parent": "antigravity-external-provider",
           "x": "display.origin.agy_external",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.percent_box.agy_external",
           "height": "13",
           "background": {
@@ -5367,7 +5367,7 @@
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.marker_box.agy_external",
           "height": "13",
           "background": {
@@ -5400,7 +5400,7 @@
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.marker_box.agy_external",
           "height": "13",
           "background": {
@@ -5433,7 +5433,7 @@
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.marker_box.agy_external",
           "height": "13",
           "background": {
@@ -5466,7 +5466,7 @@
           "visibility": "100",
           "parent": "antigravity-external-provider",
           "x": "0",
-          "y": "25",
+          "y": "antigravity.external_a.shown * (25) + (1 - antigravity.external_a.shown) * (8)",
           "width": "display.marker_box.agy_external",
           "height": "13",
           "background": {

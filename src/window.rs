@@ -100,6 +100,8 @@ struct AppState {
     providers: ProviderSet,
     pub(super) show_antigravity_gemini: bool,
     pub(super) show_antigravity_external: bool,
+    /// External models of agy pool o (pool a's is `show_antigravity_external`).
+    pub(super) show_antigravity_external_x: bool,
     crossfade_opacity: f64,
     antigravity_hovered: bool,
     crossfade_animation: Option<PhaseAnimation>,
@@ -308,6 +310,7 @@ pub(super) const IDM_PROVIDER_ANTIGRAVITY_GEMINI: u16 = 68;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_EXTERNAL: u16 = 67;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_X: u16 = 75;
 pub(super) const IDM_PROVIDER_ANTIGRAVITY_A: u16 = 76;
+pub(super) const IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X: u16 = 77;
 pub(super) const IDM_PROVIDER_CODEX_MAIN: u16 = 69;
 pub(super) const IDM_PROVIDER_CODEX_X: u16 = 70;
 pub(super) const IDM_PROVIDER_CLAUDE_MAIN: u16 = 72;
@@ -864,9 +867,10 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         .with_floating_card_opacity(opacity)
         .with_antigravity_pools(
             state.show_antigravity_gemini,
-            state.show_antigravity_external,
+            effective_antigravity_external(state),
             state.crossfade_opacity,
         )
+        .with_antigravity_external_x(state.show_antigravity_external_x)
         .with_antigravity_x(
             state.providers.contains(ProviderId::Antigravity)
                 && state.show_antigravity_gemini
@@ -1151,6 +1155,7 @@ fn save_state_settings() {
         persisted.set_enabled_providers(s.providers);
         persisted.show_antigravity_gemini = Some(s.show_antigravity_gemini);
         persisted.show_antigravity_external = Some(s.show_antigravity_external);
+        persisted.show_antigravity_external_x = Some(s.show_antigravity_external_x);
         persisted.custom_theme_enabled = s.custom_theme_enabled;
         persisted.show_pace = s.show_pace;
         persisted.show_fable = s.show_fable;
@@ -1385,7 +1390,7 @@ fn tray_usage_summary_from_state() -> Option<String> {
         state.language,
         state.usage_countdown,
         state.show_antigravity_gemini,
-        state.show_antigravity_external,
+        effective_antigravity_external(state),
     );
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
@@ -2791,6 +2796,7 @@ pub fn run() {
                 providers: settings.enabled_providers(),
                 show_antigravity_gemini: settings.antigravity_gemini_enabled(),
                 show_antigravity_external: settings.antigravity_external_enabled(),
+                show_antigravity_external_x: settings.antigravity_external_x_enabled(),
                 crossfade_opacity: 1.0,
                 antigravity_hovered: false,
                 crossfade_animation: None,
@@ -3943,7 +3949,12 @@ fn toggle_antigravity_models(state: &mut AppState, gemini: bool) -> bool {
 fn set_antigravity_shown(state: &mut AppState, on: bool) {
     state.providers.set(ProviderId::Antigravity, on);
     state.show_antigravity_gemini = on;
-    if !on {
+    if on {
+        // agy back on with no pool chosen shows pool a, as before pools.
+        if !state.accounts.antigravity_a_enabled() && state.accounts.antigravity_x().is_none() {
+            state.accounts.set_antigravity_a_enabled(true);
+        }
+    } else {
         state.antigravity_hovered = false;
         state.crossfade_opacity = 1.0;
         state.crossfade_animation = None;
@@ -3953,10 +3964,10 @@ fn set_antigravity_shown(state: &mut AppState, on: bool) {
     }
 }
 
-/// Turn agy pool A on or off, like Claude's main pool. The last agy pool
-/// switched off turns agy off unless it is the only provider; switching a
-/// pool on while agy is off turns agy back on. Returns true when the provider
-/// set changed.
+/// "Antigravity (Main)": agy pool a, like Claude's main pool. Switching off
+/// the last pool turns agy off (refused when agy is the only provider);
+/// switching a pool on while agy is off turns agy on. Returns true when the
+/// provider set changed.
 fn toggle_antigravity_a(state: &mut AppState) -> bool {
     let provider_on = state.providers.contains(ProviderId::Antigravity);
     let a_on = provider_on && state.accounts.antigravity_a_enabled();
@@ -3966,7 +3977,7 @@ fn toggle_antigravity_a(state: &mut AppState) -> bool {
         if state.providers.len() <= 1 {
             return false;
         }
-        state.accounts.set_antigravity_a_enabled(true);
+        state.accounts.set_antigravity_a_enabled(false);
         set_antigravity_shown(state, false);
         return true;
     }
@@ -3991,27 +4002,52 @@ fn reselect_antigravity_reading(state: &mut AppState, pool_a_turned_on: bool) {
     }
 }
 
-/// Pool O's menu toggle. Turning off the last agy pool (pool A already off)
-/// turns agy off and pool A back on for next time, or is refused when agy is
-/// the only provider, so a switched-off pool A is never polled.
-fn toggle_antigravity_pool_o(state: &mut AppState) {
-    let was_o_only = state.accounts.antigravity_o_only();
-    toggle_antigravity_x(&mut state.accounts);
-    if state.accounts.antigravity_x().is_none() && !state.accounts.antigravity_a_enabled() {
-        if state.providers.len() <= 1 && state.providers.contains(ProviderId::Antigravity) {
-            toggle_antigravity_x(&mut state.accounts);
-        } else {
-            state.accounts.set_antigravity_a_enabled(true);
-            set_antigravity_shown(state, false);
+/// Set agy pool o on or off; its profile keeps its place when off.
+fn set_antigravity_x_enabled(accounts: &mut crate::accounts::AccountSettings, on: bool) {
+    if accounts.antigravity_x().is_some() != on {
+        toggle_antigravity_x(accounts);
+    }
+}
+
+/// "Antigravity (OpenCode)": agy pool o, like Claude's X pool, with the same
+/// last-pool rules as pool a. Returns true when the provider set changed.
+fn toggle_antigravity_pool_o(state: &mut AppState) -> bool {
+    let provider_on = state.providers.contains(ProviderId::Antigravity);
+    let a_on = provider_on && state.accounts.antigravity_a_enabled();
+    let o_on = provider_on && state.accounts.antigravity_x().is_some();
+    let target = !o_on;
+    if !target && !a_on {
+        if state.providers.len() <= 1 {
+            return false;
         }
-    } else if state.accounts.antigravity_x().is_some()
-        && !state.providers.contains(ProviderId::Antigravity)
-    {
+        set_antigravity_x_enabled(&mut state.accounts, false);
+        set_antigravity_shown(state, false);
+        return true;
+    }
+    let was_o_only = state.accounts.antigravity_o_only();
+    set_antigravity_x_enabled(&mut state.accounts, target);
+    let changed = target && !provider_on;
+    if changed {
         set_antigravity_shown(state, true);
     }
-    if was_o_only {
-        // Pool O's figures stood for agy; pool A's own come with the poll.
-        reselect_antigravity_reading(state, true);
+    // Pool O's figures stood for agy; pool A's own come with the poll.
+    reselect_antigravity_reading(state, was_o_only);
+    changed
+}
+
+/// Pool o's External models child, like Claude's per-pool Fable toggle.
+fn toggle_antigravity_external_x(state: &mut AppState) {
+    state.show_antigravity_external_x = !state.show_antigravity_external_x;
+    invalidate_metrics(state);
+}
+
+/// External models of the pool that fills agy's single-pool layout: pool o's
+/// choice while only pool o is on, otherwise pool a's.
+fn effective_antigravity_external(state: &AppState) -> bool {
+    if state.accounts.antigravity_o_only() {
+        state.show_antigravity_external_x
+    } else {
+        state.show_antigravity_external
     }
 }
 
@@ -4430,6 +4466,7 @@ fn reload_external_settings(hwnd: HWND) {
         let external_enabled = settings.antigravity_external_enabled();
         state.show_antigravity_gemini = gemini_enabled;
         state.show_antigravity_external = external_enabled;
+        state.show_antigravity_external_x = settings.antigravity_external_x_enabled();
         state.accounts = settings.accounts.clone();
         if let Some(data) = state.data.as_mut() {
             data.select_accounts(&settings.accounts);
@@ -5832,6 +5869,7 @@ mod menu_command_id_tests {
             IDM_PROVIDER_ANTIGRAVITY_EXTERNAL,
             IDM_PROVIDER_ANTIGRAVITY_X,
             IDM_PROVIDER_ANTIGRAVITY_A,
+            IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X,
             IDM_PROVIDER_CODEX_MAIN,
             IDM_PROVIDER_CODEX_X,
             IDM_PROVIDER_CLAUDE_MAIN,
@@ -5953,11 +5991,18 @@ mod antigravity_pool_toggle_tests {
         assert!(!super::toggle_antigravity_a(&mut state));
         assert!(state.accounts.antigravity_a_enabled());
         assert!(state.accounts.antigravity_x().is_some());
-        // Last pool off turns agy off and leaves pool A on for next time.
+        // Last pool off turns agy off with both pools off, like Claude.
         super::toggle_antigravity_a(&mut state);
-        super::toggle_antigravity_pool_o(&mut state);
+        assert!(super::toggle_antigravity_pool_o(&mut state));
         assert!(!state.providers.contains(ProviderId::Antigravity));
-        assert!(state.accounts.antigravity_a_enabled());
+        assert!(!state.accounts.antigravity_a_enabled());
+        assert!(state.accounts.antigravity_x().is_none());
+        // "Antigravity (OpenCode)" alone brings agy back with only pool o.
+        assert!(super::toggle_antigravity_pool_o(&mut state));
+        assert!(state.providers.contains(ProviderId::Antigravity));
+        assert!(state.accounts.antigravity_o_only());
+        assert!(super::toggle_antigravity_pool_o(&mut state));
+        assert!(!state.providers.contains(ProviderId::Antigravity));
         // As the only provider, the last pool cannot be switched off.
         state.providers = ProviderSet::from_enabled([ProviderId::Antigravity]);
         assert!(!super::toggle_antigravity_a(&mut state));
@@ -6135,6 +6180,56 @@ mod antigravity_pool_toggle_tests {
             .unwrap()
             .get(ProviderId::Antigravity)
             .is_none());
+    }
+
+    #[test]
+    fn agy_menu_mirrors_claude_with_a_per_pool_external_models_toggle() {
+        use crate::context_menu::ContextMenuAction as Action;
+        let checked = |state: &super::AppState, action: Action| {
+            super::window_context_menu::context_menu_checked(state, &action)
+        };
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        state.providers = ProviderSet::from_enabled([ProviderId::Antigravity, ProviderId::Claude]);
+        state.show_antigravity_gemini = true;
+        state.show_antigravity_external = true;
+        state.show_antigravity_external_x = false;
+        assert!(checked(&state, Action::ToggleAntigravityA));
+        assert!(!checked(&state, Action::ToggleAntigravityX));
+        super::toggle_antigravity_pool_o(&mut state);
+        assert!(checked(&state, Action::ToggleAntigravityX));
+        // Each pool's External models is its own toggle.
+        assert!(checked(&state, Action::ToggleAntigravityExternal));
+        assert!(!checked(&state, Action::ToggleAntigravityExternalX));
+        let runtime = super::theme_runtime_from_state(&state);
+        assert!(runtime.antigravity_external_enabled);
+        assert!(!runtime.antigravity_external_x_enabled);
+        super::toggle_antigravity_external_x(&mut state);
+        assert!(checked(&state, Action::ToggleAntigravityExternalX));
+        // Pool a off: pool o fills the single layout with its own choice.
+        state.show_antigravity_external_x = false;
+        super::toggle_antigravity_a(&mut state);
+        let runtime = super::theme_runtime_from_state(&state);
+        assert!(runtime.antigravity_o_only());
+        assert!(!runtime.antigravity_external_enabled);
+        // Turning a pool off keeps its External models value.
+        assert!(state.show_antigravity_external);
+    }
+
+    #[test]
+    fn old_settings_give_both_pools_the_single_external_models_choice() {
+        for old in [true, false] {
+            let json = format!(r#"{{"show_antigravity":true,"show_antigravity_external":{old}}}"#);
+            let settings: crate::app_settings::SettingsFile = serde_json::from_str(&json).unwrap();
+            assert_eq!(settings.antigravity_external_enabled(), old);
+            assert_eq!(settings.antigravity_external_x_enabled(), old);
+            assert!(settings.accounts.antigravity_a_enabled());
+        }
+        let settings: crate::app_settings::SettingsFile = serde_json::from_str(
+            r#"{"show_antigravity_external":true,"show_antigravity_external_x":false}"#,
+        )
+        .unwrap();
+        assert!(settings.antigravity_external_enabled());
+        assert!(!settings.antigravity_external_x_enabled());
     }
 
     #[test]

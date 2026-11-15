@@ -159,6 +159,7 @@ fn is_provider_toggle(action: &ContextMenuAction) -> bool {
             | ContextMenuAction::ToggleAntigravityExternal
             | ContextMenuAction::ToggleAntigravityA
             | ContextMenuAction::ToggleAntigravityX
+            | ContextMenuAction::ToggleAntigravityExternalX
             | ContextMenuAction::ToggleClaudeMain
             | ContextMenuAction::ToggleClaudeX
             | ContextMenuAction::ToggleCodexMain
@@ -434,7 +435,11 @@ pub(super) fn context_menu_checked_with_origin(
             state.providers.contains(ProviderId::Antigravity)
                 && state.accounts.antigravity_a_enabled()
         }
-        ContextMenuAction::ToggleAntigravityX => state.accounts.antigravity_x().is_some(),
+        ContextMenuAction::ToggleAntigravityX => {
+            state.providers.contains(ProviderId::Antigravity)
+                && state.accounts.antigravity_x().is_some()
+        }
+        ContextMenuAction::ToggleAntigravityExternalX => state.show_antigravity_external_x,
         ContextMenuAction::ToggleClaudeMain => {
             state.providers.contains(ProviderId::Claude)
                 && state
@@ -646,6 +651,7 @@ fn context_menu_static_command(action: &ContextMenuAction) -> Option<u16> {
         ContextMenuAction::ToggleAntigravityExternal => Some(IDM_PROVIDER_ANTIGRAVITY_EXTERNAL),
         ContextMenuAction::ToggleAntigravityA => Some(IDM_PROVIDER_ANTIGRAVITY_A),
         ContextMenuAction::ToggleAntigravityX => Some(IDM_PROVIDER_ANTIGRAVITY_X),
+        ContextMenuAction::ToggleAntigravityExternalX => Some(IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X),
         ContextMenuAction::ToggleClaudeMain => Some(IDM_PROVIDER_CLAUDE_MAIN),
         ContextMenuAction::ToggleClaudeX => Some(IDM_PROVIDER_CLAUDE_X),
         ContextMenuAction::ToggleCodexMain => Some(IDM_PROVIDER_CODEX_MAIN),
@@ -755,6 +761,7 @@ mod tests {
             ContextMenuAction::ToggleAntigravityExternal,
             ContextMenuAction::ToggleAntigravityA,
             ContextMenuAction::ToggleAntigravityX,
+            ContextMenuAction::ToggleAntigravityExternalX,
             ContextMenuAction::ToggleClaudeMain,
             ContextMenuAction::ToggleClaudeX,
             ContextMenuAction::ToggleCodexMain,

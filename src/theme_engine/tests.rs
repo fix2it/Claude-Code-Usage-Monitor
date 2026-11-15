@@ -6264,7 +6264,53 @@ fn agy_data_with_pool_o(
 fn agy_runtime(external: bool, pool_o: bool) -> ThemeRuntime {
     ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
         .with_antigravity_pools(true, external, 1.0)
+        .with_antigravity_external_x(external)
         .with_antigravity_x(pool_o)
+}
+
+#[test]
+fn agy_external_models_widget_has_one_row_per_pool_toggle() {
+    let theme = quad_theme();
+    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+        .children
+        .iter()
+        .map(|object| (object.id.as_str(), object))
+        .collect();
+    let renders =
+        |id: &str, context: &DataContext| scene_object_renders(by_id[id], &by_id, context);
+    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+    for (ext_a, ext_o) in [(true, true), (true, false), (false, true), (false, false)] {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(true, ext_a, 1.0)
+                .with_antigravity_external_x(ext_o)
+                .with_antigravity_x(true);
+        let mut context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        let split = ext_a || ext_o;
+        assert_eq!(context.get("display.agy_split"), Some(split as u8 as f64));
+        assert_eq!(
+            context.get("display.widget_count"),
+            Some(if split { 2.0 } else { 1.0 })
+        );
+        assert_eq!(
+            renders("antigravity-ext-a-5h-dark-normal", &context),
+            ext_a,
+            "{ext_a} {ext_o}"
+        );
+        assert_eq!(
+            renders("antigravity-ext-o-5h-dark-normal", &context),
+            ext_o,
+            "{ext_a} {ext_o}"
+        );
+        if ext_o {
+            // Pool o's row moves up when pool a's row is off.
+            let y = evaluate(&by_id["antigravity-ext-o-5h-dark-normal"].y.0, &context).unwrap();
+            let a_y = evaluate(&by_id["antigravity-ext-a-5h-dark-normal"].y.0, &context).unwrap();
+            assert_eq!(y > a_y, ext_a, "{ext_a} {ext_o}");
+        }
+    }
 }
 
 #[test]
@@ -6387,7 +6433,7 @@ fn agy_pool_o_with_external_models_on_shows_gemini_and_external_widgets_together
     assert_eq!(children[agy + 1].parent.as_deref(), Some("provider-row"));
 
     // Pool O without external data (its models-only reading): the Gemini
-    // widget has rows A and O, the external widget only row A.
+    // widget has rows A and O; the external widget keeps pool O's row, empty.
     let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, None)));
     let context = DataContext::from_usage_with_runtime(
         Some(&data),
@@ -6405,13 +6451,13 @@ fn agy_pool_o_with_external_models_on_shows_gemini_and_external_widgets_together
         "antigravity-o-marker-dark-normal",
         "antigravity-ext-a-5h-dark-normal",
         "antigravity-ext-a-marker-dark-normal",
+        "antigravity-ext-o-5h-dark-normal",
+        "antigravity-ext-o-marker-dark-normal",
     ] {
         assert!(renders(id, &context), "{id}");
     }
     for id in [
         "antigravity-external-5h-dark-normal",
-        "antigravity-ext-o-5h-dark-normal",
-        "antigravity-ext-o-marker-dark-normal",
         "antigravity-session-gemini-solo-dark",
     ] {
         assert!(!renders(id, &context), "{id}");
@@ -6776,4 +6822,58 @@ fn agy_pool_a_off_shows_only_pool_o_in_one_row() {
         context.get("antigravity.gemini.session.percentage"),
         Some(10.0)
     );
+}
+
+#[test]
+fn agy_pool_o_external_row_without_a_reading_stays_shown_empty() {
+    let theme = quad_theme();
+    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+        .children
+        .iter()
+        .map(|object| (object.id.as_str(), object))
+        .collect();
+    let renders =
+        |id: &str, context: &DataContext| scene_object_renders(by_id[id], &by_id, context);
+    // Both pools on, pool a's External models off, pool o's on.
+    let runtime =
+        ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_antigravity_pools(true, false, 1.0)
+            .with_antigravity_external_x(true)
+            .with_antigravity_x(true);
+    for (case, pool_o) in [
+        ("no external pool", Ok(agy_pool_fixture(70.0, None))),
+        ("no reading", Ok(crate::models::UsageData::default())),
+        ("failed", Err(crate::poller::PollError::NetworkError)),
+    ] {
+        let data = agy_data_with_pool_o(pool_o);
+        let mut context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(context.get("display.agy_split"), Some(1.0), "{case}");
+        assert_eq!(context.get("display.widget_count"), Some(2.0), "{case}");
+        assert!(renders("antigravity-external-provider", &context), "{case}");
+        // The widget is never empty: pool o's row shows the no-data state.
+        for id in [
+            "antigravity-ext-o-5h-dark-normal",
+            "antigravity-ext-o-text-dark-normal",
+            "antigravity-ext-o-marker-dark-normal",
+        ] {
+            assert!(renders(id, &context), "{case}: {id}");
+        }
+        assert!(
+            !renders("antigravity-ext-a-5h-dark-normal", &context),
+            "{case}"
+        );
+        let SceneContent::Text { template, .. } =
+            &by_id["antigravity-ext-o-text-dark-normal"].content
+        else {
+            unreachable!()
+        };
+        assert_eq!(format_template(template, &context), "--", "{case}");
+        assert_eq!(
+            context.get("antigravity.external_o.session.available"),
+            Some(0.0),
+            "{case}"
+        );
+    }
 }

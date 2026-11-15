@@ -59,6 +59,10 @@ pub struct SettingsFile {
     pub show_antigravity_gemini: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_antigravity_external: Option<bool>,
+    /// External models of the second (OpenCode) agy pool. Older files take
+    /// the single External models choice for both pools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_antigravity_external_x: Option<bool>,
     #[serde(default)]
     show_opencode: bool,
     #[serde(default)]
@@ -157,6 +161,7 @@ impl Default for SettingsFile {
             show_antigravity: false,
             show_antigravity_gemini: None,
             show_antigravity_external: None,
+            show_antigravity_external_x: None,
             show_opencode: false,
             show_cursor: false,
             show_grok: false,
@@ -201,6 +206,9 @@ impl SettingsFile {
         }
         if self.show_antigravity_external.is_none() {
             self.show_antigravity_external = Some(self.show_antigravity);
+        }
+        if self.show_antigravity_external_x.is_none() {
+            self.show_antigravity_external_x = self.show_antigravity_external;
         }
         // Older saves stored Antigravity as on with only External enabled. Gemini is
         // now the parent pool, so keep such a provider on by enabling its parent.
@@ -301,6 +309,12 @@ impl SettingsFile {
     pub fn antigravity_external_enabled(&self) -> bool {
         self.show_antigravity_external
             .unwrap_or(self.show_antigravity)
+    }
+
+    /// Pool o's External models; defaults to pool a's (old single) choice.
+    pub fn antigravity_external_x_enabled(&self) -> bool {
+        self.show_antigravity_external_x
+            .unwrap_or_else(|| self.antigravity_external_enabled())
     }
 
     #[allow(dead_code)]
