@@ -2189,6 +2189,10 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
                 .with_countdown(countdown),
         );
         for object in &theme.surfaces[0].children {
+            // Split-only copies are hidden in this combined-layout fixture.
+            if object.id.starts_with("split-") {
+                continue;
+            }
             // The second Claude pool has no profile in this data set, so its
             // two-pool Fable row legitimately reads "no data".
             if object.id.starts_with("fable-dual-x-") {
@@ -3898,7 +3902,7 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         .collect::<Vec<_>>();
     // Includes one tick per two-pool Fable row and colour scheme, and the
     // agy widget's pool o row (eight ticks).
-    assert_eq!(ticks.len(), 108);
+    assert_eq!(ticks.len(), 198);
     for (index, tick) in ticks {
         let gauge = &children[index - 1];
         assert_eq!(tick.id, format!("{}-pace", gauge.id));
@@ -3930,6 +3934,16 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
             .or_else(|| stripped.strip_suffix(" * antigravity.hover.opacity"))
             .or_else(|| stripped.strip_suffix(" * agy_external.normal.opacity"))
             .or_else(|| stripped.strip_suffix(" * agy_external.hover.opacity"))
+            .or_else(|| stripped.strip_suffix(" * agy_external_o.normal.opacity"))
+            .or_else(|| stripped.strip_suffix(" * agy_external_o.hover.opacity"))
+            .or_else(|| stripped.strip_suffix(" * antigravity_o.gemini.opacity"))
+            .or_else(|| stripped.strip_suffix(" * antigravity_o.external.opacity"))
+            .or_else(|| stripped.strip_suffix(" * antigravity_o.normal.opacity"))
+            .or_else(|| stripped.strip_suffix(" * antigravity_o.hover.opacity"))
+            .or_else(|| stripped.strip_suffix(" * claude_x.normal.opacity"))
+            .or_else(|| stripped.strip_suffix(" * claude_x.hover.opacity"))
+            .or_else(|| stripped.strip_suffix(" * codex_x.normal.opacity"))
+            .or_else(|| stripped.strip_suffix(" * codex_x.hover.opacity"))
             .or_else(|| stripped.strip_suffix(" * claude.normal.opacity"))
             .or_else(|| stripped.strip_suffix(" * claude.hover.opacity"))
             .or_else(|| stripped.strip_suffix(" * codex.normal.opacity"))
@@ -3955,6 +3969,16 @@ fn compact_pace_ticks_validate_and_stay_inside_their_gauges() {
         context.insert("antigravity.hover.opacity", 1.0);
         context.insert("agy_external.normal.opacity", 1.0);
         context.insert("agy_external.hover.opacity", 1.0);
+        for prefix in ["agy_external_o", "antigravity_o", "claude_x", "codex_x"] {
+            for suffix in [
+                "normal.opacity",
+                "hover.opacity",
+                "gemini.opacity",
+                "external.opacity",
+            ] {
+                context.insert(&format!("{prefix}.{suffix}"), 1.0);
+            }
+        }
         context.insert("claude.normal.opacity", 1.0);
         context.insert("claude.hover.opacity", 1.0);
         context.insert("codex.normal.opacity", 1.0);
@@ -4166,10 +4190,13 @@ fn compact_marker_and_label_rows_share_the_same_y() {
 /// `display.*.<key>` suffix of an object's widget: the agy external-models
 /// widget has its own key, every other object uses its id prefix.
 fn widget_binding_key(object: &SceneObject) -> &str {
-    if object.parent.as_deref() == Some(super::ANTIGRAVITY_EXTERNAL_WIDGET) {
-        super::AGY_EXTERNAL_KEY
-    } else {
-        object.id.split('-').next().unwrap()
+    match object.parent.as_deref() {
+        Some(super::ANTIGRAVITY_EXTERNAL_WIDGET) => super::AGY_EXTERNAL_KEY,
+        Some("claude_x-provider") => "claude_x",
+        Some("codex_x-provider") => "codex_x",
+        Some("antigravity_o-provider") => "antigravity_o",
+        Some("agy_external_o-provider") => "agy_external_o",
+        _ => object.id.split('-').next().unwrap(),
     }
 }
 
@@ -4184,7 +4211,7 @@ fn compact_markers_are_centered_and_clear_of_the_gauges() {
         .collect::<Vec<_>>();
     // 26 before the two-pool Fable rows added an o and an x marker per scheme;
     // the two agy pools (A and O) add eight more in each agy widget.
-    assert_eq!(markers.len(), 46);
+    assert_eq!(markers.len(), 78);
     for marker in &markers {
         let key = widget_binding_key(marker);
         assert_eq!(marker.x.0, "0");
@@ -4268,7 +4295,7 @@ fn compact_pace_ticks_follow_morphing_gauges_at_every_hover_phase() {
         .filter(|(_, object)| object.id.ends_with("-pace"))
         .collect::<Vec<_>>();
     // 100 plus the agy widget's pool o row.
-    assert_eq!(ticks.len(), 108);
+    assert_eq!(ticks.len(), 198);
     let mut context = DataContext::from_usage(None, &Canvas::default());
     for opacity in [
         "antigravity.gemini.opacity",
@@ -4283,7 +4310,17 @@ fn compact_pace_ticks_follow_morphing_gauges_at_every_hover_phase() {
         context.insert(opacity, 1.0);
     }
     for phase in [0.0, 0.25, 0.5, 0.75, 1.0] {
-        for provider in ["antigravity", "claude", "codex", "opencode", "qoder"] {
+        for provider in [
+            "antigravity",
+            "antigravity_o",
+            "agy_external_o",
+            "claude",
+            "claude_x",
+            "codex_x",
+            "codex",
+            "opencode",
+            "qoder",
+        ] {
             context.insert(&format!("{provider}.hover_phase"), phase);
         }
         for (index, tick) in &ticks {
@@ -4744,7 +4781,7 @@ fn compact_percent_twins_crossfade_values_on_hover_in_every_mode() {
     // 68 before the two-pool Fable rows added four value labels with twins;
     // the agy external-models widget adds eight more and the agy widget's
     // pool o row four.
-    assert_eq!(twins, 86);
+    assert_eq!(twins, 144);
 
     // A dual-mode row: mode controls appearance, hover controls the value.
     let normal = by_id("claude-main-text-dark-normal-pct");
@@ -6237,6 +6274,284 @@ fn agy_pool_fixture(gemini: f64, external: Option<f64>) -> crate::models::UsageD
             })
         }),
         ..Default::default()
+    }
+}
+
+#[test]
+fn split_claude_pools_use_single_pool_rows_and_independent_mode() {
+    let theme = quad_theme();
+    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+        .children
+        .iter()
+        .map(|o| (o.id.as_str(), o))
+        .collect();
+    let data = dual_fable_data(Some(20.0), Some(70.0));
+    for combined in [true, false] {
+        let runtime = dual_fable_runtime()
+            .with_pool_layouts(combined, true)
+            .with_widget_mode_phase("claude_x", 2.0);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        assert_eq!(
+            widget_count(Some(&data), runtime),
+            if combined { 2 } else { 2 }
+        );
+        assert_eq!(
+            context.get("display.fable_separate"),
+            Some(combined as u8 as f64)
+        );
+        assert_eq!(
+            scene_object_renders(by_id["claude_x-provider"], &by_id, &context),
+            !combined
+        );
+        assert_eq!(
+            scene_object_renders(by_id["claude-fable-segments-dark"], &by_id, &context),
+            !combined
+        );
+        assert_eq!(
+            scene_object_renders(
+                by_id["split-claude_x-claude-fable-segments-dark"],
+                &by_id,
+                &context
+            ),
+            !combined
+        );
+        if !combined {
+            assert_eq!(context.get("claude.model.fable.percentage"), Some(20.0));
+            assert_eq!(context.get("claude_x.model.fable.percentage"), Some(70.0));
+            assert_eq!(context.get("display.mode_phase.claude"), Some(0.0));
+            assert_eq!(context.get("display.mode_phase.claude_x"), Some(2.0));
+            let metrics = display_metrics(&theme, Some(&data), runtime);
+            let main = object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "claude-provider",
+                &metrics,
+            )
+            .unwrap();
+            let x = object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "claude_x-provider",
+                &metrics,
+            )
+            .unwrap();
+            assert!(main.0 >= x.0 + x.2 || x.0 >= main.0 + main.2);
+            assert!(x.2 < main.2);
+        }
+    }
+    for (main, x) in [(None, Some(70.0)), (Some(20.0), None)] {
+        let data = dual_fable_data(main, x);
+        let runtime = dual_fable_runtime().with_pool_layouts(false, true);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        assert_eq!(
+            context.get("claude.model.fable.available"),
+            Some(main.is_some() as u8 as f64)
+        );
+        assert_eq!(
+            context.get("claude_x.model.fable.available"),
+            Some(x.is_some() as u8 as f64)
+        );
+    }
+}
+
+#[test]
+fn split_codex_pools_keep_their_data_and_independent_modes() {
+    let theme = quad_theme();
+    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+        .children
+        .iter()
+        .map(|o| (o.id.as_str(), o))
+        .collect();
+    let mut data = AppUsageData::default();
+    let main = agy_pool_fixture(20.0, None);
+    data.insert(ProviderId::Codex, main.clone());
+    for (id, usage, selected) in [
+        ("default", main, true),
+        ("codex_x", agy_pool_fixture(70.0, None), false),
+    ] {
+        data.accounts.push(crate::models::AccountUsage {
+            provider: ProviderId::Codex,
+            profile: crate::accounts::AccountProfile {
+                id: id.into(),
+                name: id.into(),
+                enabled: true,
+                ..Default::default()
+            },
+            source_signature: String::new(),
+            source_path: None,
+            usage: Some(usage),
+            error: None,
+            selected,
+        });
+    }
+    for combined in [true, false] {
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
+            .with_codex_state(false, true, true, 0.0)
+            .with_codex_pool_layout(combined)
+            .with_widget_mode_phase("codex_x", 2.0);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        assert_eq!(
+            widget_count(Some(&data), runtime),
+            if combined { 1 } else { 2 }
+        );
+        assert_eq!(
+            context.get("providers.count"),
+            Some(if combined { 1.0 } else { 2.0 })
+        );
+        assert_eq!(context.get("codex.dual_mode"), Some(combined as u8 as f64));
+        assert_eq!(
+            scene_object_renders(by_id["codex_x-provider"], &by_id, &context),
+            !combined
+        );
+        if !combined {
+            assert_eq!(context.get("codex.session.percentage"), Some(20.0));
+            assert_eq!(context.get("codex_x.session.percentage"), Some(70.0));
+            assert_eq!(context.get("display.mode_phase.codex"), Some(0.0));
+            assert_eq!(context.get("display.mode_phase.codex_x"), Some(2.0));
+            let metrics = display_metrics(&theme, Some(&data), runtime);
+            let a = object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "codex-provider",
+                &metrics,
+            )
+            .unwrap();
+            let b = object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "codex_x-provider",
+                &metrics,
+            )
+            .unwrap();
+            assert!(a.0 + a.2 <= b.0 || b.0 + b.2 <= a.0);
+            assert!(b.2 < a.2);
+        }
+    }
+    for (main, x) in [(true, false), (false, true)] {
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
+            .with_codex_state(false, main, x, 0.0);
+        assert_eq!(
+            display_metrics(&theme, Some(&data), runtime.with_codex_pool_layout(true)),
+            display_metrics(&theme, Some(&data), runtime.with_codex_pool_layout(false))
+        );
+    }
+}
+
+#[test]
+fn split_agy_pools_count_and_render_independent_external_widgets() {
+    let theme = quad_theme();
+    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+        .children
+        .iter()
+        .map(|o| (o.id.as_str(), o))
+        .collect();
+    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+    for combined in [true, false] {
+        for (a, o) in [(false, false), (true, false), (false, true), (true, true)] {
+            let runtime = agy_runtime(a, true)
+                .with_antigravity_external_x(o)
+                .with_pool_layouts(true, combined)
+                .with_widget_mode_phase("antigravity_o", 2.0)
+                .with_widget_mode_phase("agy_external_o", 1.0);
+            let context =
+                DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+            let expected = if combined {
+                1 + usize::from(a || o)
+            } else {
+                2 + usize::from(a) + usize::from(o)
+            };
+            assert_eq!(widget_count(Some(&data), runtime), expected);
+            assert_eq!(
+                scene_object_renders(by_id["antigravity_o-provider"], &by_id, &context),
+                !combined
+            );
+            assert_eq!(
+                scene_object_renders(by_id["agy_external_o-provider"], &by_id, &context),
+                !combined && o
+            );
+            if !combined {
+                assert_eq!(
+                    context.get("antigravity.gemini.session.percentage"),
+                    Some(10.0)
+                );
+                assert_eq!(
+                    context.get("antigravity_o.gemini.session.percentage"),
+                    Some(70.0)
+                );
+                assert_eq!(
+                    context.get("antigravity_o.external.session.percentage"),
+                    Some(55.0)
+                );
+                assert_eq!(context.get("display.mode_phase.antigravity"), Some(0.0));
+                assert_eq!(context.get("display.mode_phase.antigravity_o"), Some(2.0));
+                assert_eq!(context.get("display.mode_phase.agy_external_o"), Some(1.0));
+                let metrics = display_metrics(&theme, Some(&data), runtime);
+                for id in ["antigravity-provider", "antigravity_o-provider"] {
+                    assert!(
+                        object_bounds_with_metrics(&theme, 0, Some(&data), runtime, id, &metrics)
+                            .is_some(),
+                        "{id}"
+                    );
+                }
+                assert_eq!(
+                    object_bounds_with_metrics(
+                        &theme,
+                        0,
+                        Some(&data),
+                        runtime,
+                        "antigravity-external-provider",
+                        &metrics
+                    )
+                    .is_some(),
+                    a
+                );
+                assert_eq!(
+                    object_bounds_with_metrics(
+                        &theme,
+                        0,
+                        Some(&data),
+                        runtime,
+                        "agy_external_o-provider",
+                        &metrics
+                    )
+                    .is_some(),
+                    o
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn split_settings_do_not_change_single_pool_geometry() {
+    let theme = quad_theme();
+    for runtime in [
+        ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Claude]))
+            .with_show_fable(true),
+        agy_runtime(true, false),
+    ] {
+        let combined = runtime.with_pool_layouts(true, true);
+        let split = runtime.with_pool_layouts(false, false);
+        assert_eq!(widget_count(None, combined), widget_count(None, split));
+        assert_eq!(
+            display_metrics(&theme, None, combined),
+            display_metrics(&theme, None, split)
+        );
+        assert_eq!(
+            resolve_surface_size(&theme, 0, None, combined),
+            resolve_surface_size(&theme, 0, None, split)
+        );
     }
 }
 

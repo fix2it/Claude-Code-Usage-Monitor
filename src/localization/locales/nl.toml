@@ -70,6 +70,7 @@ copilot_window_title = "Copilot-gebruiksmonitor"
 qoder_window_title = "Qoder-gebruiksmonitor"
 
 [translations]
+"Pools on one widget" = "Pools in één widget"
 "Use Windows default font" = "Standaardlettertype van Windows gebruiken"
 "Turn off to use Segoe UI for widget text" = "Schakel uit om Segoe UI voor widgettekst te gebruiken"
 "Absolute value" = "Absolute waarde"

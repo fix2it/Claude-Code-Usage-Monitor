@@ -489,6 +489,9 @@ pub(super) fn context_menu_checked_with_origin(
         ContextMenuAction::ToggleShowPace => state.show_pace,
         ContextMenuAction::ToggleShowFable => state.show_fable,
         ContextMenuAction::ToggleShowFableX => state.show_fable_x,
+        ContextMenuAction::ToggleClaudePoolsOneWidget => state.claude_pools_one_widget,
+        ContextMenuAction::ToggleCodexPoolsOneWidget => state.codex_pools_one_widget,
+        ContextMenuAction::ToggleAntigravityPoolsOneWidget => state.antigravity_pools_one_widget,
         ContextMenuAction::ToggleWidget => state
             .active_theme
             .as_ref()
@@ -661,6 +664,11 @@ fn context_menu_static_command(action: &ContextMenuAction) -> Option<u16> {
         ContextMenuAction::ToggleShowPace => Some(IDM_SHOW_PACE),
         ContextMenuAction::ToggleShowFable => Some(IDM_SHOW_FABLE),
         ContextMenuAction::ToggleShowFableX => Some(IDM_SHOW_FABLE_X),
+        ContextMenuAction::ToggleClaudePoolsOneWidget => Some(IDM_CLAUDE_POOLS_ONE_WIDGET),
+        ContextMenuAction::ToggleCodexPoolsOneWidget => Some(IDM_CODEX_POOLS_ONE_WIDGET),
+        ContextMenuAction::ToggleAntigravityPoolsOneWidget => {
+            Some(IDM_ANTIGRAVITY_POOLS_ONE_WIDGET)
+        }
         ContextMenuAction::SetLanguage { language } => {
             if language.eq_ignore_ascii_case("system") {
                 Some(IDM_LANG_SYSTEM)

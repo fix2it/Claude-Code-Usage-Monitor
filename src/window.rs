@@ -127,6 +127,7 @@ struct AppState {
     agy_external_hovered: bool,
     agy_external_crossfade_opacity: f64,
     agy_external_crossfade_animation: Option<PhaseAnimation>,
+    split_hovers: [SplitHover; 4],
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     view_mode: u8,
@@ -178,6 +179,9 @@ struct AppState {
     show_pace: bool,
     show_fable: bool,
     show_fable_x: bool,
+    claude_pools_one_widget: bool,
+    codex_pools_one_widget: bool,
+    antigravity_pools_one_widget: bool,
     active_theme_path: Option<PathBuf>,
     active_theme: Option<ThemeDocument>,
     theme_clock_interval: Option<Duration>,
@@ -201,6 +205,10 @@ impl AppState {
             || self.qoder_crossfade_animation.is_some()
             || self.agy_external_crossfade_animation.is_some()
             || self.widget_animations.iter().any(Option::is_some)
+            || self
+                .split_hovers
+                .iter()
+                .any(|hover| hover.animation.is_some())
     }
 
     pub(super) fn stop_crossfade_timer_if_idle(&self, hwnd: HWND) {
@@ -238,6 +246,14 @@ impl AppState {
         self.is_account_profile_enabled(provider, main_id, true)
             && self.is_account_profile_enabled(provider, x_id, false)
     }
+}
+
+#[derive(Default)]
+struct SplitHover {
+    rect: Option<(f64, f64, f64, f64)>,
+    hovered: bool,
+    phase: f64,
+    animation: Option<PhaseAnimation>,
 }
 
 #[derive(Clone, Debug)]
@@ -301,6 +317,9 @@ const IDM_LOCK_TASKBAR: u16 = 21;
 const IDM_SHOW_PACE: u16 = 22;
 const IDM_SHOW_FABLE: u16 = 23;
 const IDM_SHOW_FABLE_X: u16 = 24;
+const IDM_CLAUDE_POOLS_ONE_WIDGET: u16 = 25;
+const IDM_ANTIGRAVITY_POOLS_ONE_WIDGET: u16 = 26;
+const IDM_CODEX_POOLS_ONE_WIDGET: u16 = 27;
 const IDM_VERSION_ACTION: u16 = 31;
 const IDM_LANG_SYSTEM: u16 = 100;
 const IDM_LANG_FIRST: u16 = 101;
@@ -858,11 +877,23 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         .with_show_pace(state.show_pace)
         .with_show_fable(state.show_fable)
         .with_show_fable_x(state.show_fable_x)
+        .with_pool_layouts(
+            state.claude_pools_one_widget,
+            state.antigravity_pools_one_widget,
+        )
+        .with_codex_pool_layout(state.codex_pools_one_widget)
+        .with_pool_split_support(
+            state
+                .active_theme
+                .as_ref()
+                .is_some_and(ThemeDocument::supports_pool_splitting),
+        )
         .with_view_mode(state.view_mode)
         .with_mode_phase(state.mode_phase)
         .with_opencode_state(state.opencode_crossfade_opacity)
         .with_qoder_state(state.qoder_crossfade_opacity)
         .with_agy_external_state(state.agy_external_crossfade_opacity)
+        .with_split_hover_phases(std::array::from_fn(|i| state.split_hovers[i].phase))
         .with_nest(nest)
         .with_floating_card_opacity(opacity)
         .with_antigravity_pools(
@@ -1160,6 +1191,9 @@ fn save_state_settings() {
         persisted.show_pace = s.show_pace;
         persisted.show_fable = s.show_fable;
         persisted.show_fable_x = Some(s.show_fable_x);
+        persisted.claude_pools_one_widget = s.claude_pools_one_widget;
+        persisted.codex_pools_one_widget = s.codex_pools_one_widget;
+        persisted.antigravity_pools_one_widget = s.antigravity_pools_one_widget;
         persisted.view_mode = s.view_mode;
         persisted.widget_modes = widget_mode_overrides(s.view_mode, &s.widget_modes);
         persisted.active_theme_path = s
@@ -2121,12 +2155,7 @@ fn replace_active_theme(state: &mut AppState, loaded: ThemeDocument, path: Optio
     }
     state.active_theme = Some(loaded);
     invalidate_metrics(state);
-    state.antigravity_tile_rect = None;
-    state.claude_tile_rect = None;
-    state.codex_tile_rect = None;
-    state.opencode_tile_rect = None;
-    state.qoder_tile_rect = None;
-    state.agy_external_tile_rect = None;
+    invalidate_hover_tile_rects(state);
     if path.is_some() {
         state.active_theme_path = path;
     }
@@ -2821,6 +2850,7 @@ pub fn run() {
                 agy_external_hovered: false,
                 agy_external_crossfade_opacity: 0.0,
                 agy_external_crossfade_animation: None,
+                split_hovers: std::array::from_fn(|_| SplitHover::default()),
                 view_mode: settings.view_mode,
                 mode_phase: (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0),
                 widget_modes: widget_modes_from_settings(&settings),
@@ -2864,6 +2894,9 @@ pub fn run() {
                 show_pace: settings.show_pace,
                 show_fable: settings.show_fable,
                 show_fable_x: settings.show_fable_x.unwrap_or(settings.show_fable),
+                claude_pools_one_widget: settings.claude_pools_one_widget,
+                codex_pools_one_widget: settings.codex_pools_one_widget,
+                antigravity_pools_one_widget: settings.antigravity_pools_one_widget,
                 active_theme_path,
                 active_theme,
                 theme_clock_interval,
@@ -3110,6 +3143,23 @@ fn render_layered_impl(trigger: RenderTrigger) {
                         mouse::AGY_EXTERNAL_HOVER_OBJECT,
                         &surface_metrics,
                     );
+                }
+                for (hover, id) in state.split_hovers.iter_mut().zip([
+                    "claude_x-provider",
+                    "antigravity_o-provider",
+                    "agy_external_o-provider",
+                    "codex_x-provider",
+                ]) {
+                    if hover.rect.is_none() {
+                        hover.rect = theme_engine::object_bounds_with_metrics(
+                            &theme,
+                            0,
+                            usage_data.as_ref(),
+                            surface_runtime,
+                            id,
+                            &surface_metrics,
+                        );
+                    }
                 }
             }
         }
@@ -3906,6 +3956,9 @@ fn invalidate_hover_tile_rects(state: &mut AppState) {
     state.opencode_tile_rect = None;
     state.qoder_tile_rect = None;
     state.agy_external_tile_rect = None;
+    for hover in &mut state.split_hovers {
+        hover.rect = None;
+    }
 }
 
 /// Toggle the opt-in Fable column and invalidate the geometry-dependent hover
@@ -4242,6 +4295,12 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
             render |= changed;
             active |= more;
         }
+        for hover in &mut state.split_hovers {
+            let (changed, more) =
+                PhaseAnimation::tick_slot(&mut hover.animation, &mut hover.phase, throttle);
+            render |= changed;
+            active |= more;
+        }
         sync_shared_mode_phase(state);
         (
             render,
@@ -4277,6 +4336,32 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
 
 fn hover_phase_animation(start: f64, target: f64, duration_ms: u64) -> PhaseAnimation {
     PhaseAnimation::hover(start, target, Duration::from_millis(duration_ms))
+}
+
+pub(super) fn set_split_hover(hwnd: HWND, index: usize, hovered: bool) {
+    let changed = {
+        let mut state = lock_state();
+        let Some(hover) = state
+            .as_mut()
+            .and_then(|state| state.split_hovers.get_mut(index))
+        else {
+            return;
+        };
+        if hover.hovered == hovered {
+            false
+        } else {
+            hover.hovered = hovered;
+            hover.animation = Some(hover_phase_animation(
+                hover.phase,
+                if hovered { 1.0 } else { 0.0 },
+                CLAUDE_CROSSFADE_DURATION_MS,
+            ));
+            true
+        }
+    };
+    if changed {
+        ensure_crossfade_timer(hwnd);
+    }
 }
 
 pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
@@ -4478,6 +4563,9 @@ fn reload_external_settings(hwnd: HWND) {
         state.show_pace = settings.show_pace;
         state.show_fable = settings.show_fable;
         state.show_fable_x = settings.show_fable_x.unwrap_or(settings.show_fable);
+        state.claude_pools_one_widget = settings.claude_pools_one_widget;
+        state.codex_pools_one_widget = settings.codex_pools_one_widget;
+        state.antigravity_pools_one_widget = settings.antigravity_pools_one_widget;
         // An external settings reload replaces the transient view state too.
         state.view_mode = settings.view_mode;
         state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
@@ -4522,12 +4610,7 @@ fn reload_external_settings(hwnd: HWND) {
         }
         state.stop_crossfade_timer_if_idle(hwnd);
         invalidate_metrics(state);
-        state.antigravity_tile_rect = None;
-        state.claude_tile_rect = None;
-        state.codex_tile_rect = None;
-        state.opencode_tile_rect = None;
-        state.qoder_tile_rect = None;
-        state.agy_external_tile_rect = None;
+        invalidate_hover_tile_rects(state);
         update_configured_placement(
             state,
             settings.placement_override,
@@ -5749,6 +5832,43 @@ mod phase_animation_tests {
     }
 
     #[test]
+    fn split_widget_modes_change_independently_and_round_trip() {
+        use super::placement_regression_tests::{placement, state_for};
+        let mut state = state_for(
+            crate::theme_engine::ThemeDocument::starter(),
+            placement("taskbar"),
+        );
+        let keys: Vec<_> = crate::app_settings::widget_mode_keys().collect();
+        for key in ["claude_x", "antigravity_o", "agy_external_o", "codex_x"] {
+            let index = keys.iter().position(|candidate| *candidate == key).unwrap();
+            assert!(super::change_widget_mode(&mut state, index, false, Some(1)));
+            assert_eq!(state.widget_modes[index].0, 2);
+        }
+        assert_eq!(
+            state.widget_modes[keys.iter().position(|key| *key == "claude").unwrap()].0,
+            1
+        );
+        assert_eq!(
+            state.widget_modes[keys.iter().position(|key| *key == "antigravity").unwrap()].0,
+            1
+        );
+        let mut settings = crate::app_settings::SettingsFile::default();
+        settings.widget_modes = super::widget_mode_overrides(state.view_mode, &state.widget_modes);
+        let mut restored: crate::app_settings::SettingsFile =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        restored.normalize();
+        for (saved, live) in super::widget_modes_from_settings(&restored)
+            .iter()
+            .zip(state.widget_modes.iter())
+        {
+            assert_eq!(saved.0, live.0);
+        }
+        let index = keys.iter().position(|key| *key == "claude_x").unwrap();
+        assert!(super::change_widget_mode(&mut state, index, true, Some(1)));
+        assert!(state.widget_modes.iter().all(|slot| slot.0 == 3));
+    }
+
+    #[test]
     fn view_mode_cycle_bounces_1_2_3_2_1() {
         let mut mode = 1u8;
         let mut direction = 1i8;
@@ -6213,6 +6333,42 @@ mod antigravity_pool_toggle_tests {
         assert!(!runtime.antigravity_external_enabled);
         // Turning a pool off keeps its External models value.
         assert!(state.show_antigravity_external);
+    }
+
+    #[test]
+    fn pool_layout_menu_checks_and_runtime_follow_settings() {
+        use crate::context_menu::ContextMenuAction as Action;
+        let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+        for (claude, agy) in [(true, true), (false, true), (true, false), (false, false)] {
+            state.claude_pools_one_widget = claude;
+            state.codex_pools_one_widget = claude;
+            state.antigravity_pools_one_widget = agy;
+            assert_eq!(
+                super::window_context_menu::context_menu_checked(
+                    &state,
+                    &Action::ToggleClaudePoolsOneWidget
+                ),
+                claude
+            );
+            assert_eq!(
+                super::window_context_menu::context_menu_checked(
+                    &state,
+                    &Action::ToggleAntigravityPoolsOneWidget
+                ),
+                agy
+            );
+            assert_eq!(
+                super::window_context_menu::context_menu_checked(
+                    &state,
+                    &Action::ToggleCodexPoolsOneWidget
+                ),
+                claude
+            );
+            let runtime = super::theme_runtime_from_state(&state);
+            assert_eq!(runtime.claude_pools_one_widget, claude);
+            assert_eq!(runtime.codex_pools_one_widget, claude);
+            assert_eq!(runtime.antigravity_pools_one_widget, agy);
+        }
     }
 
     #[test]

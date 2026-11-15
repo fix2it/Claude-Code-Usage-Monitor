@@ -72,6 +72,7 @@ copilot_window_title = "ตัวติดตามการใช้งาน C
 qoder_window_title = "ตัวติดตามการใช้งาน Qoder"
 
 [translations]
+"Pools on one widget" = "รวมพูลไว้ในวิดเจ็ตเดียว"
 "Use Windows default font" = "ใช้แบบอักษรเริ่มต้นของ Windows"
 "Turn off to use Segoe UI for widget text" = "ปิดเพื่อใช้ Segoe UI สำหรับข้อความในวิดเจ็ต"
 "Absolute value" = "ค่าสัมบูรณ์"

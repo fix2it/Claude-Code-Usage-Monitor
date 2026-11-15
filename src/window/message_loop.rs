@@ -880,6 +880,29 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     super::mouse::revalidate_mouse_hover(hwnd);
                     sync_tray_icon(hwnd);
                 }
+                IDM_CLAUDE_POOLS_ONE_WIDGET
+                | IDM_ANTIGRAVITY_POOLS_ONE_WIDGET
+                | IDM_CODEX_POOLS_ONE_WIDGET => {
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            if id == IDM_CLAUDE_POOLS_ONE_WIDGET {
+                                s.claude_pools_one_widget = !s.claude_pools_one_widget;
+                            } else if id == IDM_CODEX_POOLS_ONE_WIDGET {
+                                s.codex_pools_one_widget = !s.codex_pools_one_widget;
+                            } else {
+                                s.antigravity_pools_one_widget = !s.antigravity_pools_one_widget;
+                            }
+                            super::invalidate_metrics(s);
+                            super::invalidate_hover_tile_rects(s);
+                        }
+                    }
+                    save_state_settings();
+                    position_at_taskbar();
+                    render_layered();
+                    super::mouse::revalidate_mouse_hover(hwnd);
+                    sync_tray_icon(hwnd);
+                }
                 IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
                     let new_interval = match id {
                         IDM_FREQ_1MIN => POLL_1_MIN,

@@ -90,6 +90,12 @@ pub struct SettingsFile {
     pub show_fable: bool,
     #[serde(default)]
     pub show_fable_x: Option<bool>,
+    #[serde(default = "default_true")]
+    pub claude_pools_one_widget: bool,
+    #[serde(default = "default_true")]
+    pub codex_pools_one_widget: bool,
+    #[serde(default = "default_true")]
+    pub antigravity_pools_one_widget: bool,
     /// Widget view mode: 1 = full, 2 = bars only, 3 = compact percent.
     /// Persisted so the widget starts in the last selected view.
     #[serde(
@@ -173,6 +179,9 @@ impl Default for SettingsFile {
             show_pace: true,
             show_fable: false,
             show_fable_x: None,
+            claude_pools_one_widget: true,
+            codex_pools_one_widget: true,
+            antigravity_pools_one_widget: true,
             view_mode: default_view_mode(),
             widget_modes: BTreeMap::new(),
             active_theme_path: None,
@@ -854,6 +863,34 @@ mod tests {
             assert_eq!(json["show_pace"], show_pace);
             let loaded = decode_settings(&json.to_string()).unwrap();
             assert_eq!(loaded.show_pace, show_pace);
+        }
+    }
+
+    #[test]
+    fn pool_layout_settings_default_to_combined_and_round_trip() {
+        let legacy = decode_settings(r#"{"poll_interval_ms":900000}"#).unwrap();
+        assert!(legacy.claude_pools_one_widget);
+        assert!(legacy.codex_pools_one_widget);
+        assert!(legacy.antigravity_pools_one_widget);
+        for claude in [false, true] {
+            for agy in [false, true] {
+                let settings = SettingsFile {
+                    claude_pools_one_widget: claude,
+                    antigravity_pools_one_widget: agy,
+                    ..Default::default()
+                };
+                let restored = decode_settings(&settings_json(&settings).to_string()).unwrap();
+                assert_eq!(restored.claude_pools_one_widget, claude);
+                assert_eq!(restored.antigravity_pools_one_widget, agy);
+            }
+        }
+        for codex in [false, true] {
+            let settings = SettingsFile {
+                codex_pools_one_widget: codex,
+                ..Default::default()
+            };
+            let restored = decode_settings(&settings_json(&settings).to_string()).unwrap();
+            assert_eq!(restored.codex_pools_one_widget, codex);
         }
     }
 

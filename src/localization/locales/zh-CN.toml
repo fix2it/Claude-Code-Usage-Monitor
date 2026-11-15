@@ -72,6 +72,7 @@ copilot_window_title = "Copilot 使用量监控"
 qoder_window_title = "Qoder 使用量监控"
 
 [translations]
+"Pools on one widget" = "在同一小组件中显示资源池"
 "Use Windows default font" = "使用 Windows 默认字体"
 "Turn off to use Segoe UI for widget text" = "关闭后，组件文本将使用 Segoe UI"
 "Absolute value" = "绝对值"

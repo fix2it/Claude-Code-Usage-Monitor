@@ -72,6 +72,7 @@ copilot_window_title = "Copilot 사용량 모니터"
 qoder_window_title = "Qoder 사용량 모니터"
 
 [translations]
+"Pools on one widget" = "풀을 하나의 위젯에 표시"
 "Use Windows default font" = "Windows 기본 글꼴 사용"
 "Turn off to use Segoe UI for widget text" = "끄면 위젯 텍스트에 Segoe UI를 사용합니다"
 "Absolute value" = "절댓값"

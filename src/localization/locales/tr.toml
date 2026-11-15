@@ -70,6 +70,7 @@ copilot_window_title = "Copilot Kullanım İzleyicisi"
 qoder_window_title = "Qoder Kullanım İzleyicisi"
 
 [translations]
+"Pools on one widget" = "Havuzları tek widget'ta göster"
 "Use Windows default font" = "Windows varsayılan yazı tipini kullan"
 "Turn off to use Segoe UI for widget text" = "Widget metninde Segoe UI kullanmak için kapatın"
 "Absolute value" = "Mutlak değer"

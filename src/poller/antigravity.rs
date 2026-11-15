@@ -1103,7 +1103,17 @@ mod auth_tests {
             Some("a-fixture".into())
         );
         assert_eq!(
-            opencode_access_token(&opencode_value("a-fixture", now_ms() - 1.0), now),
+            opencode_access_token(
+                &opencode_value(
+                    "a-fixture",
+                    now.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f64()
+                        * 1000.0
+                        - 1.0,
+                ),
+                now,
+            ),
             None
         );
         for bad in ["not json", "{}", r#"{"access":""}"#, r#"{"access":"a"}"#] {

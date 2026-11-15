@@ -548,7 +548,8 @@ fn revalidate_active_hover_once() {
             || state.codex_hovered
             || state.opencode_hovered
             || state.qoder_hovered
-            || state.agy_external_hovered;
+            || state.agy_external_hovered
+            || state.split_hovers.iter().any(|hover| hover.hovered);
         let active =
             hover_needs_revalidation(provider_hovered, state.hovered_mouse_layer.is_some());
         let count = (state.mirror_hwnds.len() + 1).max(state.desktop_hwnds.len());
@@ -799,6 +800,17 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     super::set_opencode_hover(hwnd, opencode_hovered);
     super::set_qoder_hover(hwnd, qoder_hovered);
     super::set_agy_external_hover(hwnd, agy_external_hovered);
+    let split_hovered = {
+        let state = lock_state();
+        std::array::from_fn::<_, 4, _>(|i| {
+            state
+                .as_ref()
+                .is_some_and(|state| tile_hover_at(state, hwnd, lparam, state.split_hovers[i].rect))
+        })
+    };
+    for (index, hovered) in split_hovered.into_iter().enumerate() {
+        super::set_split_hover(hwnd, index, hovered);
+    }
     // No tick here: the animation timer drives every frame. Ticking on mouse
     // move could produce a second full render, and its throttle could swallow
     // real timer ticks.
@@ -871,6 +883,9 @@ pub(super) fn clear_mouse_hover(hwnd: HWND) {
     super::set_opencode_hover(hwnd, false);
     super::set_qoder_hover(hwnd, false);
     super::set_agy_external_hover(hwnd, false);
+    for index in 0..4 {
+        super::set_split_hover(hwnd, index, false);
+    }
     let previous = {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {

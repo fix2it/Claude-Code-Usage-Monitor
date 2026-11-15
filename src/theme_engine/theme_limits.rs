@@ -137,7 +137,9 @@ impl DataContext {
             if !matches!(
                 owner,
                 "claude"
+                    | "claude_x"
                     | "codex"
+                    | "codex_x"
                     | "antigravity"
                     | "opencode"
                     | "cursor"

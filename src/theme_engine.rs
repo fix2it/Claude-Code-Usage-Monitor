@@ -1182,6 +1182,10 @@ pub struct ThemeRuntime {
     /// Opt-in visibility for the Claude "Fable" promo quota column.
     pub show_fable: bool,
     pub show_fable_x: bool,
+    pub claude_pools_one_widget: bool,
+    pub codex_pools_one_widget: bool,
+    pub pool_split_supported: bool,
+    pub antigravity_pools_one_widget: bool,
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     pub view_mode: u8,
@@ -1212,6 +1216,7 @@ pub struct ThemeRuntime {
     /// Hover progress (0 = normal, 1 = hovered) of the agy external-models
     /// widget, which has its own hover area.
     pub agy_external_crossfade_opacity: f64,
+    pub split_hover_phases: [f64; 4],
     host_width: u32,
     host_height: u32,
 }
@@ -1228,6 +1233,10 @@ impl Default for ThemeRuntime {
             show_pace: true,
             show_fable: false,
             show_fable_x: false,
+            claude_pools_one_widget: true,
+            codex_pools_one_widget: true,
+            pool_split_supported: true,
+            antigravity_pools_one_widget: true,
             view_mode: 1,
             mode_phase: 0.0,
             widget_mode_phases: [None; WIDGET_SLOTS],
@@ -1250,6 +1259,7 @@ impl Default for ThemeRuntime {
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
             agy_external_crossfade_opacity: 0.0,
+            split_hover_phases: [0.0; 4],
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1283,6 +1293,10 @@ impl ThemeRuntime {
             show_pace: true,
             show_fable: false,
             show_fable_x: false,
+            claude_pools_one_widget: true,
+            codex_pools_one_widget: true,
+            pool_split_supported: true,
+            antigravity_pools_one_widget: true,
             view_mode: 1,
             mode_phase: 0.0,
             widget_mode_phases: [None; WIDGET_SLOTS],
@@ -1305,6 +1319,7 @@ impl ThemeRuntime {
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
             agy_external_crossfade_opacity: 0.0,
+            split_hover_phases: [0.0; 4],
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1420,6 +1435,29 @@ impl ThemeRuntime {
         self
     }
 
+    pub fn with_pool_layouts(mut self, claude: bool, agy: bool) -> Self {
+        self.claude_pools_one_widget = claude;
+        self.antigravity_pools_one_widget = agy;
+        self
+    }
+
+    pub fn with_codex_pool_layout(mut self, combined: bool) -> Self {
+        self.codex_pools_one_widget = combined;
+        self
+    }
+
+    /// Unsupported themes keep the existing combined layout while preserving
+    /// the user's persisted choices for a later supporting theme.
+    pub fn with_pool_split_support(mut self, supported: bool) -> Self {
+        self.pool_split_supported = supported;
+        if !supported {
+            self.claude_pools_one_widget = true;
+            self.codex_pools_one_widget = true;
+            self.antigravity_pools_one_widget = true;
+        }
+        self
+    }
+
     pub fn with_view_mode(mut self, view_mode: u8) -> Self {
         self.view_mode = view_mode.clamp(1, 3);
         self
@@ -1458,6 +1496,11 @@ impl ThemeRuntime {
 
     pub fn with_agy_external_state(mut self, opacity: f64) -> Self {
         self.agy_external_crossfade_opacity = opacity;
+        self
+    }
+
+    pub fn with_split_hover_phases(mut self, phases: [f64; 4]) -> Self {
+        self.split_hover_phases = phases;
         self
     }
 
@@ -1580,12 +1623,36 @@ pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -
     runtime.provider_count()
         + (fable_visible(data, runtime) && claude_dual(runtime)) as usize
         + antigravity_split(data, runtime) as usize
+        + claude_separate(runtime) as usize
+        + codex_separate(runtime) as usize
+        + agy_separate(data, runtime) as usize
+        + (agy_separate(data, runtime) && runtime.antigravity_external_enabled) as usize
+        + (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as usize
+}
+
+fn claude_separate(runtime: ThemeRuntime) -> bool {
+    runtime.provider_enabled(ProviderId::Claude)
+        && runtime.claude_main_enabled
+        && runtime.claude_x_enabled
+        && !runtime.claude_pools_one_widget
+}
+
+fn codex_separate(runtime: ThemeRuntime) -> bool {
+    runtime.provider_enabled(ProviderId::Codex)
+        && runtime.codex_main_enabled
+        && runtime.codex_x_enabled
+        && !runtime.codex_pools_one_widget
+}
+
+fn agy_separate(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
+    antigravity_pool_o(data, runtime) && !runtime.antigravity_pools_one_widget
 }
 
 /// External models on with pool O shown: the external models get their own
 /// widget next to the Gemini one, each with a row per pool (A and O).
 pub(crate) fn antigravity_split(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
     antigravity_pool_o(data, runtime)
+        && runtime.antigravity_pools_one_widget
         && (runtime.antigravity_external_enabled || runtime.antigravity_external_x_enabled)
 }
 
@@ -1604,7 +1671,7 @@ pub(crate) fn antigravity_pool_o(data: Option<&AppUsageData>, runtime: ThemeRunt
 
 /// Both Claude pools are on: the Fable column then shows one row per pool.
 fn claude_dual(runtime: ThemeRuntime) -> bool {
-    runtime.claude_main_enabled && runtime.claude_x_enabled
+    runtime.claude_main_enabled && runtime.claude_x_enabled && runtime.claude_pools_one_widget
 }
 
 /// Whether the Fable column is drawn.
@@ -1680,9 +1747,14 @@ fn widget_mode_index(key: &str) -> Option<usize> {
 /// Every widget key in slot order: the providers, the Fable column, then the
 /// agy external-models widget.
 pub(crate) fn widget_keys() -> impl Iterator<Item = &'static str> {
-    DISPLAY_PROVIDER_KEYS
-        .into_iter()
-        .chain([FABLE_KEY, AGY_EXTERNAL_KEY])
+    DISPLAY_PROVIDER_KEYS.into_iter().chain([
+        FABLE_KEY,
+        AGY_EXTERNAL_KEY,
+        "claude_x",
+        "antigravity_o",
+        "agy_external_o",
+        "codex_x",
+    ])
 }
 
 const COMPACT_PERCENT_WIDTH: f64 = 30.0;
@@ -1717,6 +1789,14 @@ pub struct DisplayMetrics {
     /// The agy external-models widget, measured and moded on its own. It is
     /// only shown with pool O, so it always has a marker column.
     agy_external: ProviderMetrics,
+    claude_x: ProviderMetrics,
+    codex_x: ProviderMetrics,
+    antigravity_o: ProviderMetrics,
+    agy_external_o: ProviderMetrics,
+    claude_separate: bool,
+    codex_separate: bool,
+    agy_separate: bool,
+    agy_external_o_shown: bool,
 }
 
 impl DisplayMetrics {
@@ -1741,8 +1821,18 @@ impl DisplayMetrics {
             providers_width: 0.0,
             widget_count,
             fable: ProviderMetrics::default(),
-            agy_split: antigravity_split(None, runtime),
+            agy_split: antigravity_split(None, runtime)
+                || (agy_separate(None, runtime) && runtime.antigravity_external_enabled),
             agy_external: ProviderMetrics::default(),
+            claude_x: ProviderMetrics::default(),
+            codex_x: ProviderMetrics::default(),
+            antigravity_o: ProviderMetrics::default(),
+            agy_external_o: ProviderMetrics::default(),
+            claude_separate: claude_separate(runtime),
+            codex_separate: codex_separate(runtime),
+            agy_separate: agy_separate(None, runtime),
+            agy_external_o_shown: agy_separate(None, runtime)
+                && runtime.antigravity_external_x_enabled,
         };
         let dual = claude_dual(runtime);
         metrics.fable = fable_column(
@@ -1784,6 +1874,14 @@ impl DisplayMetrics {
             decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
             COMPACT_MARKER_WIDTH,
         );
+        metrics.claude_x = metrics.providers[1];
+        metrics.codex_x = metrics.providers[2];
+        metrics.antigravity_o = metrics.providers[3];
+        metrics.agy_external_o = metrics.agy_external;
+        metrics.claude_x.origin = 0.0;
+        metrics.codex_x.origin = 0.0;
+        metrics.antigravity_o.origin = 0.0;
+        metrics = metrics_for_phase(metrics, runtime);
         metrics.providers_width = metrics.providers_width(runtime);
         metrics
     }
@@ -1807,8 +1905,20 @@ impl DisplayMetrics {
                         .provider_enabled(display_provider_id(key))
                         .then_some(self.providers[index].row_width)
                 })
-                .chain(self.agy_split.then_some(agy)),
-            runtime.provider_count() + self.agy_split as usize,
+                .chain(self.agy_split.then_some(agy))
+                .chain(self.claude_separate.then_some(self.claude_x.row_width))
+                .chain(self.codex_separate.then_some(self.codex_x.row_width))
+                .chain(self.agy_separate.then_some(self.antigravity_o.row_width))
+                .chain(
+                    self.agy_external_o_shown
+                        .then_some(self.agy_external_o.row_width),
+                ),
+            runtime.provider_count()
+                + self.agy_split as usize
+                + self.claude_separate as usize
+                + self.codex_separate as usize
+                + self.agy_separate as usize
+                + self.agy_external_o_shown as usize,
         )
     }
 }
@@ -1921,7 +2031,7 @@ pub(crate) const AGY_EXTERNAL_KEY: &str = "agy_external";
 /// Slot after the Fable column: the agy external-models widget.
 const AGY_EXTERNAL_INDEX: usize = FABLE_METRICS_INDEX + 1;
 /// Providers, the Fable column and the agy external-models widget.
-pub(crate) const WIDGET_SLOTS: usize = AGY_EXTERNAL_INDEX + 1;
+pub(crate) const WIDGET_SLOTS: usize = AGY_EXTERNAL_INDEX + 5;
 
 fn display_provider_key(provider_id: &str) -> Option<&'static str> {
     // The agy external-models widget is measured as its own widget.
@@ -2055,6 +2165,7 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
                 variant.opencode_crossfade_opacity = opencode;
                 variant.qoder_crossfade_opacity = qoder;
                 variant.agy_external_crossfade_opacity = claude;
+                variant.split_hover_phases = [claude; 4];
                 let mut context =
                     DataContext::from_usage_with_runtime(data, &Canvas::default(), variant);
                 context.insert("system.dark", f64::from(dark));
@@ -2250,6 +2361,8 @@ pub(crate) fn display_metrics(
     let agy_pool_o = base.get("antigravity.pool_o").unwrap_or(0.0) != 0.0;
     let mut metrics = legacy.clone();
     metrics.agy_split = base.get("display.agy_split").unwrap_or(0.0) != 0.0;
+    metrics.agy_separate = agy_separate(data, runtime);
+    metrics.agy_external_o_shown = metrics.agy_separate && runtime.antigravity_external_x_enabled;
     let (fable_marker_box, fable_origin) =
         marker_column(marker_advance[FABLE_METRICS_INDEX], legacy.fable);
     metrics.fable = fable_column(
@@ -2305,6 +2418,28 @@ pub(crate) fn display_metrics(
             row_width: compact_row_width(bar, text_box, percent_box, origin, phases),
         };
     }
+    for (index, target) in [
+        (AGY_EXTERNAL_INDEX + 1, &mut metrics.claude_x),
+        (AGY_EXTERNAL_INDEX + 2, &mut metrics.antigravity_o),
+        (AGY_EXTERNAL_INDEX + 3, &mut metrics.agy_external_o),
+        (AGY_EXTERNAL_INDEX + 4, &mut metrics.codex_x),
+    ] {
+        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
+        target.text_box = text_advance[index].map_or(target.text_box, |advance| advance + 2.0);
+        target.percent_box =
+            percent_advance[index].map_or(target.percent_box, |advance| advance + 2.0);
+        if index != AGY_EXTERNAL_INDEX + 3 {
+            target.origin = 0.0;
+        }
+        target.text_slide = -target.text_box * phases.text_collapse;
+        target.row_width = compact_row_width(
+            bar,
+            target.text_box,
+            target.percent_box,
+            target.origin,
+            phases,
+        );
+    }
     metrics.providers_width = metrics.providers_width(runtime);
     store_display_metrics(key, &metrics);
     metrics_for_phase(metrics, runtime)
@@ -2344,6 +2479,22 @@ pub(crate) fn metrics_for_phase(
         decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
         external.marker_box,
     );
+    for (index, target) in [
+        (AGY_EXTERNAL_INDEX + 1, &mut metrics.claude_x),
+        (AGY_EXTERNAL_INDEX + 2, &mut metrics.antigravity_o),
+        (AGY_EXTERNAL_INDEX + 3, &mut metrics.agy_external_o),
+        (AGY_EXTERNAL_INDEX + 4, &mut metrics.codex_x),
+    ] {
+        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
+        target.text_slide = -target.text_box * phases.text_collapse;
+        target.row_width = compact_row_width(
+            bar,
+            target.text_box,
+            target.percent_box,
+            target.origin,
+            phases,
+        );
+    }
     metrics.providers_width = metrics.providers_width(runtime);
     metrics
 }
@@ -2373,6 +2524,14 @@ fn display_metric(metrics: &DisplayMetrics, name: &str) -> Option<f64> {
         metrics.fable
     } else if key.eq_ignore_ascii_case(AGY_EXTERNAL_KEY) {
         metrics.agy_external
+    } else if key.eq_ignore_ascii_case("claude_x") {
+        metrics.claude_x
+    } else if key.eq_ignore_ascii_case("codex_x") {
+        metrics.codex_x
+    } else if key.eq_ignore_ascii_case("antigravity_o") {
+        metrics.antigravity_o
+    } else if key.eq_ignore_ascii_case("agy_external_o") {
+        metrics.agy_external_o
     } else {
         let index = DISPLAY_PROVIDER_KEYS
             .iter()
@@ -2567,7 +2726,16 @@ impl DataContext {
         context.insert_string("i18n.hour_suffix", strings.hour_suffix);
         context.insert_string("i18n.minute_suffix", strings.minute_suffix);
         context.insert_string("i18n.second_suffix", strings.second_suffix);
-        context.insert("providers.count", runtime.provider_count() as f64);
+        context.insert(
+            "providers.count",
+            (runtime.provider_count()
+                + claude_separate(runtime) as usize
+                + codex_separate(runtime) as usize
+                + agy_separate(data, runtime) as usize
+                + (agy_separate(data, runtime) && runtime.antigravity_external_enabled) as usize
+                + (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as usize)
+                as f64,
+        );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|value| value.as_secs_f64())
@@ -2598,6 +2766,10 @@ impl DataContext {
         }
         context.insert("display.countdown", runtime.countdown as u8 as f64);
         context.insert("display.show_pace", runtime.show_pace as u8 as f64);
+        context.insert(
+            "display.pool_split_supported",
+            runtime.pool_split_supported as u8 as f64,
+        );
         context.insert("display.show_fable", runtime.show_fable as u8 as f64);
         let (fable_main, fable_x) = fable_pools(runtime);
         context.insert("display.fable_main", fable_main as u8 as f64);
@@ -2612,7 +2784,24 @@ impl DataContext {
         );
         context.insert(
             "display.fable_row",
-            (fable_visible(data, runtime) && !claude_dual(runtime)) as u8 as f64,
+            (if claude_separate(runtime) {
+                runtime.show_fable
+            } else {
+                fable_visible(data, runtime) && !claude_dual(runtime)
+            }) as u8 as f64,
+        );
+        context.insert(
+            "display.fable_x_row",
+            (claude_separate(runtime) && runtime.show_fable_x) as u8 as f64,
+        );
+        context.insert(
+            "display.claude_split",
+            claude_separate(runtime) as u8 as f64,
+        );
+        context.insert("display.codex_split", codex_separate(runtime) as u8 as f64);
+        context.insert(
+            "display.agy_pool_split",
+            agy_separate(data, runtime) as u8 as f64,
         );
         insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
         context.insert(
@@ -2623,7 +2812,7 @@ impl DataContext {
             "antigravity.external.enabled",
             runtime.antigravity_external_enabled as u8 as f64,
         );
-        let pool_o = antigravity_pool_o(data, runtime);
+        let pool_o = antigravity_pool_o(data, runtime) && !agy_separate(data, runtime);
         context.insert(
             "antigravity.x.enabled",
             runtime.antigravity_x_enabled as u8 as f64,
@@ -2635,11 +2824,18 @@ impl DataContext {
         );
         context.insert(
             "display.agy_split",
-            antigravity_split(data, runtime) as u8 as f64,
+            (antigravity_split(data, runtime)
+                || (agy_separate(data, runtime) && runtime.antigravity_external_enabled))
+                as u8 as f64,
+        );
+        context.insert(
+            "display.agy_o_external",
+            (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as u8 as f64,
         );
         // Two rows: Gemini and external models (pool A), or pools A and O.
-        let agy_dual_mode =
-            (runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled) || pool_o;
+        let agy_dual_mode = !agy_separate(data, runtime)
+            && ((runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled)
+                || pool_o);
         context.insert("antigravity.dual_mode", agy_dual_mode as u8 as f64);
         let crossfade = runtime.crossfade_opacity.clamp(0.0, 1.0);
         context.insert("antigravity.crossfade_opacity", crossfade);
@@ -2666,10 +2862,7 @@ impl DataContext {
             runtime.claude_main_enabled as u8 as f64,
         );
         context.insert("claude.x.enabled", runtime.claude_x_enabled as u8 as f64);
-        context.insert(
-            "claude.dual_mode",
-            (runtime.claude_main_enabled && runtime.claude_x_enabled) as u8 as f64,
-        );
+        context.insert("claude.dual_mode", claude_dual(runtime) as u8 as f64);
         context.insert("codex.hovered", runtime.codex_hovered as u8 as f64);
         context.insert_hover_crossfade("codex", runtime.codex_crossfade_opacity);
         context.insert(
@@ -2679,7 +2872,9 @@ impl DataContext {
         context.insert("codex.x.enabled", runtime.codex_x_enabled as u8 as f64);
         context.insert(
             "codex.dual_mode",
-            (runtime.codex_main_enabled && runtime.codex_x_enabled) as u8 as f64,
+            (runtime.codex_main_enabled
+                && runtime.codex_x_enabled
+                && runtime.codex_pools_one_widget) as u8 as f64,
         );
         context.insert_hover_crossfade("opencode", runtime.opencode_crossfade_opacity);
         // Qoder's hover only swaps in a second pool. If a poll removes that
@@ -2859,7 +3054,109 @@ impl DataContext {
             context.insert_antigravity_rows(None, None, pool_o, runtime);
             context.insert_provider("active", None, false, runtime.countdown);
         }
+        // Theme validation evaluates every expression even when its parent is
+        // hidden, so the split namespaces must exist in single-pool contexts.
+        context.copy_prefix("claude.", "claude_x.");
+        context.copy_prefix("codex.", "codex_x.");
+        context.copy_prefix("antigravity.", "antigravity_o.");
+        context.copy_prefix("agy_external.", "agy_external_o.");
+        if claude_separate(runtime) {
+            for owner in ["claude", "claude_x"] {
+                for field in [
+                    "session.",
+                    "five_hour.",
+                    "weekly.",
+                    "model.",
+                    "limits.",
+                    "scoped.",
+                ] {
+                    let prefix = format!("{owner}.{field}");
+                    context.values.retain(|key, _| !key.starts_with(&prefix));
+                    context.strings.retain(|key, _| !key.starts_with(&prefix));
+                }
+            }
+            context.copy_prefix("accounts.claude.default.", "claude.");
+            context.copy_prefix("accounts.claude.claude_x.", "claude_x.");
+            let phase = runtime.split_hover_phases[0].clamp(0.0, 1.0);
+            context.insert("claude_x.hover_phase", phase);
+            context.insert("claude_x.hovered", (phase > 0.0) as u8 as f64);
+            context.insert_hover_crossfade("claude_x", phase);
+        }
+        if codex_separate(runtime) {
+            if data.is_some() {
+                for owner in ["codex", "codex_x"] {
+                    for field in [
+                        "session.",
+                        "five_hour.",
+                        "weekly.",
+                        "model.",
+                        "limits.",
+                        "scoped.",
+                        "credits.",
+                    ] {
+                        let prefix = format!("{owner}.{field}");
+                        context.values.retain(|key, _| !key.starts_with(&prefix));
+                        context.strings.retain(|key, _| !key.starts_with(&prefix));
+                    }
+                }
+                context.copy_prefix("accounts.codex.default.", "codex.");
+                context.copy_prefix("accounts.codex.codex_x.", "codex_x.");
+            }
+            let phase = runtime.split_hover_phases[3].clamp(0.0, 1.0);
+            context.insert("codex_x.hover_phase", phase);
+            context.insert("codex_x.hovered", (phase > 0.0) as u8 as f64);
+            context.insert_hover_crossfade("codex_x", phase);
+        }
+        if agy_separate(data, runtime) {
+            context.insert("antigravity.gemini.opacity", 1.0);
+            context.insert("antigravity.external.opacity", 0.0);
+            let mut single = runtime;
+            single.antigravity_pools_one_widget = true;
+            single.antigravity_a_enabled = false;
+            single.antigravity_external_enabled = runtime.antigravity_external_x_enabled;
+            let other = Self::from_usage_with_runtime(data, canvas, single);
+            context.copy_prefix_from(&other, "antigravity.", "antigravity_o.");
+            let phase = runtime.split_hover_phases[1].clamp(0.0, 1.0);
+            context.insert("antigravity_o.hover_phase", phase);
+            context.insert_hover_crossfade("antigravity_o", phase);
+            context.insert("antigravity_o.gemini.opacity", 1.0);
+            context.insert("antigravity_o.external.opacity", 0.0);
+            context.insert("antigravity_o.dual_mode", 0.0);
+            context.insert(
+                "antigravity.external_a.shown",
+                runtime.antigravity_external_enabled as u8 as f64,
+            );
+            context.insert("antigravity.external_o.shown", 0.0);
+            context.insert(
+                "antigravity_o.external_a.shown",
+                runtime.antigravity_external_x_enabled as u8 as f64,
+            );
+            context.insert("antigravity_o.external_o.shown", 0.0);
+            context.copy_prefix("agy_external.", "agy_external_o.");
+            let phase = runtime.split_hover_phases[2].clamp(0.0, 1.0);
+            context.insert("agy_external_o.hover_phase", phase);
+            context.insert_hover_crossfade("agy_external_o", phase);
+        }
         context
+    }
+
+    fn copy_prefix(&mut self, source: &str, target: &str) {
+        let clone = self.clone();
+        self.copy_prefix_from(&clone, source, target);
+    }
+
+    fn copy_prefix_from(&mut self, other: &Self, source: &str, target: &str) {
+        for (key, value) in &other.values {
+            if let Some(suffix) = key.strip_prefix(source) {
+                self.values.insert(format!("{target}{suffix}"), *value);
+            }
+        }
+        for (key, value) in &other.strings {
+            if let Some(suffix) = key.strip_prefix(source) {
+                self.strings
+                    .insert(format!("{target}{suffix}"), value.clone());
+            }
+        }
     }
 
     /// Sources of the agy two-row layout. Row 1 is always pool A's Gemini
@@ -3783,6 +4080,24 @@ pub(crate) fn execute_mouse_actions_with_metrics(
 }
 
 impl ThemeDocument {
+    /// Splitting is an all-provider capability: every required widget must
+    /// exist on the primary surface before any saved split choice takes effect.
+    pub fn supports_pool_splitting(&self) -> bool {
+        self.surfaces.first().is_some_and(|surface| {
+            [
+                "claude_x-provider",
+                "codex_x-provider",
+                "antigravity_o-provider",
+                "agy_external_o-provider",
+            ]
+            .iter()
+            .all(|id| {
+                surface.children.iter().any(|object| {
+                    object.id == *id && object.parent.as_deref() == Some("provider-row")
+                })
+            })
+        })
+    }
     /// How often a live clock can visibly change. Minute-only clocks avoid the
     /// much more expensive second-by-second surface rendering path.
     pub fn current_time_refresh_interval(&self) -> Option<Duration> {

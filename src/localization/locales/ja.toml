@@ -72,6 +72,7 @@ copilot_window_title = "Copilot 使用量モニター"
 qoder_window_title = "Qoder 使用量モニター"
 
 [translations]
+"Pools on one widget" = "プールを一つのウィジェットにまとめる"
 "Use Windows default font" = "Windows の既定のフォントを使用"
 "Turn off to use Segoe UI for widget text" = "オフにするとウィジェットのテキストに Segoe UI を使用します"
 "Absolute value" = "絶対値"

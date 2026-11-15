@@ -81,6 +81,9 @@ pub enum ContextMenuAction {
     ToggleShowPace,
     ToggleShowFable,
     ToggleShowFableX,
+    ToggleClaudePoolsOneWidget,
+    ToggleCodexPoolsOneWidget,
+    ToggleAntigravityPoolsOneWidget,
     ToggleWidget,
     /// Accepted only so menus saved by older versions can be loaded and
     /// cleaned up. New menus cannot create or execute this legacy action.
@@ -427,12 +430,24 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::ToggleShowFableX,
                 "providers.claude.enabled && claude.x.enabled",
             ),
+            child(
+                "claude-pools-one-widget",
+                "Pools on one widget",
+                Action::ToggleClaudePoolsOneWidget,
+                "display.pool_split_supported && providers.claude.enabled && claude.main.enabled && claude.x.enabled",
+            ),
             ContextMenuItem::action(
                 "provider-codex-main",
                 "Codex (Main)",
                 Action::ToggleCodexMain,
             ),
             ContextMenuItem::action("provider-codex-x", "Codex X", Action::ToggleCodexX),
+            child(
+                "codex-pools-one-widget",
+                "Pools on one widget",
+                Action::ToggleCodexPoolsOneWidget,
+                "display.pool_split_supported && providers.codex.enabled && codex.main.enabled && codex.x.enabled",
+            ),
             ContextMenuItem::action(
                 "provider-antigravity-a",
                 "Antigravity (Main)",
@@ -454,6 +469,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "External models",
                 Action::ToggleAntigravityExternalX,
                 "providers.antigravity.enabled && antigravity.x.enabled",
+            ),
+            child(
+                "antigravity-pools-one-widget",
+                "Pools on one widget",
+                Action::ToggleAntigravityPoolsOneWidget,
+                "display.pool_split_supported && providers.antigravity.enabled && antigravity.a.enabled && antigravity.x.enabled",
             ),
             ContextMenuItem::action(
                 "provider-opencode",
@@ -888,6 +909,45 @@ mod tests {
             assert!(!item.should_render(&context));
             context.insert(binding, 1.0);
             assert!(item.should_render(&context));
+        }
+        for (id, provider, main, x) in [
+            (
+                "claude-pools-one-widget",
+                "providers.claude.enabled",
+                "claude.main.enabled",
+                "claude.x.enabled",
+            ),
+            (
+                "codex-pools-one-widget",
+                "providers.codex.enabled",
+                "codex.main.enabled",
+                "codex.x.enabled",
+            ),
+            (
+                "antigravity-pools-one-widget",
+                "providers.antigravity.enabled",
+                "antigravity.a.enabled",
+                "antigravity.x.enabled",
+            ),
+        ] {
+            let item = providers.iter().find(|item| item.id == id).unwrap();
+            for supported in [false, true] {
+                context.insert("display.pool_split_supported", supported as u8 as f64);
+                for p in [false, true] {
+                    for a in [false, true] {
+                        for b in [false, true] {
+                            context.insert(provider, p as u8 as f64);
+                            context.insert(main, a as u8 as f64);
+                            context.insert(x, b as u8 as f64);
+                            assert_eq!(
+                                item.should_render(&context),
+                                supported && p && a && b,
+                                "{id}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

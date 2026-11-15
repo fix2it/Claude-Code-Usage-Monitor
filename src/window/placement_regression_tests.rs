@@ -39,6 +39,7 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         agy_external_hovered: false,
         agy_external_crossfade_opacity: 0.0,
         agy_external_crossfade_animation: None,
+        split_hovers: std::array::from_fn(|_| SplitHover::default()),
         view_mode: 1,
         mode_phase: 0.0,
         widget_modes: [(1, 0.0); theme_engine::WIDGET_SLOTS],
@@ -80,6 +81,9 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         show_pace: true,
         show_fable: false,
         show_fable_x: false,
+        claude_pools_one_widget: true,
+        codex_pools_one_widget: true,
+        antigravity_pools_one_widget: true,
         active_theme_path: None,
         active_theme: Some(theme),
         theme_clock_interval: None,
@@ -111,6 +115,99 @@ fn font_setting_reaches_widget_runtime() {
     assert!(theme_runtime_from_state(&state).use_windows_default_font);
     state.use_windows_default_font = false;
     assert!(!theme_runtime_from_state(&state).use_windows_default_font);
+}
+
+#[test]
+fn unsupported_theme_keeps_combined_pools_without_changing_preferences() {
+    use crate::accounts::AccountProfile;
+    use crate::providers::{ProviderId, ProviderSet};
+
+    let mut custom = ThemeDocument::starter();
+    custom.id = "custom-without-split".into();
+    custom.surfaces[0].children.retain(|object| {
+        !matches!(
+            object.id.as_str(),
+            "claude_x-provider"
+                | "codex_x-provider"
+                | "antigravity_o-provider"
+                | "agy_external_o-provider"
+        ) && !object.id.starts_with("split-")
+    });
+    assert!(!custom.supports_pool_splitting());
+    let mut state = state_for(custom, placement("taskbar"));
+    state.providers = ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+    ]);
+    for (accounts, id) in [
+        (&mut state.accounts.claude, "claude_x"),
+        (&mut state.accounts.codex, "codex_x"),
+    ] {
+        accounts.profiles.push(AccountProfile {
+            id: id.into(),
+            enabled: true,
+            ..Default::default()
+        });
+    }
+    super::toggle_antigravity_x(&mut state.accounts);
+    state.claude_pools_one_widget = false;
+    state.codex_pools_one_widget = false;
+    state.antigravity_pools_one_widget = false;
+    let runtime = theme_runtime_from_state(&state);
+    assert!(!runtime.pool_split_supported);
+    assert!(
+        runtime.claude_pools_one_widget
+            && runtime.codex_pools_one_widget
+            && runtime.antigravity_pools_one_widget
+    );
+    let mut context = theme_engine::DataContext::from_usage_with_runtime(
+        None,
+        &theme_engine::Canvas::default(),
+        runtime,
+    );
+    context.insert("system.dark", 1.0);
+    assert_eq!(context.get("claude.dual_mode"), Some(1.0));
+    assert_eq!(context.get("codex.dual_mode"), Some(1.0));
+    assert_eq!(context.get("antigravity.pool_o"), Some(1.0));
+    assert_eq!(context.get("display.claude_split"), Some(0.0));
+    assert_eq!(context.get("display.codex_split"), Some(0.0));
+    assert_eq!(context.get("display.agy_pool_split"), Some(0.0));
+    let theme = state.active_theme.as_ref().unwrap();
+    for id in [
+        "claude-main-5h-dark-normal",
+        "claude-x-5h-dark-normal",
+        "codex-main-5h-dark-normal",
+        "codex-x-5h-dark-normal",
+        "antigravity-gemini-5h-dark-normal",
+        "antigravity-o-row-5h-dark-normal",
+    ] {
+        let row = theme.surfaces[0]
+            .children
+            .iter()
+            .find(|object| object.id == id)
+            .unwrap();
+        assert_eq!(
+            theme_engine::evaluate(&row.render.0, &context),
+            Ok(1.0),
+            "{id}"
+        );
+    }
+    assert_eq!(theme_engine::widget_count(None, runtime), 4);
+    assert!(
+        !state.claude_pools_one_widget
+            && !state.codex_pools_one_widget
+            && !state.antigravity_pools_one_widget
+    );
+
+    state.active_theme = Some(ThemeDocument::starter());
+    let runtime = theme_runtime_from_state(&state);
+    assert!(runtime.pool_split_supported);
+    assert!(
+        !runtime.claude_pools_one_widget
+            && !runtime.codex_pools_one_widget
+            && !runtime.antigravity_pools_one_widget
+    );
 }
 
 #[test]
