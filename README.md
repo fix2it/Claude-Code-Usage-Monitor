@@ -88,6 +88,9 @@ Download `claude-code-usage-monitor.exe` from this fork's
 [GitHub Releases](https://github.com/fix2it/Claude-Code-Usage-Monitor/releases) and run it; no installer is needed.
 The original project's WinGet package installs the upstream app, not this fork.
 
+Fork versions encode the upstream base in the patch number: `2.23.601` is
+fork build 01 on top of upstream `2.23.6`.
+
 See [updater verification](docs/updater.md) for the portable updater's integrity checks and trust boundary.
 
 ## Usage

@@ -6,6 +6,10 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.601] - 2026-11-15
+
+First release of the fix2it fork, based on upstream 2.23.6. Fork versions keep the upstream base in the patch number: 2.23.601 is fork build 01 on top of 2.23.6.
+
 ### Added
 
 - Add a "Pools on one widget" menu toggle for Claude, Codex and Antigravity. Off draws each pool as its own widget with its own saved view mode; on (the default) keeps the combined layout. Themes without split support stay combined and hide the item.
