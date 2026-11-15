@@ -3,23 +3,73 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A lightweight, open-source Windows taskbar widget for monitoring Claude Code usage limits and reset times. It can also display usage for Codex, Google Antigravity, OpenCode Go, Cursor, Grok Build, and GitHub Copilot.
+> **This is a standalone fork** of
+> [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor).
+> Many thanks to Code Zeno, the original author, for creating the monitor and
+> releasing it under the MIT License. The fork is developed separately at
+> [fix2it/Claude-Code-Usage-Monitor](https://github.com/fix2it/Claude-Code-Usage-Monitor); please report problems with
+> fork builds here, not to the original project.
 
-See the [user guide](USER_GUIDE.md) for theme customisation and everyday settings,
-or the [changelog](CHANGELOG.md) for version history and notable changes.
+A Windows taskbar widget for people who juggle several AI quota pools. Where
+the original shows one tile per provider, this fork gives each Claude, Codex,
+and Antigravity pool its own widget (or combines them with one toggle), shows
+Fable usage per Claude pool, reads a second Antigravity pool from the OpenCode
+token, and adds Qoder. Each widget keeps its own compact view mode, and pace
+ticks show whether you are ahead of or behind the reset window. To keep the
+app lean, it ships a single theme, Compact Fluent Quad, in a horizontal
+taskbar layout only; Theme Studio and the other themes, including the vertical
+one, are removed.
+
+OpenCode Go is supported too. Cursor, Grok Build, and GitHub Copilot support is
+inherited from the original project and is untested in this fork. See the
+[changelog](CHANGELOG.md) for version history and notable changes.
 
 ![Claude Code Usage Monitor running in the Windows taskbar](.github/animation.gif)
+
+## What the fork changes
+
+Compared with the original project, this fork:
+
+- Removes Theme Studio, the context-menu editor, the Assets page, and the extra
+  bundled themes. The settings window keeps Settings and Diagnostics; Compact
+  Fluent Quad is the only bundled theme. User themes still load.
+- Adds three compact view modes for the widget, switched with a click or the
+  mouse wheel. Each widget keeps its own mode; hold Shift to change all widgets.
+- Shows separate pool widgets for Claude, Codex, and Antigravity (agy), with a
+  **Pools on one widget** menu toggle to combine or split them.
+- Adds a second Antigravity pool, **O**, read-only from the OpenCode token, next
+  to pool **A**; external models get their own widget state.
+- Shows Fable usage per Claude pool, with its own toggle in each pool's menu.
+- Nests Fable and External models under their providers in a multi-select
+  provider menu.
+- Draws pace ticks on usage gauges (**Show pace**) and animates hover
+  crossfades between pools and labels.
+- Sizes compact rows from the measured text and markers, so widths adapt to
+  the content.
+- Reworks the OpenCode Go widget: it keeps the 7-day window and the billing
+  period start, adds dual-mode gauges and markers with a hover swap between
+  the weekly and monthly pools, and sends the `Authorization: Bearer` header
+  that the OpenCode console API requires.
+- Adds a Qoder provider read from the `qodercli` `/usage` panel (Qoder has no
+  plain usage API; probes run at most every 15 minutes). The widget shows the
+  plan on the top row and the extra credit pool in use below, with pace ticks;
+  when both extra pools are in use, hover swaps between them. Pace assumes a 30-day window because Qoder reports only
+  end dates. See [Qoder provider](docs/qoder-provider.md).
+- Updates only from this fork's own GitHub Releases through the portable
+  updater; the original project's WinGet package is not used.
+
+See the [changelog](CHANGELOG.md) for details.
 
 ## Features
 
 - Displays current usage and time remaining until each limit resets
 - Counts usage up from zero or down from the full allowance, whichever you prefer
-- Supports Claude Code, Codex, Google Antigravity, OpenCode Go, Cursor, Grok Build, and GitHub Copilot
+- Supports Claude Code, Codex, Google Antigravity, OpenCode Go, Qoder, Cursor, Grok Build, and GitHub Copilot
 - Supports multiple accounts for Claude Code and Codex
 - Lives in the Windows taskbar with quick controls in the system tray
 - Supports multiple monitors and Windows startup
 - Includes configurable refresh intervals, providers, languages, and updates
-- Provides built-in themes and a visual Theme Studio for custom layouts
+- Ships the Compact Fluent Quad theme and loads user themes
 - Collects no analytics or telemetry
 
 ## Requirements
@@ -29,15 +79,14 @@ or the [changelog](CHANGELOG.md) for version history and notable changes.
 
 Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL. Other providers are optional and can be enabled independently from the dashboard.
 
+> **Cursor, Grok Build, and GitHub Copilot** support is inherited unchanged from
+> the original project and has not been tested in this fork.
+
 ## Installation
 
-Install the latest release with WinGet:
-
-```powershell
-winget install CodeZeno.ClaudeCodeUsageMonitor
-```
-
-Alternatively, download `claude-code-usage-monitor.exe` from [GitHub Releases](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/releases).
+Download `claude-code-usage-monitor.exe` from this fork's
+[GitHub Releases](https://github.com/fix2it/Claude-Code-Usage-Monitor/releases) and run it; no installer is needed.
+The original project's WinGet package installs the upstream app, not this fork.
 
 See [updater verification](docs/updater.md) for the portable updater's integrity checks and trust boundary.
 

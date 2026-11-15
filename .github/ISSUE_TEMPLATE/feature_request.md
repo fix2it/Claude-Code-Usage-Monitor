@@ -8,9 +8,9 @@ assignees: []
 
 <!--
 Search existing issues and pull requests before submitting.
-This request will be public. For suspected vulnerabilities, email
-contact@codezeno.com.au instead. Read the security policy:
-https://github.com/CodeZeno/Claude-Code-Usage-Monitor/blob/main/SECURITY.md
+This request will be public. For suspected vulnerabilities, do not post details here;
+follow the security policy instead:
+https://github.com/fix2it/Claude-Code-Usage-Monitor/blob/main/SECURITY.md
 Do not include credential files, OAuth tokens, API keys, session cookies,
 authorization headers, or personal information in examples or screenshots.
 -->

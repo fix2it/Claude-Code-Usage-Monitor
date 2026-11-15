@@ -2,16 +2,20 @@
 
 ## Report a vulnerability privately
 
-Email [contact@codezeno.com.au](mailto:contact@codezeno.com.au) with the subject
-`[Security] Claude Code Usage Monitor`. This is Code Zeno's contact address,
-published on [codezeno.com.au](https://codezeno.com.au/).
+This repository is a fork maintained by
+[fix2it](https://github.com/fix2it); it has no security email address, and
+GitHub private vulnerability reporting is not currently enabled for it.
 
-Do **not** report suspected vulnerabilities in public issues, pull requests, or
-discussions. If you are unsure whether a problem is security-related, use email
-first. GitHub private vulnerability reporting is not currently enabled for this
-repository; email is the private reporting route.
+To report a vulnerability, open a short public issue titled
+`[Security] Private contact request` that contains **no** technical details,
+and the maintainer will arrange a private channel. Do **not** describe
+suspected vulnerabilities in public issues, pull requests, or discussions.
 
-Include what you can safely share:
+Vulnerabilities that also affect the original project
+([CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor))
+should be reported to its author through that project's own security policy.
+
+Once the private channel is set up, include what you can safely share:
 
 - A description of the vulnerability and its potential impact.
 - The app version or commit, Windows version, and affected provider or feature.
@@ -42,8 +46,8 @@ the affected version, and check the latest release when it is safe to do so.
 
 Maintainers review reports privately and may ask for additional reproduction
 details. Response and fix times depend on severity and maintainer availability;
-there is no guaranteed response deadline. Follow up on the same email thread
-if you have not received a response.
+there is no guaranteed response deadline. If nobody replies, comment on the same issue
+(still without details) to ask again.
 
 Please coordinate public disclosure with the maintainers so a fix or mitigation
 can be made available before publishing exploit details. Reporter credit should

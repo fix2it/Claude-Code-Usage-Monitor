@@ -5,16 +5,16 @@ edition = "2021"
 rust-version = "1.95"
 license = "MIT"
 description = "Claude Code Usage Monitor"
-homepage = "https://codezeno.com.au"
+homepage = "https://github.com/fix2it/Claude-Code-Usage-Monitor"
 repository = "https://github.com/fix2it/Claude-Code-Usage-Monitor"
 
 [package.metadata.winresource]
-CompanyName = "Code Zeno Pty Ltd"
+CompanyName = "fix2it (fork of Code Zeno's Claude Code Usage Monitor)"
 ProductName = "Claude Code Usage Monitor"
 FileDescription = "Claude Code Usage Monitor"
 OriginalFilename = "claude-code-usage-monitor.exe"
 InternalName = "ClaudeCodeUsageMonitor"
-Comments = "https://codezeno.com.au"
+Comments = "https://github.com/fix2it/Claude-Code-Usage-Monitor"
 LegalCopyright = "Copyright (C) 2026 Code Zeno Pty Ltd"
 
 [dependencies]

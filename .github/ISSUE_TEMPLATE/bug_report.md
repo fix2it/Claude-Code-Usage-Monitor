@@ -7,9 +7,9 @@ assignees: []
 ---
 
 <!--
-This report will be public. For suspected vulnerabilities, email
-contact@codezeno.com.au instead. Read the security policy:
-https://github.com/CodeZeno/Claude-Code-Usage-Monitor/blob/main/SECURITY.md
+This report will be public. For suspected vulnerabilities, do not post details here;
+follow the security policy instead:
+https://github.com/fix2it/Claude-Code-Usage-Monitor/blob/main/SECURITY.md
 Never include credential files, OAuth tokens, API keys, session cookies, or
 authorization headers. Redact personal information from logs and screenshots.
 Search existing issues before submitting.
@@ -23,7 +23,7 @@ Describe the problem and what you expected to happen.
 
 - App version (or commit if built from source):
 - Windows version and build:
-- Installation method (WinGet, portable release, or source):
+- Installation method (portable release or source):
 - Affected provider(s), if applicable:
 - Relevant setup (for example WSL, multiple accounts, monitors, or display scaling):
 

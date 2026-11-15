@@ -25,10 +25,10 @@ publicly.
 
 ## Reporting concerns
 
-Report conduct concerns privately to
-[contact@codezeno.com.au](mailto:contact@codezeno.com.au) with the subject
-`[Conduct] Claude Code Usage Monitor`. Include a description, relevant links or
-redacted evidence, and a way to contact you. Do not post personal information in
+Report conduct concerns by opening a short issue titled
+`[Conduct] Private contact request` without details; the maintainer
+([fix2it](https://github.com/fix2it)) will arrange a private channel. In that
+channel, include a description, relevant links or redacted evidence. Do not post personal information in
 a public issue. Security vulnerabilities should follow [SECURITY.md](SECURITY.md).
 
 Maintainers will review reports with discretion and share identifying details

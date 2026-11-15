@@ -6,10 +6,25 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+### Added
+
+- Add a "Pools on one widget" menu toggle for Claude, Codex and Antigravity. Off draws each pool as its own widget with its own saved view mode; on (the default) keeps the combined layout. Themes without split support stay combined and hide the item.
+- Add a second Antigravity pool, O, read-only from the OpenCode Google token. It is never refreshed, shows no data when the token is missing or expired, and is hidden when it matches pool A. Pools are labelled A and O. With pools split, each pool's widget holds its own external models; combined, external models of both pools can share a separate widget.
+- Show Fable usage for each Claude pool, with a skeleton and pace tick and its own Fable toggle in each pool's menu. With one Claude pool, Fable is a third Claude row. With two pools combined, their Fable rows share a separate widget; with pools split, each pool's widget holds its own Fable row.
+- Keep a view mode per widget: a click or the mouse wheel changes only the widget under the cursor, Shift changes all widgets.
+
 ### Changed
 
+- This repository is now presented as a standalone fork of CodeZeno/Claude-Code-Usage-Monitor: the README, issue templates, security policy and dashboard GitHub link point to fix2it/Claude-Code-Usage-Monitor, and the funding file is removed.
+- The updater installs updates only from this fork's own GitHub Releases through the portable channel, so the upstream WinGet package can no longer replace a fork build. The WinGet manifest is submitted only from the upstream repository.
+- Nest Fable and External models under their providers in the context menu, and keep the Providers submenu and the first context menu open as expected.
+- Cap gauge bars at 5 cubes and count Fable and split pool widgets when sizing bars.
 - Show Antigravity's Gemini usage labels at rest and reveal the Claude/GPT labels while the cursor is over the Antigravity tile, replacing the timed 8 s / 2 s alternation.
 - With only one Antigravity pool enabled, hovering the Antigravity tile crossfades to the other pool's labels and gauges, the same way as with both pools enabled.
+
+### Removed
+
+- Remove Theme Studio, the context-menu editor, the Assets page and the classic, vertical and Minecraft themes. Compact Fluent Quad is the only bundled theme; saved selections of retired themes fall back to it, and user themes keep working.
 
 ## [2.23.6] - 2026-11-11
 

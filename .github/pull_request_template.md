@@ -1,6 +1,5 @@
 <!--
-For suspected vulnerabilities, email contact@codezeno.com.au before opening a
-public PR. See SECURITY.md. Never include credential files, OAuth tokens, API
+For suspected vulnerabilities, follow SECURITY.md before opening a public PR. Never include credential files, OAuth tokens, API
 keys, session cookies, or authorization headers in code, fixtures, or attachments.
 Redact personal information from logs and screenshots.
 -->
