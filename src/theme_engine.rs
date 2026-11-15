@@ -1627,8 +1627,6 @@ pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -
         + claude_separate(runtime) as usize
         + codex_separate(runtime) as usize
         + agy_separate(data, runtime) as usize
-        + (agy_separate(data, runtime) && runtime.antigravity_external_enabled) as usize
-        + (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as usize
 }
 
 fn claude_separate(runtime: ThemeRuntime) -> bool {
@@ -1797,7 +1795,6 @@ pub struct DisplayMetrics {
     claude_separate: bool,
     codex_separate: bool,
     agy_separate: bool,
-    agy_external_o_shown: bool,
 }
 
 impl DisplayMetrics {
@@ -1822,8 +1819,7 @@ impl DisplayMetrics {
             providers_width: 0.0,
             widget_count,
             fable: ProviderMetrics::default(),
-            agy_split: antigravity_split(None, runtime)
-                || (agy_separate(None, runtime) && runtime.antigravity_external_enabled),
+            agy_split: antigravity_split(None, runtime),
             agy_external: ProviderMetrics::default(),
             claude_x: ProviderMetrics::default(),
             codex_x: ProviderMetrics::default(),
@@ -1832,8 +1828,6 @@ impl DisplayMetrics {
             claude_separate: claude_separate(runtime),
             codex_separate: codex_separate(runtime),
             agy_separate: agy_separate(None, runtime),
-            agy_external_o_shown: agy_separate(None, runtime)
-                && runtime.antigravity_external_x_enabled,
         };
         let dual = claude_dual(runtime);
         metrics.fable = fable_column(
@@ -1909,17 +1903,12 @@ impl DisplayMetrics {
                 .chain(self.agy_split.then_some(agy))
                 .chain(self.claude_separate.then_some(self.claude_x.row_width))
                 .chain(self.codex_separate.then_some(self.codex_x.row_width))
-                .chain(self.agy_separate.then_some(self.antigravity_o.row_width))
-                .chain(
-                    self.agy_external_o_shown
-                        .then_some(self.agy_external_o.row_width),
-                ),
+                .chain(self.agy_separate.then_some(self.antigravity_o.row_width)),
             runtime.provider_count()
                 + self.agy_split as usize
                 + self.claude_separate as usize
                 + self.codex_separate as usize
-                + self.agy_separate as usize
-                + self.agy_external_o_shown as usize,
+                + self.agy_separate as usize,
         )
     }
 }
@@ -2363,7 +2352,6 @@ pub(crate) fn display_metrics(
     let mut metrics = legacy.clone();
     metrics.agy_split = base.get("display.agy_split").unwrap_or(0.0) != 0.0;
     metrics.agy_separate = agy_separate(data, runtime);
-    metrics.agy_external_o_shown = metrics.agy_separate && runtime.antigravity_external_x_enabled;
     let (fable_marker_box, fable_origin) =
         marker_column(marker_advance[FABLE_METRICS_INDEX], legacy.fable);
     metrics.fable = fable_column(
@@ -2733,10 +2721,7 @@ impl DataContext {
             (runtime.provider_count()
                 + claude_separate(runtime) as usize
                 + codex_separate(runtime) as usize
-                + agy_separate(data, runtime) as usize
-                + (agy_separate(data, runtime) && runtime.antigravity_external_enabled) as usize
-                + (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as usize)
-                as f64,
+                + agy_separate(data, runtime) as usize) as f64,
         );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2826,18 +2811,12 @@ impl DataContext {
         );
         context.insert(
             "display.agy_split",
-            (antigravity_split(data, runtime)
-                || (agy_separate(data, runtime) && runtime.antigravity_external_enabled))
-                as u8 as f64,
+            antigravity_split(data, runtime) as u8 as f64,
         );
-        context.insert(
-            "display.agy_o_external",
-            (agy_separate(data, runtime) && runtime.antigravity_external_x_enabled) as u8 as f64,
-        );
+        context.insert("display.agy_o_external", 0.0);
         // Two rows: Gemini and external models (pool A), or pools A and O.
-        let agy_dual_mode = !agy_separate(data, runtime)
-            && ((runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled)
-                || pool_o);
+        let agy_dual_mode =
+            (runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled) || pool_o;
         context.insert("antigravity.dual_mode", agy_dual_mode as u8 as f64);
         let crossfade = runtime.crossfade_opacity.clamp(0.0, 1.0);
         context.insert("antigravity.crossfade_opacity", crossfade);
@@ -2855,8 +2834,15 @@ impl DataContext {
             (false, false) => (0.0, 0.0),
             _ => (agy_normal_opacity, agy_hover_opacity),
         };
-        context.insert("antigravity.gemini.opacity", gemini_opacity);
-        context.insert("antigravity.external.opacity", external_opacity);
+        let only_gemini_a = agy_separate(data, runtime) && !runtime.antigravity_external_enabled;
+        context.insert(
+            "antigravity.gemini.opacity",
+            if only_gemini_a { 1.0 } else { gemini_opacity },
+        );
+        context.insert(
+            "antigravity.external.opacity",
+            if only_gemini_a { 0.0 } else { external_opacity },
+        );
         context.insert("claude.hovered", runtime.claude_hovered as u8 as f64);
         context.insert_hover_crossfade("claude", runtime.claude_crossfade_opacity);
         context.insert(
@@ -3138,9 +3124,30 @@ impl DataContext {
             let phase = runtime.split_hover_phases[1].clamp(0.0, 1.0);
             context.insert("antigravity_o.hover_phase", phase);
             let (normal, hover) = context.insert_hover_crossfade("antigravity_o", phase);
-            context.insert("antigravity_o.gemini.opacity", normal);
-            context.insert("antigravity_o.external.opacity", hover);
-            context.insert("antigravity_o.dual_mode", 0.0);
+            context.insert(
+                "antigravity_o.external.enabled",
+                runtime.antigravity_external_x_enabled as u8 as f64,
+            );
+            context.insert(
+                "antigravity_o.gemini.opacity",
+                if runtime.antigravity_external_x_enabled {
+                    normal
+                } else {
+                    1.0
+                },
+            );
+            context.insert(
+                "antigravity_o.external.opacity",
+                if runtime.antigravity_external_x_enabled {
+                    hover
+                } else {
+                    0.0
+                },
+            );
+            context.insert(
+                "antigravity_o.dual_mode",
+                runtime.antigravity_external_x_enabled as u8 as f64,
+            );
             context.insert(
                 "antigravity.external_a.shown",
                 runtime.antigravity_external_enabled as u8 as f64,

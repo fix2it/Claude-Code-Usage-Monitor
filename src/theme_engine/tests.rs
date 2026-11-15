@@ -6668,12 +6668,7 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
         "20%"
     );
     let metrics = display_metrics(&theme, Some(&data), runtime);
-    let ids = [
-        "antigravity-provider",
-        "antigravity-external-provider",
-        "antigravity_o-provider",
-        "agy_external_o-provider",
-    ];
+    let ids = ["antigravity-provider", "antigravity_o-provider"];
     let bounds =
         object_bounds_for_ids_with_metrics(&theme, 0, Some(&data), runtime, &ids, &metrics);
     for pair in bounds.windows(2) {
@@ -6712,8 +6707,6 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
         "codex_x",
         "antigravity",
         "antigravity_o",
-        "agy_external",
-        "agy_external_o",
     ] {
         assert_eq!(
             context.get(&format!("display.bar_width.{key}")),
@@ -6755,7 +6748,7 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
 }
 
 #[test]
-fn split_agy_pools_count_and_render_independent_external_widgets() {
+fn split_agy_pools_embed_each_pools_external_row() {
     let theme = quad_theme();
     let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
         .children
@@ -6772,11 +6765,7 @@ fn split_agy_pools_count_and_render_independent_external_widgets() {
                 .with_widget_mode_phase("agy_external_o", 1.0);
             let context =
                 DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
-            let expected = if combined {
-                1 + usize::from(a || o)
-            } else {
-                2 + usize::from(a) + usize::from(o)
-            };
+            let expected = if combined { 1 + usize::from(a || o) } else { 2 };
             assert_eq!(widget_count(Some(&data), runtime), expected);
             assert_eq!(
                 scene_object_renders(by_id["antigravity_o-provider"], &by_id, &context),
@@ -6784,7 +6773,7 @@ fn split_agy_pools_count_and_render_independent_external_widgets() {
             );
             assert_eq!(
                 scene_object_renders(by_id["agy_external_o-provider"], &by_id, &context),
-                !combined && o
+                false
             );
             if !combined {
                 assert_eq!(
@@ -6801,7 +6790,65 @@ fn split_agy_pools_count_and_render_independent_external_widgets() {
                 );
                 assert_eq!(context.get("display.mode_phase.antigravity"), Some(0.0));
                 assert_eq!(context.get("display.mode_phase.antigravity_o"), Some(2.0));
-                assert_eq!(context.get("display.mode_phase.agy_external_o"), Some(1.0));
+                assert_eq!(context.get("antigravity.dual_mode"), Some(a as u8 as f64));
+                assert_eq!(context.get("antigravity_o.dual_mode"), Some(o as u8 as f64));
+                assert_eq!(
+                    context.get("antigravity.row2.session.percentage"),
+                    Some(30.0)
+                );
+                assert_eq!(
+                    context.get("antigravity_o.row2.session.percentage"),
+                    Some(55.0)
+                );
+                let mut dark = context.clone();
+                dark.insert("system.dark", 1.0);
+                for (id, visible) in [
+                    ("antigravity-gemini-5h-dark-normal", a),
+                    ("antigravity-external-5h-dark-normal", a),
+                    ("split-antigravity_o-antigravity-gemini-5h-dark-normal", o),
+                    ("split-antigravity_o-antigravity-external-5h-dark-normal", o),
+                    ("antigravity-session-gemini-solo-dark", !a),
+                    (
+                        "split-antigravity_o-antigravity-session-gemini-solo-dark",
+                        !o,
+                    ),
+                ] {
+                    assert_eq!(
+                        scene_object_renders(by_id[id], &by_id, &dark),
+                        visible,
+                        "{id}: a={a} o={o}"
+                    );
+                }
+                let mut hovered = DataContext::from_usage_with_runtime(
+                    Some(&data),
+                    &Canvas::default(),
+                    runtime
+                        .with_antigravity_pools(true, a, 0.0)
+                        .with_split_hover_phases([0.0, 1.0, 0.0, 0.0]),
+                );
+                assert_eq!(hovered.get("antigravity.hover_phase"), Some(1.0));
+                assert_eq!(hovered.get("antigravity_o.hover_phase"), Some(1.0));
+                hovered.insert("system.dark", 1.0);
+                for (id, visible) in [
+                    ("antigravity-gemini-5h-dark-hover", a),
+                    ("antigravity-external-5h-dark-hover", a),
+                    ("split-antigravity_o-antigravity-gemini-5h-dark-hover", o),
+                    ("split-antigravity_o-antigravity-external-5h-dark-hover", o),
+                ] {
+                    assert_eq!(
+                        scene_object_renders(by_id[id], &by_id, &hovered),
+                        visible,
+                        "{id}: a={a} o={o}"
+                    );
+                }
+                if !a {
+                    assert_eq!(hovered.get("antigravity.gemini.opacity"), Some(1.0));
+                    assert_eq!(hovered.get("antigravity.external.opacity"), Some(0.0));
+                }
+                if !o {
+                    assert_eq!(hovered.get("antigravity_o.gemini.opacity"), Some(1.0));
+                    assert_eq!(hovered.get("antigravity_o.external.opacity"), Some(0.0));
+                }
                 let metrics = display_metrics(&theme, Some(&data), runtime);
                 for id in ["antigravity-provider", "antigravity_o-provider"] {
                     assert!(
@@ -6820,7 +6867,7 @@ fn split_agy_pools_count_and_render_independent_external_widgets() {
                         &metrics
                     )
                     .is_some(),
-                    a
+                    false
                 );
                 assert_eq!(
                     object_bounds_with_metrics(
@@ -6832,7 +6879,7 @@ fn split_agy_pools_count_and_render_independent_external_widgets() {
                         &metrics
                     )
                     .is_some(),
-                    o
+                    false
                 );
             }
         }
