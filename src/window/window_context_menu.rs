@@ -164,6 +164,11 @@ fn is_provider_toggle(action: &ContextMenuAction) -> bool {
             | ContextMenuAction::ToggleClaudeX
             | ContextMenuAction::ToggleCodexMain
             | ContextMenuAction::ToggleCodexX
+            | ContextMenuAction::ToggleShowFable
+            | ContextMenuAction::ToggleShowFableX
+            | ContextMenuAction::ToggleClaudePoolsOneWidget
+            | ContextMenuAction::ToggleCodexPoolsOneWidget
+            | ContextMenuAction::ToggleAntigravityPoolsOneWidget
     )
 }
 
@@ -754,6 +759,34 @@ mod tests {
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetMenuItemID, GetSubMenu};
 
+    /// Every row of the Providers submenu keeps the menu open, so a new row
+    /// cannot be forgotten in `is_provider_toggle`.
+    #[test]
+    fn every_providers_submenu_action_is_repeatable() {
+        fn walk(items: &[crate::context_menu::ContextMenuItem], out: &mut Vec<ContextMenuAction>) {
+            for item in items {
+                match &item.kind {
+                    ContextMenuItemKind::Action { action } => out.push(action.clone()),
+                    ContextMenuItemKind::Submenu { items } => walk(items, out),
+                    _ => {}
+                }
+            }
+        }
+        let document = crate::context_menu::classic_context_menu();
+        let providers = document
+            .items
+            .iter()
+            .find(|item| item.id == "providers")
+            .expect("providers submenu");
+        let mut actions = Vec::new();
+        walk(std::slice::from_ref(providers), &mut actions);
+        assert!(actions.len() > 10);
+        for action in &actions {
+            assert!(is_provider_toggle(action), "{action:?}");
+            assert!(context_menu_static_command(action).is_some(), "{action:?}");
+        }
+    }
+
     #[test]
     fn provider_toggles_are_repeatable_but_other_actions_close_the_menu() {
         use crate::providers::ProviderId;
@@ -795,8 +828,6 @@ mod tests {
             ContextMenuAction::Exit,
             ContextMenuAction::OpenDashboard,
             ContextMenuAction::ToggleShowPace,
-            ContextMenuAction::ToggleShowFable,
-            ContextMenuAction::ToggleShowFableX,
             ContextMenuAction::ToggleStartup,
             ContextMenuAction::ToggleTaskbarLock,
             ContextMenuAction::CheckForUpdates,
