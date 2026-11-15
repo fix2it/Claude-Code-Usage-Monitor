@@ -35,6 +35,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    window_context_menu::trace_menu_message(hwnd, msg, wparam, lparam);
     match msg {
         WM_MOUSEHOVER => {
             // A tooltip popping up over an open context menu competes with it.

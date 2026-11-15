@@ -117,6 +117,36 @@ pub(super) fn defer_while_menu_open(work: DeferredMenuWork) -> bool {
     true
 }
 
+/// `--diagnose` trace of the messages that can dismiss an open popup, so a
+/// menu that closes by itself shows what closed it.
+pub(super) fn trace_menu_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) {
+    if !MENU_TRACKING.load(Ordering::Acquire) || !diagnose::is_enabled() {
+        return;
+    }
+    let name = match msg {
+        WM_CANCELMODE => "WM_CANCELMODE",
+        WM_ACTIVATE => "WM_ACTIVATE",
+        WM_ACTIVATEAPP => "WM_ACTIVATEAPP",
+        WM_KILLFOCUS => "WM_KILLFOCUS",
+        WM_SETFOCUS => "WM_SETFOCUS",
+        WM_CAPTURECHANGED => "WM_CAPTURECHANGED",
+        WM_WINDOWPOSCHANGING => "WM_WINDOWPOSCHANGING",
+        WM_SHOWWINDOW => "WM_SHOWWINDOW",
+        WM_UNINITMENUPOPUP => "WM_UNINITMENUPOPUP",
+        WM_EXITMENULOOP => "WM_EXITMENULOOP",
+        WM_ENTERMENULOOP => "WM_ENTERMENULOOP",
+        WM_TIMER => "WM_TIMER",
+        _ => return,
+    };
+    diagnose::log(format!(
+        "menu trace hwnd={:#x} {name} wparam={:#x} lparam={:#x} fg={:#x}",
+        hwnd.0 as usize,
+        wparam.0,
+        lparam.0,
+        unsafe { GetForegroundWindow() }.0 as usize
+    ));
+}
+
 /// Mark the popup open or closed. Closing hands back the deferred work.
 fn set_menu_tracking(open: bool) -> (bool, bool) {
     MENU_TRACKING.store(open, Ordering::Release);
@@ -260,7 +290,27 @@ pub(super) fn show_context_menu_document(
             } else {
                 (point.x, point.y)
             };
-            let _ = SetForegroundWindow(hwnd);
+            let foreground_before = GetForegroundWindow();
+            // A taskbar-hosted surface is a child window: it can never be
+            // foreground, so SetForegroundWindow(hwnd) fails. Right after start
+            // nothing is foreground; the taskbar then activates a moment later
+            // and that activation cancels the first menu. Activate the top-level
+            // host now, so the menu opens with the foreground already settled.
+            let mut foreground_ok = SetForegroundWindow(hwnd).as_bool();
+            if !foreground_ok {
+                let root = GetAncestor(hwnd, GA_ROOT);
+                if !root.is_invalid() && root != hwnd {
+                    foreground_ok = SetForegroundWindow(root).as_bool();
+                }
+            }
+            diagnose::log(format!(
+                "menu open hwnd={:#x} top={:#x} fg_before={:#x} set_fg={foreground_ok} fg_after={:#x}",
+                hwnd.0 as usize,
+                GetAncestor(hwnd, GA_ROOT).0 as usize,
+                foreground_before.0 as usize,
+                GetForegroundWindow().0 as usize
+            ));
+            let opened_at = std::time::Instant::now();
             set_menu_tracking(true);
             let selected = TrackPopupMenu(
                 display_menu,
@@ -272,6 +322,14 @@ pub(super) fn show_context_menu_document(
                 None,
             )
             .0 as usize;
+            // KB135788: let the owner's queue run once so the next menu
+            // dismisses on an outside click instead of lingering.
+            let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
+            diagnose::log(format!(
+                "menu closed selected={selected} after_ms={} fg={:#x}",
+                opened_at.elapsed().as_millis(),
+                GetForegroundWindow().0 as usize
+            ));
             run_deferred_menu_work(set_menu_tracking(false));
             ROOT_MENU_HANDLE.store(0, Ordering::Relaxed);
             let _ = DestroyMenu(menu);
