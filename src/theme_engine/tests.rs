@@ -6277,6 +6277,153 @@ fn agy_pool_fixture(gemini: f64, external: Option<f64>) -> crate::models::UsageD
     }
 }
 
+/// Manual frame benchmark: includes adaptive measurement and rasterisation.
+#[test]
+#[ignore]
+fn benchmark_combined_and_split_pool_frame() {
+    let theme = quad_theme();
+    let mut data = dual_fable_data(Some(20.0), Some(70.0));
+    data.insert(ProviderId::Codex, agy_pool_fixture(35.0, None));
+    data.insert(ProviderId::Antigravity, agy_pool_fixture(45.0, Some(55.0)));
+    for (provider, id, value) in [
+        (ProviderId::Codex, "default", 35.0),
+        (ProviderId::Codex, "codex_x", 65.0),
+        (ProviderId::Antigravity, "antigravity_x", 75.0),
+    ] {
+        data.accounts.push(crate::models::AccountUsage {
+            provider,
+            profile: crate::accounts::AccountProfile {
+                id: id.into(),
+                enabled: true,
+                ..Default::default()
+            },
+            source_signature: String::new(),
+            source_path: None,
+            usage: Some(agy_pool_fixture(value, Some(85.0))),
+            error: None,
+            selected: id == "default",
+        });
+    }
+    let base = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+    ]))
+    .with_claude_state(false, true, true, 0.0)
+    .with_codex_state(false, true, true, 0.0)
+    .with_antigravity_pools(true, true, 1.0)
+    .with_antigravity_external_x(true)
+    .with_antigravity_x(true);
+    for combined in [true, false] {
+        let runtime = base
+            .with_pool_layouts(combined, combined)
+            .with_codex_pool_layout(combined);
+        let start = std::time::Instant::now();
+        for _ in 0..3 {
+            let _ = std::hint::black_box(render_theme_surface_with_runtime(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+            ));
+        }
+        eprintln!(
+            "pool_frame {} mean_ms={:.2}",
+            if combined { "combined" } else { "split" },
+            start.elapsed().as_secs_f64() * 1000.0 / 3.0
+        );
+        let start = std::time::Instant::now();
+        let metrics = display_metrics(&theme, Some(&data), runtime);
+        let measurement = start.elapsed().as_secs_f64() * 1000.0;
+        let start = std::time::Instant::now();
+        for _ in 0..3 {
+            let _ = std::hint::black_box(render_theme_surface_with_metrics_at_scale(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                1.0,
+                &metrics,
+            ));
+        }
+        eprintln!(
+            "components {} metrics_ms={:.2} paint_ms={:.2}",
+            if combined { "combined" } else { "split" },
+            measurement,
+            start.elapsed().as_secs_f64() * 1000.0 / 3.0
+        );
+        if !combined {
+            let metrics = display_metrics(&theme, Some(&data), runtime);
+            let context =
+                DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+            let ids = [
+                "antigravity-provider",
+                "claude-provider",
+                "codex-provider",
+                "opencode-provider",
+                "qoder-provider",
+                "antigravity-external-provider",
+                "claude_x-provider",
+                "antigravity_o-provider",
+                "agy_external_o-provider",
+                "codex_x-provider",
+            ];
+            let start = std::time::Instant::now();
+            for id in ids {
+                std::hint::black_box(object_bounds_with_metrics(
+                    &theme,
+                    0,
+                    Some(&data),
+                    runtime,
+                    id,
+                    &metrics,
+                ));
+            }
+            let repeated = start.elapsed().as_secs_f64() * 1000.0;
+            let start = std::time::Instant::now();
+            std::hint::black_box(object_bounds_for_ids_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                &ids,
+                &metrics,
+            ));
+            eprintln!(
+                "hover_bounds repeated_ms={repeated:.2} batched_ms={:.2}",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
+            for id in [
+                "antigravity-provider",
+                "antigravity-external-provider",
+                "antigravity_o-provider",
+                "agy_external_o-provider",
+            ] {
+                eprintln!(
+                    "bounds {id} {:?}",
+                    object_bounds_with_metrics(&theme, 0, Some(&data), runtime, id, &metrics)
+                );
+            }
+            for key in [
+                "display.widget_count",
+                "display.bar_width.claude",
+                "display.bar_width.claude_x",
+                "display.bar_width.antigravity",
+                "display.bar_width.antigravity_o",
+            ] {
+                eprintln!("{key} {:?}", context.get(key));
+            }
+            for tpl in [
+                "{claude_x.session.display:usage_line}",
+                "{antigravity.gemini.session.display:usage_line}",
+                "{antigravity_o.gemini.session.display:usage_line}",
+            ] {
+                eprintln!("{tpl} {}", format_template(tpl, &context));
+            }
+        }
+    }
+}
+
 #[test]
 fn split_claude_pools_use_single_pool_rows_and_independent_mode() {
     let theme = quad_theme();
@@ -6446,6 +6593,165 @@ fn split_codex_pools_keep_their_data_and_independent_modes() {
             display_metrics(&theme, Some(&data), runtime.with_codex_pool_layout(false))
         );
     }
+}
+
+#[test]
+fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
+    let theme = quad_theme();
+    let mut data = AppUsageData::default();
+    for provider in [
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+    ] {
+        data.insert(provider, agy_pool_fixture(20.0, Some(30.0)));
+    }
+    for (provider, id, value) in [
+        (ProviderId::Claude, "default", 20.0),
+        (ProviderId::Claude, "claude_x", 40.0),
+        (ProviderId::Codex, "default", 20.0),
+        (ProviderId::Codex, "codex_x", 50.0),
+        (ProviderId::Antigravity, "antigravity_x", 60.0),
+    ] {
+        data.accounts.push(crate::models::AccountUsage {
+            provider,
+            profile: crate::accounts::AccountProfile {
+                id: id.into(),
+                enabled: true,
+                ..Default::default()
+            },
+            source_signature: String::new(),
+            source_path: None,
+            usage: Some(agy_pool_fixture(value, Some(70.0))),
+            error: None,
+            selected: id == "default",
+        });
+    }
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+    ]))
+    .with_claude_state(false, true, true, 0.0)
+    .with_codex_state(false, true, true, 0.0)
+    .with_antigravity_pools(true, true, 1.0)
+    .with_antigravity_external_x(true)
+    .with_antigravity_x(true)
+    .with_pool_layouts(false, false)
+    .with_codex_pool_layout(false);
+    let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+    for (template, expected) in [
+        ("{claude.session.display:usage_line}", "20%"),
+        ("{claude_x.session.display:usage_line}", "40%"),
+        ("{codex_x.session.display:usage_line}", "50%"),
+        ("{antigravity.gemini.session.display:usage_line}", "20%"),
+        ("{antigravity.external.session.display:usage_line}", "30%"),
+        ("{antigravity_o.gemini.session.display:usage_line}", "60%"),
+        ("{antigravity_o.external.session.display:usage_line}", "70%"),
+    ] {
+        assert_eq!(format_template(template, &context), expected, "{template}");
+    }
+    let mut missing_o = data.clone();
+    missing_o
+        .accounts
+        .iter_mut()
+        .find(|account| account.profile.id == "antigravity_x")
+        .unwrap()
+        .usage = None;
+    let no_o = DataContext::from_usage_with_runtime(Some(&missing_o), &Canvas::default(), runtime);
+    assert_eq!(
+        format_template("{antigravity_o.gemini.session.display:usage_line}", &no_o),
+        "--"
+    );
+    assert_eq!(
+        format_template("{antigravity.gemini.session.display:usage_line}", &no_o),
+        "20%"
+    );
+    let metrics = display_metrics(&theme, Some(&data), runtime);
+    let ids = [
+        "antigravity-provider",
+        "antigravity-external-provider",
+        "antigravity_o-provider",
+        "agy_external_o-provider",
+    ];
+    let bounds =
+        object_bounds_for_ids_with_metrics(&theme, 0, Some(&data), runtime, &ids, &metrics);
+    for pair in bounds.windows(2) {
+        let left = pair[0].unwrap();
+        let right = pair[1].unwrap();
+        assert!(
+            (right.0 - (left.0 + left.2) - 6.0).abs() < 0.01,
+            "{left:?} {right:?}"
+        );
+    }
+    for (id, rect) in ids.into_iter().zip(bounds) {
+        let (x, y, width, height) = rect.unwrap();
+        let (root_width, _) = resolve_surface_size(&theme, 0, Some(&data), runtime);
+        assert!(
+            x + width <= f64::from(root_width),
+            "{id} is clipped by the root"
+        );
+        assert_eq!(
+            hit_test_widget_with_metrics(
+                &theme,
+                0,
+                x + width / 2.0,
+                y + height / 2.0,
+                Some(&data),
+                runtime,
+                &metrics
+            )
+            .as_deref(),
+            Some(id)
+        );
+    }
+    for key in [
+        "claude",
+        "claude_x",
+        "codex",
+        "codex_x",
+        "antigravity",
+        "antigravity_o",
+        "agy_external",
+        "agy_external_o",
+    ] {
+        assert_eq!(
+            context.get(&format!("display.bar_width.{key}")),
+            Some(compact_bar_full_width(widget_count(Some(&data), runtime)))
+        );
+    }
+    for id in [
+        "split-claude_x-claude-session-segments-dark",
+        "split-codex_x-codex-session-segments-dark",
+        "split-antigravity_o-antigravity-session-gemini-solo-dark",
+    ] {
+        let object = theme.surfaces[0]
+            .children
+            .iter()
+            .find(|object| object.id == id)
+            .unwrap();
+        let SceneContent::Progress {
+            segments_expression: Some(expression),
+            ..
+        } = &object.content
+        else {
+            panic!("{id}")
+        };
+        assert_eq!(
+            evaluate(&expression.0, &context).unwrap(),
+            compact_bar_cubes(widget_count(Some(&data), runtime))
+        );
+    }
+    let hovered = DataContext::from_usage_with_runtime(
+        Some(&data),
+        &Canvas::default(),
+        ThemeRuntime {
+            crossfade_opacity: 0.0,
+            ..runtime
+        },
+    );
+    assert_eq!(hovered.get("antigravity.hover_phase"), Some(1.0));
+    assert_eq!(hovered.get("antigravity.external.opacity"), Some(1.0));
 }
 
 #[test]

@@ -3084,81 +3084,42 @@ fn render_layered_impl(trigger: RenderTrigger) {
                 trigger == RenderTrigger::Full
                     || state.widget_animations.iter().any(Option::is_some)
             }) {
-                if state.antigravity_tile_rect.is_none() {
-                    state.antigravity_tile_rect = theme_engine::object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        usage_data.as_ref(),
-                        surface_runtime,
+                if state.antigravity_tile_rect.is_none()
+                    || state.claude_tile_rect.is_none()
+                    || state.codex_tile_rect.is_none()
+                    || state.opencode_tile_rect.is_none()
+                    || state.qoder_tile_rect.is_none()
+                    || state.agy_external_tile_rect.is_none()
+                    || state.split_hovers.iter().any(|hover| hover.rect.is_none())
+                {
+                    let ids = [
                         mouse::ANTIGRAVITY_HOVER_OBJECT,
-                        &surface_metrics,
-                    );
-                }
-                if state.claude_tile_rect.is_none() {
-                    state.claude_tile_rect = theme_engine::object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        usage_data.as_ref(),
-                        surface_runtime,
                         mouse::CLAUDE_HOVER_OBJECT,
-                        &surface_metrics,
-                    );
-                }
-                if state.codex_tile_rect.is_none() {
-                    state.codex_tile_rect = theme_engine::object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        usage_data.as_ref(),
-                        surface_runtime,
                         mouse::CODEX_HOVER_OBJECT,
-                        &surface_metrics,
-                    );
-                }
-                if state.opencode_tile_rect.is_none() {
-                    state.opencode_tile_rect = theme_engine::object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        usage_data.as_ref(),
-                        surface_runtime,
                         mouse::OPENCODE_HOVER_OBJECT,
-                        &surface_metrics,
-                    );
-                }
-                if state.qoder_tile_rect.is_none() {
-                    state.qoder_tile_rect = theme_engine::object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        usage_data.as_ref(),
-                        surface_runtime,
                         mouse::QODER_HOVER_OBJECT,
-                        &surface_metrics,
-                    );
-                }
-                if state.agy_external_tile_rect.is_none() {
-                    state.agy_external_tile_rect = theme_engine::object_bounds_with_metrics(
+                        mouse::AGY_EXTERNAL_HOVER_OBJECT,
+                        "claude_x-provider",
+                        "antigravity_o-provider",
+                        "agy_external_o-provider",
+                        "codex_x-provider",
+                    ];
+                    let bounds = theme_engine::object_bounds_for_ids_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
-                        mouse::AGY_EXTERNAL_HOVER_OBJECT,
+                        &ids,
                         &surface_metrics,
                     );
-                }
-                for (hover, id) in state.split_hovers.iter_mut().zip([
-                    "claude_x-provider",
-                    "antigravity_o-provider",
-                    "agy_external_o-provider",
-                    "codex_x-provider",
-                ]) {
-                    if hover.rect.is_none() {
-                        hover.rect = theme_engine::object_bounds_with_metrics(
-                            &theme,
-                            0,
-                            usage_data.as_ref(),
-                            surface_runtime,
-                            id,
-                            &surface_metrics,
-                        );
+                    state.antigravity_tile_rect = bounds[0];
+                    state.claude_tile_rect = bounds[1];
+                    state.codex_tile_rect = bounds[2];
+                    state.opencode_tile_rect = bounds[3];
+                    state.qoder_tile_rect = bounds[4];
+                    state.agy_external_tile_rect = bounds[5];
+                    for (hover, rect) in state.split_hovers.iter_mut().zip(&bounds[6..]) {
+                        hover.rect = *rect;
                     }
                 }
             }

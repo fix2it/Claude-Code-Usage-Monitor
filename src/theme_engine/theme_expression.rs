@@ -510,9 +510,20 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
                 && !id.is_empty()
                 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         });
+    // Split widgets use the same usage formatting as their source provider;
+    // only lookup keys differ between the copies.
+    let canonical_provider = if provider == "claude_x" {
+        "claude".to_string()
+    } else if provider == "codex_x" {
+        "codex".to_string()
+    } else if let Some(suffix) = provider.strip_prefix("antigravity_o") {
+        format!("antigravity{suffix}")
+    } else {
+        provider.to_string()
+    };
     if (!named_account
         && !matches!(
-            provider,
+            canonical_provider.as_str(),
             "active"
                 | "claude"
                 | "codex"
@@ -538,7 +549,9 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
         return None;
     }
     let scoped_error = context.get(&format!("{provider}.has_error")).or_else(|| {
-        if provider.starts_with("antigravity.") {
+        if provider.starts_with("antigravity_o.") {
+            context.get("antigravity_o.has_error")
+        } else if provider.starts_with("antigravity.") {
             context.get("antigravity.has_error")
         } else {
             None
@@ -551,7 +564,14 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
     // A pool Antigravity did not report, while Antigravity itself answered, is
     // "no limit data", not an error.
     if provider.starts_with("antigravity")
-        && context.get("antigravity.reported").unwrap_or(0.0) != 0.0
+        && context
+            .get(if provider.starts_with("antigravity_o") {
+                "antigravity_o.reported"
+            } else {
+                "antigravity.reported"
+            })
+            .unwrap_or(0.0)
+            != 0.0
         && (!available || context.get(&format!("{provider}.{window}.available")) == Some(0.0))
     {
         return Some("--".into());

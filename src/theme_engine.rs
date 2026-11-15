@@ -1158,8 +1158,9 @@ pub struct RenderedTheme {
 
 #[derive(Clone, Debug, Default)]
 pub struct DataContext {
-    values: HashMap<String, f64>,
-    strings: HashMap<String, String>,
+    values: Arc<HashMap<String, f64>>,
+    strings: Arc<HashMap<String, String>>,
+    geometry_values: HashMap<String, f64>,
     force_segoe_ui: bool,
     display_metrics: Option<DisplayMetrics>,
 }
@@ -2671,7 +2672,8 @@ impl DataContext {
             "parent.width",
             "parent.height",
         ] {
-            context.values.remove(name);
+            Arc::make_mut(&mut context.values).remove(name);
+            context.geometry_values.remove(name);
         }
         evaluate(&expression.0, &context)
             .ok()
@@ -3071,8 +3073,8 @@ impl DataContext {
                     "scoped.",
                 ] {
                     let prefix = format!("{owner}.{field}");
-                    context.values.retain(|key, _| !key.starts_with(&prefix));
-                    context.strings.retain(|key, _| !key.starts_with(&prefix));
+                    Arc::make_mut(&mut context.values).retain(|key, _| !key.starts_with(&prefix));
+                    Arc::make_mut(&mut context.strings).retain(|key, _| !key.starts_with(&prefix));
                 }
             }
             context.copy_prefix("accounts.claude.default.", "claude.");
@@ -3095,8 +3097,10 @@ impl DataContext {
                         "credits.",
                     ] {
                         let prefix = format!("{owner}.{field}");
-                        context.values.retain(|key, _| !key.starts_with(&prefix));
-                        context.strings.retain(|key, _| !key.starts_with(&prefix));
+                        Arc::make_mut(&mut context.values)
+                            .retain(|key, _| !key.starts_with(&prefix));
+                        Arc::make_mut(&mut context.strings)
+                            .retain(|key, _| !key.starts_with(&prefix));
                     }
                 }
                 context.copy_prefix("accounts.codex.default.", "codex.");
@@ -3108,19 +3112,34 @@ impl DataContext {
             context.insert_hover_crossfade("codex_x", phase);
         }
         if agy_separate(data, runtime) {
-            context.insert("antigravity.gemini.opacity", 1.0);
-            context.insert("antigravity.external.opacity", 0.0);
-            let mut single = runtime;
-            single.antigravity_pools_one_widget = true;
-            single.antigravity_a_enabled = false;
-            single.antigravity_external_enabled = runtime.antigravity_external_x_enabled;
-            let other = Self::from_usage_with_runtime(data, canvas, single);
-            context.copy_prefix_from(&other, "antigravity.", "antigravity_o.");
+            // Build pool O through the same provider insertion path as A,
+            // without rebuilding every unrelated provider and animation binding.
+            let account = data.and_then(AppUsageData::antigravity_x);
+            let pool = account.and_then(|account| account.usage.as_ref());
+            let external = pool.and_then(|usage| usage.external_pool.as_deref());
+            for (key, usage) in [
+                ("antigravity_o", pool),
+                ("antigravity_o.gemini", pool),
+                ("antigravity_o.external", external),
+                ("antigravity_o.row1h", pool),
+                ("antigravity_o.row2", external),
+                ("antigravity_o.row2h", external),
+            ] {
+                context.insert_provider(key, usage, false, runtime.countdown);
+            }
+            context.insert("antigravity_o.reported", pool.is_some() as u8 as f64);
+            Arc::make_mut(&mut context.values).remove("antigravity_o.has_error");
+            if let Some(account) = account {
+                context.insert(
+                    "antigravity_o.has_error",
+                    account.error.is_some() as u8 as f64,
+                );
+            }
             let phase = runtime.split_hover_phases[1].clamp(0.0, 1.0);
             context.insert("antigravity_o.hover_phase", phase);
-            context.insert_hover_crossfade("antigravity_o", phase);
-            context.insert("antigravity_o.gemini.opacity", 1.0);
-            context.insert("antigravity_o.external.opacity", 0.0);
+            let (normal, hover) = context.insert_hover_crossfade("antigravity_o", phase);
+            context.insert("antigravity_o.gemini.opacity", normal);
+            context.insert("antigravity_o.external.opacity", hover);
             context.insert("antigravity_o.dual_mode", 0.0);
             context.insert(
                 "antigravity.external_a.shown",
@@ -3141,22 +3160,24 @@ impl DataContext {
     }
 
     fn copy_prefix(&mut self, source: &str, target: &str) {
-        let clone = self.clone();
-        self.copy_prefix_from(&clone, source, target);
-    }
-
-    fn copy_prefix_from(&mut self, other: &Self, source: &str, target: &str) {
-        for (key, value) in &other.values {
-            if let Some(suffix) = key.strip_prefix(source) {
-                self.values.insert(format!("{target}{suffix}"), *value);
-            }
-        }
-        for (key, value) in &other.strings {
-            if let Some(suffix) = key.strip_prefix(source) {
-                self.strings
-                    .insert(format!("{target}{suffix}"), value.clone());
-            }
-        }
+        let values: Vec<_> = self
+            .values
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix(source)
+                    .map(|suffix| (format!("{target}{suffix}"), *value))
+            })
+            .collect();
+        let strings: Vec<_> = self
+            .strings
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix(source)
+                    .map(|suffix| (format!("{target}{suffix}"), value.clone()))
+            })
+            .collect();
+        Arc::make_mut(&mut self.values).extend(values);
+        Arc::make_mut(&mut self.strings).extend(strings);
     }
 
     /// Sources of the agy two-row layout. Row 1 is always pool A's Gemini
@@ -3530,10 +3551,18 @@ impl DataContext {
     }
 
     pub fn insert(&mut self, name: &str, value: f64) {
-        self.values.insert(name.to_ascii_lowercase(), value);
+        let key = name.to_ascii_lowercase();
+        if key.starts_with("parent.") || key.starts_with("this.") || key.starts_with("object.") {
+            self.geometry_values.insert(key, value);
+        } else {
+            Arc::make_mut(&mut self.values).insert(key, value);
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<f64> {
+        if let Some(value) = self.geometry_values.get(name).copied() {
+            return Some(value);
+        }
         if let Some(value) = self.values.get(name).copied() {
             return Some(value);
         }
@@ -3545,9 +3574,10 @@ impl DataContext {
             return Some(value);
         }
         let name = name.to_ascii_lowercase();
-        self.values
+        self.geometry_values
             .get(&name)
             .copied()
+            .or_else(|| self.values.get(&name).copied())
             .or_else(|| self.limit_default(&name))
             .or_else(|| {
                 let key = Self::account_default_key(&name)?;
@@ -3565,7 +3595,7 @@ impl DataContext {
     }
 
     pub fn insert_string(&mut self, name: &str, value: impl Into<String>) {
-        self.strings.insert(name.to_ascii_lowercase(), value.into());
+        Arc::make_mut(&mut self.strings).insert(name.to_ascii_lowercase(), value.into());
     }
 
     pub fn get_string(&self, name: &str) -> Option<&str> {
@@ -4682,8 +4712,9 @@ pub(crate) fn hit_test_widget_with_metrics(
         .into_iter()
         .rev()
         .find(|object| {
-            crate::app_settings::widget_mode_keys()
-                .any(|key| object.source.id == format!("{key}-provider"))
+            (object.source.id == ANTIGRAVITY_EXTERNAL_WIDGET
+                || crate::app_settings::widget_mode_keys()
+                    .any(|key| object.source.id == format!("{key}-provider")))
                 && object.opacity > 0.0
                 && object.width > 0.0
                 && object.height > 0.0

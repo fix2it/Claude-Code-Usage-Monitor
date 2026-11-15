@@ -423,9 +423,27 @@ pub fn object_bounds_with_metrics(
     object_id: &str,
     metrics: &DisplayMetrics,
 ) -> Option<(f64, f64, f64, f64)> {
-    let surface = theme.surfaces.get(surface_index)?;
+    object_bounds_for_ids_with_metrics(theme, surface_index, data, runtime, &[object_id], metrics)
+        .into_iter()
+        .next()
+        .flatten()
+}
+
+/// Resolve the scene once for all hover targets, rather than once per target.
+pub(crate) fn object_bounds_for_ids_with_metrics(
+    theme: &ThemeDocument,
+    surface_index: usize,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    object_ids: &[&str],
+    metrics: &DisplayMetrics,
+) -> Vec<Option<(f64, f64, f64, f64)>> {
+    let empty = || vec![None; object_ids.len()];
+    let Some(surface) = theme.surfaces.get(surface_index) else {
+        return empty();
+    };
     if !surface_should_render_with_metrics(theme, surface_index, data, runtime, metrics) {
-        return None;
+        return empty();
     }
     let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (width, height) = resolve_object_size_with_context(surface, &size_context, &mut Vec::new());
@@ -445,10 +463,15 @@ pub fn object_bounds_with_metrics(
         runtime,
         metrics,
     );
-    resolved
-        .into_iter()
-        .find(|object| object.source.id == object_id && object.width > 0.0 && object.height > 0.0)
-        .map(|object| (object.x + padding, object.y, object.width, object.height))
+    object_ids
+        .iter()
+        .map(|id| {
+            resolved
+                .iter()
+                .find(|object| object.source.id == *id && object.width > 0.0 && object.height > 0.0)
+                .map(|object| (object.x + padding, object.y, object.width, object.height))
+        })
+        .collect()
 }
 
 #[cfg(test)]
