@@ -22,6 +22,7 @@ one, are removed.
 
 OpenCode Go is supported too. Cursor, Grok Build, and GitHub Copilot support is
 inherited from the original project and is untested in this fork. See the
+[user guide](USER_GUIDE.md) for everyday use and the
 [changelog](CHANGELOG.md) for version history and notable changes.
 
 ![Claude Code Usage Monitor running in the Windows taskbar](.github/animation.gif)

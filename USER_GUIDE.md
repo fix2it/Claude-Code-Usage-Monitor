@@ -1,96 +1,109 @@
 # User guide
 
-Start here to customise Claude Code Usage Monitor and adjust its everyday settings.
-For installation and provider sign-in requirements, see the [README](README.md).
-The instructions below use the app's English labels.
+Everyday use of this fork of Claude Code Usage Monitor: the widget, its context
+menu, pools, view modes and settings. For installation and provider sign-in,
+see the [README](README.md). The instructions use the app's English labels.
 
 ## Contents
 
-- [Open the dashboard](#open-the-dashboard)
-- [Duplicate and customise a built-in theme](#duplicate-and-customise-a-built-in-theme)
-- [Choose providers and refresh usage](#choose-providers-and-refresh-usage)
+- [The widget](#the-widget)
+- [Switch view modes](#switch-view-modes)
+- [Choose providers and pools](#choose-providers-and-pools)
+- [Fable and external models](#fable-and-external-models)
+- [Pace ticks](#pace-ticks)
+- [Settings menu](#settings-menu)
+- [Settings window](#settings-window)
 - [Show used or remaining allowance](#show-used-or-remaining-allowance)
+- [Themes](#themes)
 - [Windows VM testing for developers](#windows-vm-testing-for-developers)
 
-## Open the dashboard
+## The widget
 
-With the default theme, right-click a provider icon in the Windows system tray
-and choose **Open Dashboard**. If the icon is hidden, look in the tray's overflow
-menu beside the clock.
+The widget sits in the Windows taskbar and shows one tile per provider or pool:
+a gauge for each limit window and the time until it resets. The fork ships one
+theme, Compact Fluent Quad, in a horizontal taskbar layout. Rows are sized from
+the text they actually show, so the widget is only as wide as it needs to be.
 
-You can also open the dashboard from PowerShell:
+- **Left-click** a widget to change its view mode.
+- **Mouse wheel** over a widget steps its view mode up or down.
+- **Right-click** the widget to open the context menu.
+- **Hover** a tile to see its other pool or labels, where a tile has them, and
+  a tooltip with the latest reading or error.
+
+## Switch view modes
+
+Each widget has three compact view modes that trade bar width against text.
+
+- A click moves to the next mode and bounces at the ends: 1, 2, 3, 2, 1, ...
+- The wheel moves one step toward mode 1 (wheel up) or mode 3 (wheel down).
+- Only the widget under the cursor changes. Hold **Shift** to change all
+  widgets to the same mode.
+
+Each widget's mode is saved and restored after a restart.
+
+## Choose providers and pools
+
+Right-click the widget and open **Providers**. Claude Code and Codex each have
+two pools, **Main** and **X**; Antigravity has **Main** and **OpenCode**:
+
+| Menu item | What it shows |
+| --- | --- |
+| **Claude Code (Main)**, **Claude Code X** | Two Claude Code profiles: the default one and a second one in `~/.claude_x`. Sign each in to the account you want. |
+| **Codex (Main)**, **Codex X** | Two Codex profiles: the default one and a second one in `~/.codex_x`. |
+| **Antigravity (Main)** | Antigravity pool A, from Antigravity's own sign-in. |
+| **Antigravity (OpenCode)** | Pool O, read-only from the Google token that OpenCode stores. It is never refreshed by the monitor; when the token is missing or expired the pool shows no data, and it is hidden when it matches pool A. |
+| **OpenCode**, **Qoder** | OpenCode Go and Qoder usage. |
+| **Cursor**, **Grok**, **Copilot** | Inherited from the original project; untested in this fork. |
+
+With both pools of a provider enabled, the indented **Pools on one widget**
+item appears under it (the bundled theme supports it; a user theme may not). On (the default), both pools share one widget. Off,
+each pool gets its own widget with its own view mode.
+
+## Fable and external models
+
+Under each Claude pool, the indented **Fable** item shows that pool's Fable
+usage. With one Claude pool, Fable is a third row of the Claude widget. With
+two pools combined, their Fable rows share a separate widget; with pools
+split, each pool's widget holds its own Fable row.
+
+Under each Antigravity pool, **External models** shows the Claude/GPT usage of
+that pool. With pools split, each pool's external models are a row inside its
+own widget. With pools combined, the external models of both pools share a
+separate widget, which has its own hover.
+
+## Pace ticks
+
+**Settings > Show pace** draws a thin tick on usage gauges at the share of the
+limit window that has already passed (with **Remaining** direction, the share
+still left). With **Used**, a bar past the tick means you are using the
+allowance faster than the window elapses; with **Remaining**, a bar past the
+tick means you are using it more slowly. Ticks are hidden when a provider
+reports no window start, and in the view mode that shows bars only. Qoder reports only reset
+dates, so its pace assumes a 30-day window.
+
+## Settings menu
+
+The context menu's **Settings** submenu has **Start with Windows**, **Lock in
+taskbar**, **Show pace**, **Language**, and **Check for updates**. **Update
+frequency** sets how often usage is refreshed (every minute, 5 or 15 minutes,
+or every hour); **Refresh** fetches usage now. Qoder is probed at most every
+15 minutes whatever the frequency.
+
+**Check for updates** looks only at this fork's
+[GitHub Releases](https://github.com/fix2it/Claude-Code-Usage-Monitor/releases).
+
+## Settings window
+
+Choose **Open Dashboard** from the context menu, or run:
 
 ```powershell
 claude-code-usage-monitor --dashboard
 ```
 
-For a portable download, run `.\claude-code-usage-monitor.exe --dashboard` from
-the folder containing the executable.
-
-## Duplicate and customise a built-in theme
-
-Built-in themes are read-only. Create an editable copy to make your own design;
-the original stays available to switch back to.
-
-### Create your copy
-
-1. Open **Theme Studio** from the dashboard's navigation.
-2. In the **Theme** dropdown at the top, select the theme you want to start from,
-   such as **Compact Fluent Quad**. Built-in themes are marked **(built-in)**.
-3. Click the toolbar's copy icon beside the theme dropdown. Hover over it to see
-   the **Duplicate...** tooltip. Use this top toolbar control to copy the whole
-   theme; the **Duplicate** control beneath the layer list copies a layer.
-4. In **Duplicate theme**, enter a name such as `My theme`, then click
-   **Create copy**.
-
-The app saves your copy, selects it in Theme Studio, and makes it the active
-theme. Its controls are now editable.
-
-### Make and save a change
-
-1. Select a layer in the tree on the left. Expand its arrow to find nested layers.
-2. Use the inspector on the right to edit the selected layer. Start with a small
-   change, such as a colour or text size, and check the preview in the centre.
-   **Appearance** contains appearance controls; **Positioning** contains layout
-   controls. The available fields depend on the selected layer.
-3. Click the toolbar's disk icon, with the **Save** tooltip, to save your changes
-   and apply them to the running widget.
-
-**Live apply** is disabled by default. With it disabled, edits update the Studio
-preview until you click **Save**. Enable it to save and apply each edit
-automatically. Enabling it also saves any changes already waiting in the editor.
-
-Use the toolbar's **Undo** and **Redo** icons, or **Ctrl+Z** and **Ctrl+Y**, to
-reverse or restore edits. With Live apply disabled, save again to apply an undo
-to the running widget. If you close the dashboard or switch themes with unsaved
-changes, choose **Save and continue**, **Discard changes**, or **Cancel**.
-
-### Switch back to a built-in theme
-
-Select the original theme from the **Theme** dropdown in Theme Studio. You can
-also choose it under **Settings > Appearance > Active theme**. Switching applies
-the selected theme; your saved custom copy remains available in the dropdown.
-
-Custom theme files are stored in:
-
-```text
-%APPDATA%\ClaudeCodeUsageMonitor\themes
-```
-
-## Choose providers and refresh usage
-
-1. Sign in to the provider you want to monitor using its own app or CLI. See
-   [Provider setup](README.md#provider-setup) for provider-specific requirements.
-2. Open **Settings** and find **Providers**. Enable the providers you want to
-   monitor and disable any you do not use.
-3. Under **Settings > General**, set **Update frequency** to the number of
-   minutes between usage refreshes. This controls usage polling, not checks for
-   new app versions.
-4. Click **Refresh now** beside that setting when you want a fresh reading
-   without waiting for the next scheduled refresh.
-
-These settings save automatically. The default theme adapts to enabled providers;
-a custom theme must include layers for the providers you want to display.
+The window has two pages, **Settings** and **Diagnostics**. Settings covers
+providers and accounts, update frequency, language, startup, the taskbar lock,
+and usage direction. Diagnostics records polling errors when you enable it; see
+[Troubleshooting](README.md#troubleshooting).
 
 ## Show used or remaining allowance
 
@@ -102,65 +115,13 @@ a custom theme must include layers for the providers you want to display.
 | **Used** (default) | How much of the allowance you have consumed. | After using 30%, the display reads 30%. |
 | **Remaining** | How much allowance is left. | After using 30%, the display reads 70%. |
 
-The setting saves automatically. The default theme and Compact Fluent Quad
-support both directions. Custom themes need to support this setting too; a
-theme that always displays consumed usage may stay unchanged. See the
-[theme binding notes](README.md#usage) if you are editing usage expressions.
+## Themes
 
-## Claude extra limits in custom themes
-
-Claude may report extra quotas in its usage API, including model-specific caps.
-These are available to custom themes. Built-in themes and the existing session,
-weekly, and headline bindings retain their current behaviour.
-
-After refreshing Claude usage, open the text editor's **Provider values** list or
-the expression editor's **Variables** panel and look under **Claude Code**.
-The text editor lists each reported quota with its summary, label, usage,
-remaining allowance, and reset formats. Select a value and format, then click
-**Insert value**. The expression editor also lists the exact binding keys. API quotas vary by account and may disappear or change over time.
-
-| Binding | Meaning |
-| --- | --- |
-| `claude.limits.count` | Number of parsed quotas, including standard windows when supplied in `limits[]`. |
-| `claude.limits.weekly_scoped_fable.*` | A specific quota from `limits[]`, using its kind and model name. |
-| `claude.model.fable.*` | Shortcut for a model's weekly quota, when unambiguous. |
-| `claude.scoped.*` | The single scoped quota marked `is_active` by the API. Unavailable if none or multiple are active. |
-| `claude.limits.seven_day_cowork.*` | An older optional top-level quota bucket, when reported. |
-
-The examples are illustrative; only quotas actually returned by the API have
-`available = 1`. No quota is inferred from a model name or subscription plan.
-Model names become lowercase keys with punctuation replaced by underscores:
-`Future Model 2` becomes `future_model_2`. Non-model scopes and colliding names
-have a stable hash suffix; use the exact key shown in the Variables panel.
-The array takes precedence over legacy Opus/Sonnet buckets for the same model.
-If multiple weekly quotas share a model key, use the full `limits` keys instead
-of the ambiguous model shortcut.
-
-Each quota exposes:
-
-- `available`, `percentage` (used), `remaining`, and `display` (follows Usage direction).
-- `is_active`, as supplied by the API; it is not inferred from the highest percentage.
-- `reset.unix`, `reset.seconds`, `reset.minutes`, `reset.hours`, and `reset.days`.
-- Text fields `label`, `kind`, `key`, `model_id`, and `scope` (the scope JSON, or empty).
-
-For a custom Fable bar, use `claude.model.fable.available` as the layer's
-**Render** expression and `claude.model.fable.display` as its progress value.
-A text layer can use:
-
-```text
-{claude.model.fable.label} {claude.model.fable.display:usage_line}
-```
-
-Omit `.display` to always show used usage. The `usage_badge` format is also
-supported. For a specific account, replace `claude` with its account binding,
-for example `accounts.claude.work.model.fable.percentage`. Each account keeps its
-own quotas; changing the default account updates the plain `claude.*` bindings.
-
-Missing quotas have `available = 0`, zero used usage/reset values, and empty
-metadata. Always gate optional layers on `available` so a missing quota is not
-presented as an unused allowance. These bindings validate even before login.
-Cached limits follow the existing stale-data behaviour; check `claude.stale`
-(or the account's `.stale`) when freshness matters.
+Theme Studio, the menu editor, and the other bundled themes were removed in
+this fork. A saved selection of a removed theme falls back to Compact Fluent
+Quad. Theme files you made yourself still load from the theme selector, but
+pool splitting, per-widget modes, and Fable rows need theme support; themes
+without it keep the combined layout.
 
 ## Windows VM testing for developers
 
