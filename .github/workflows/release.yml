@@ -42,6 +42,8 @@ jobs:
           generate_release_notes: true
 
   winget:
+    # The WinGet package ID belongs to upstream; never submit it from the fork.
+    if: github.repository == 'CodeZeno/Claude-Code-Usage-Monitor'
     needs: build
     runs-on: windows-latest
     env:

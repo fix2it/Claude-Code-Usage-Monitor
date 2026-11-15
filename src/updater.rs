@@ -44,6 +44,8 @@ use semver::Version;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallChannel {
     Portable,
+    // This fork has no WinGet package of its own: never route to upstream's ID.
+    #[cfg_attr(not(test), allow(dead_code))]
     Winget,
 }
 
@@ -116,10 +118,10 @@ fn parse_apply_update_args(
 }
 
 pub fn current_install_channel() -> InstallChannel {
-    match std::env::current_exe() {
-        Ok(path) if is_winget_install_path(&path) => InstallChannel::Winget,
-        _ => InstallChannel::Portable,
-    }
+    // Fork builds always update from the fork's GitHub Releases, even when the
+    // executable sits under a WinGet packages folder, so the upstream WinGet
+    // package can never replace them.
+    InstallChannel::Portable
 }
 
 pub fn check_for_updates(channel: InstallChannel) -> Result<UpdateCheckResult, String> {
@@ -533,63 +535,6 @@ fn github_repo() -> Result<(&'static str, &'static str), String> {
 
 fn user_agent() -> &'static str {
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
-}
-
-fn is_winget_install_path(path: &Path) -> bool {
-    let normalized_path = normalize_path(path);
-    winget_install_roots()
-        .into_iter()
-        .map(|root| normalize_path(&root))
-        .any(|root| {
-            normalized_path
-                .strip_prefix(&root)
-                .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('\\'))
-        })
-}
-
-fn winget_install_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        roots.push(
-            PathBuf::from(local_app_data)
-                .join("Microsoft")
-                .join("WinGet")
-                .join("Packages"),
-        );
-    }
-
-    if let Ok(program_files) = std::env::var("ProgramFiles") {
-        roots.push(PathBuf::from(program_files).join("WinGet").join("Packages"));
-    } else {
-        roots.push(PathBuf::from(r"C:\Program Files\WinGet\Packages"));
-    }
-
-    if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
-        roots.push(
-            PathBuf::from(program_files_x86)
-                .join("WinGet")
-                .join("Packages"),
-        );
-    } else {
-        roots.push(PathBuf::from(r"C:\Program Files (x86)\WinGet\Packages"));
-    }
-
-    roots
-}
-
-fn normalize_path(path: &Path) -> String {
-    let normalized = path
-        .to_string_lossy()
-        .replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_ascii_lowercase();
-
-    normalized
-        .strip_prefix("\\\\?\\unc\\")
-        .map(|rest| format!("\\\\{rest}"))
-        .or_else(|| normalized.strip_prefix("\\\\?\\").map(str::to_owned))
-        .unwrap_or(normalized)
 }
 
 fn show_error_message(title: &str, message: &str) {

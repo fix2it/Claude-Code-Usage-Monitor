@@ -207,3 +207,11 @@ fn malformed_versions_are_errors() {
         assert!(descriptor(fixture("v2.14.0"), version).is_err());
     }
 }
+
+#[test]
+fn github_repo_points_at_the_fork() {
+    assert_eq!(
+        github_repo().unwrap(),
+        ("fix2it", "Claude-Code-Usage-Monitor")
+    );
+}

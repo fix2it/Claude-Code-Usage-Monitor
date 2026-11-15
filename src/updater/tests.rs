@@ -101,55 +101,8 @@ fn updater_agent_rejects_plain_http() {
 }
 
 #[test]
-fn is_winget_install_path_accepts_configured_roots_and_descendants() {
-    // Read the configured roots without mutating process-wide environment variables.
-    let roots = winget_install_roots();
-    assert!(!roots.is_empty());
-    for root in roots {
-        assert!(is_winget_install_path(&root), "root: {}", root.display());
-        let executable = root
-            .join("CodeZeno.ClaudeCodeUsageMonitor_source")
-            .join("app.exe");
-        let path = executable.to_string_lossy();
-        for variant in [
-            path.to_string(),
-            path.to_ascii_uppercase(),
-            path.replace('\\', "/"),
-            format!("{path}\\"),
-            format!(r"\\?\{path}"),
-        ] {
-            assert!(
-                is_winget_install_path(Path::new(&variant)),
-                "path: {variant}"
-            );
-        }
-    }
-}
-
-#[test]
-fn is_winget_install_path_rejects_siblings_with_the_same_prefix() {
-    for root in winget_install_roots() {
-        for suffix in ["-old", "Backup", ".old"] {
-            let sibling = format!("{}{suffix}\\app.exe", root.display());
-            assert!(
-                !is_winget_install_path(Path::new(&sibling)),
-                "path: {sibling}"
-            );
-        }
-        assert!(!is_winget_install_path(root.parent().unwrap()));
-    }
-}
-
-#[test]
-fn is_winget_install_path_rejects_portable_and_empty_paths() {
-    for path in [
-        "",
-        "app.exe",
-        r"C:\Portable\app.exe",
-        r"C:\Downloads\WinGet\Packages\app.exe",
-    ] {
-        assert!(!is_winget_install_path(Path::new(path)), "path: {path:?}");
-    }
+fn install_channel_is_always_portable_for_the_fork() {
+    assert_eq!(current_install_channel(), InstallChannel::Portable);
 }
 
 #[test]
