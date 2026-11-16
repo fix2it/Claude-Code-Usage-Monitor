@@ -687,6 +687,92 @@ pub fn resolve_context_menu(reference: Option<&str>) -> Result<ContextMenuDocume
     }
 }
 
+/// Size and modification time of every file in the menus directory. A right
+/// click compares this cheap listing instead of re-reading, re-parsing and
+/// re-validating every menu file (F19). Any edit, addition or removal (also of
+/// a built-in file, which `ensure_builtin_context_menus` would restore)
+/// changes the fingerprint and forces a full resolve. Without a modification
+/// time there is no fingerprint and every click reads the files as before.
+/// Known limit: an edit that keeps both the size and the timestamp (a tool
+/// that deliberately restores mtime) is not seen until another change.
+type MenuDirectoryFingerprint = Vec<(PathBuf, u64, std::time::SystemTime)>;
+
+fn menu_directory_fingerprint() -> Option<MenuDirectoryFingerprint> {
+    let mut entries = std::fs::read_dir(context_menus_directory())
+        .ok()?
+        .map(|entry| {
+            let path = entry.ok()?.path();
+            // Follow symbolic links, as loading the menu does.
+            let metadata = std::fs::metadata(&path).ok()?;
+            Some((path, metadata.len(), metadata.modified().ok()?))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    entries.sort();
+    Some(entries)
+}
+
+struct CachedMenu<F> {
+    reference: String,
+    fingerprint: F,
+    document: ContextMenuDocument,
+}
+
+/// One resolved menu, valid while the reference and fingerprint match.
+struct MenuCache<F> {
+    entry: Option<CachedMenu<F>>,
+}
+
+impl<F: PartialEq> MenuCache<F> {
+    const fn new() -> Self {
+        Self { entry: None }
+    }
+
+    fn get(&self, reference: &str, fingerprint: &F) -> Option<ContextMenuDocument> {
+        self.entry
+            .as_ref()
+            .filter(|entry| entry.reference == reference && &entry.fingerprint == fingerprint)
+            .map(|entry| entry.document.clone())
+    }
+
+    fn store(&mut self, reference: &str, fingerprint: F, document: ContextMenuDocument) {
+        self.entry = Some(CachedMenu {
+            reference: reference.to_string(),
+            fingerprint,
+            document,
+        });
+    }
+}
+
+static MENU_CACHE: std::sync::Mutex<MenuCache<MenuDirectoryFingerprint>> =
+    std::sync::Mutex::new(MenuCache::new());
+
+/// `resolve_context_menu` with a cache for the right-click path. Errors are
+/// never cached, so a broken menu is re-read (and logged) on every click as
+/// before.
+pub fn resolve_context_menu_cached(reference: Option<&str>) -> Result<ContextMenuDocument, String> {
+    let key = reference.unwrap_or(CLASSIC_CONTEXT_MENU_ID).trim();
+    let before = menu_directory_fingerprint();
+    if let Some(fingerprint) = before.as_ref() {
+        let cache = MENU_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(document) = cache.get(key, fingerprint) {
+            return Ok(document);
+        }
+    }
+    let document = resolve_context_menu(reference)?;
+    // Cache only when the directory did not change while it was read. When
+    // the resolve itself restored a built-in file, the next click caches.
+    if let (Some(before), Some(after)) = (before, menu_directory_fingerprint()) {
+        if before == after {
+            MENU_CACHE.lock().unwrap_or_else(|e| e.into_inner()).store(
+                key,
+                after,
+                document.clone(),
+            );
+        }
+    }
+    Ok(document)
+}
+
 fn canonical_context_menu_reference(reference: &str) -> &str {
     match reference {
         reference if reference.eq_ignore_ascii_case(LEGACY_CLASSIC_CONTEXT_MENU_ID) => {
@@ -1122,5 +1208,24 @@ mod tests {
             item.render = Expression(render.into());
             assert_eq!(item.should_render(&context), visible);
         }
+    }
+
+    #[test]
+    fn menu_cache_hits_only_for_same_reference_and_fingerprint() {
+        let mut cache = MenuCache::<u32>::new();
+        assert!(cache.get("classic", &1).is_none());
+        cache.store("classic", 1, classic_context_menu());
+        assert_eq!(cache.get("classic", &1), Some(classic_context_menu()));
+        assert!(
+            cache.get("classic", &2).is_none(),
+            "changed files must miss"
+        );
+        assert!(
+            cache.get("other", &1).is_none(),
+            "other reference must miss"
+        );
+        cache.store("classic", 2, dashboard_v2_context_menu());
+        assert!(cache.get("classic", &1).is_none());
+        assert_eq!(cache.get("classic", &2), Some(dashboard_v2_context_menu()));
     }
 }

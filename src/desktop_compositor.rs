@@ -127,7 +127,11 @@ impl DesktopPresenter {
             rendered.width.saturating_mul(4),
             0,
         );
-        self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()?;
+        // Sync interval 0: this runs on the UI thread, and a composition
+        // flip-model swap chain never tears, because DWM picks the frame up at
+        // its own vsync. Interval 1 only made the UI thread wait for the next
+        // vblank on every desktop paint (F55).
+        self.swap_chain.Present(0, DXGI_PRESENT(0)).ok()?;
         self.composition.Commit()
     }
 }
