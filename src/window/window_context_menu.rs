@@ -526,48 +526,16 @@ pub(super) fn context_menu_checked_with_origin(
         }
         ContextMenuAction::ToggleAntigravityExternalX => state.show_antigravity_external_x,
         ContextMenuAction::ToggleClaudeMain => {
-            state.providers.contains(ProviderId::Claude)
-                && state
-                    .accounts
-                    .claude
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == "default")
-                    .map(|p| p.enabled)
-                    .unwrap_or(true)
+            state.is_account_profile_enabled(ProviderId::Claude, "default", true)
         }
         ContextMenuAction::ToggleClaudeX => {
-            state.providers.contains(ProviderId::Claude)
-                && state
-                    .accounts
-                    .claude
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == "claude_x")
-                    .map(|p| p.enabled)
-                    .unwrap_or(false)
+            state.is_account_profile_enabled(ProviderId::Claude, "claude_x", false)
         }
         ContextMenuAction::ToggleCodexMain => {
-            state.providers.contains(ProviderId::Codex)
-                && state
-                    .accounts
-                    .codex
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == "default")
-                    .map(|p| p.enabled)
-                    .unwrap_or(true)
+            state.is_account_profile_enabled(ProviderId::Codex, "default", true)
         }
         ContextMenuAction::ToggleCodexX => {
-            state.providers.contains(ProviderId::Codex)
-                && state
-                    .accounts
-                    .codex
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == "codex_x")
-                    .map(|p| p.enabled)
-                    .unwrap_or(false)
+            state.is_account_profile_enabled(ProviderId::Codex, "codex_x", false)
         }
         ContextMenuAction::ToggleStartup => is_startup_enabled(),
         ContextMenuAction::ToggleTaskbarLock => state.lock_taskbar,
