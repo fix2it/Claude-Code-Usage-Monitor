@@ -1675,13 +1675,14 @@ fn tray_failures(
             })
         })
     };
-    // A provider without profiles that failed while others answered (its
-    // last reading carried in as stale), then a whole failed poll.
+    // A whole failed poll (the newest error) first, then a provider without
+    // profiles that failed while others answered earlier (its last reading
+    // carried in as stale).
     let provider_errors = data
         .into_iter()
         .flat_map(|data| data.provider_errors())
         .map(|(provider, error)| poller::PollFailure { provider, error });
-    for failure in provider_errors.chain(failure) {
+    for failure in failure.into_iter().chain(provider_errors) {
         if providers.contains(failure.provider)
             && !explained_by_account(failure.provider)
             && !failures
@@ -5109,6 +5110,15 @@ mod tray_usage_summary_tests {
             assert_eq!(lines.len(), 1, "{lines:?}");
             assert!(lines[0].ends_with("no connection"), "{lines:?}");
             assert!(lines[0].to_lowercase().starts_with("cursor"), "{lines:?}");
+
+            // A later whole-poll failure of Cursor replaces the older reason.
+            let newer = Some(crate::poller::PollFailure {
+                provider: ProviderId::Cursor,
+                error: PollError::AuthRequired,
+            });
+            let lines = tray_short_error_lines(Some(&data), newer, providers, LanguageId::English);
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].ends_with("sign in again"), "{lines:?}");
 
             // The next poll with Cursor back clears the failure.
             let progress: AppUsageData = [(ProviderId::Cursor, usage(31.0, 41.0, None))]
