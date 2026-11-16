@@ -11,7 +11,7 @@ pub(super) fn request_scheduled_poll(hwnd: HWND) {
     request_poll_inner(hwnd, false);
 }
 
-pub(super) fn request_poll_inner(hwnd: HWND, queue_if_busy: bool) {
+fn request_poll_inner(hwnd: HWND, queue_if_busy: bool) {
     if POLL_IN_FLIGHT
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -29,7 +29,7 @@ pub(super) fn request_poll_inner(hwnd: HWND, queue_if_busy: bool) {
 /// Run credential watching under the same in-flight guard as usage polling.
 /// Timer ticks cannot pile up workers, and manual refreshes still queue behind
 /// a slow credential scan. Credential changes do not synthesize manual actions.
-pub(super) fn poll_worker(send_hwnd: SendHwnd, scheduled: bool) {
+fn poll_worker(send_hwnd: SendHwnd, scheduled: bool) {
     run_poll_worker(&POLL_IN_FLIGHT, &POLL_PENDING, scheduled, |scheduled| {
         if !scheduled || scheduled_poll_needed() {
             do_poll_once(send_hwnd.to_hwnd());
@@ -68,7 +68,7 @@ pub(super) fn run_poll_worker(
     }
 }
 
-pub(super) fn scheduled_poll_needed() -> bool {
+fn scheduled_poll_needed() -> bool {
     let watch = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
@@ -96,7 +96,7 @@ pub(super) fn scheduled_poll_needed() -> bool {
         })
 }
 
-pub(super) fn is_partial_poll_retry_error(error: poller::PollError) -> bool {
+fn is_partial_poll_retry_error(error: poller::PollError) -> bool {
     matches!(
         error,
         poller::PollError::NetworkError | poller::PollError::HttpStatus(429 | 500..=599)
@@ -153,31 +153,31 @@ impl PollRequest {
     }
 }
 
-pub(super) fn do_poll_once(hwnd: HWND) {
-    let poll_started = Instant::now();
-    let (enabled_providers, accounts, previous, force) = {
-        let mut state = lock_state();
-        state
-            .as_mut()
-            .map(|state| {
-                (
-                    state.providers,
-                    state.accounts.clone(),
-                    state.data.clone(),
-                    std::mem::take(&mut state.force_notify_auth_error),
-                )
-            })
-            .unwrap_or_default()
-    };
-    let request = PollRequest {
-        providers: enabled_providers,
-        accounts,
-        previous,
-        force,
-        started: poll_started,
+fn do_poll_once(hwnd: HWND) {
+    let started = Instant::now();
+    let request = match lock_state().as_mut() {
+        Some(state) => PollRequest {
+            providers: state.providers,
+            accounts: state.accounts.clone(),
+            previous: state.data.clone(),
+            force: std::mem::take(&mut state.force_notify_auth_error),
+            started,
+        },
+        None => PollRequest {
+            providers: ProviderSet::default(),
+            accounts: Default::default(),
+            previous: None,
+            force: false,
+            started,
+        },
     };
 
-    diagnose::log_lazy(|| format!("poll started providers={enabled_providers:?} force={force}"));
+    diagnose::log_lazy(|| {
+        format!(
+            "poll started providers={:?} force={}",
+            request.providers, request.force
+        )
+    });
     let result = poller::poll(
         request.providers,
         &request.accounts,
@@ -189,6 +189,14 @@ pub(super) fn do_poll_once(hwnd: HWND) {
         Ok(data) => apply_poll_success(hwnd, &request, data),
         Err(failure) => apply_poll_failure(hwnd, &request, failure),
     }
+}
+
+/// Store that the poll produced a reading now.
+fn mark_poll_ok(state: &mut AppState) {
+    invalidate_metrics(state);
+    state.last_poll_ok = true;
+    state.last_poll_failure = None;
+    state.last_poll_ok_at = Some(SystemTime::now());
 }
 
 /// Show a provider's reading as soon as it arrives, before slower providers.
@@ -208,10 +216,7 @@ fn publish_poll_progress(hwnd: HWND, request: &PollRequest, update: AppUsageData
             &request.accounts,
         );
         state.data = Some(data.clone());
-        invalidate_metrics(state);
-        state.last_poll_ok = true;
-        state.last_poll_failure = None;
-        state.last_poll_ok_at = Some(SystemTime::now());
+        mark_poll_ok(state);
         data
     };
     // The dashboard runs separately and follows the same cache as the
@@ -261,10 +266,7 @@ fn apply_poll_success(hwnd: HWND, request: &PollRequest, data: AppUsageData) {
             poller::retry_delay_ms(0, request.started),
         );
         s.data = Some(data);
-        invalidate_metrics(s);
-        s.last_poll_ok = true;
-        s.last_poll_failure = None;
-        s.last_poll_ok_at = Some(SystemTime::now());
+        mark_poll_ok(s);
 
         // Retry partial failures; restore the normal interval after recovery.
         if let Some(retry_ms) = retry_ms {

@@ -17,7 +17,9 @@ pub(super) fn sync_surface_windows_with(create_desktop: impl FnMut() -> HWND) {
         return;
     }
     replace_destroyed_mirrors();
-    let (desired_total, desktop_surfaces) = desired_surface_layout();
+    let desktop_surfaces = desktop_nested_surfaces();
+    // A theme without surfaces still keeps the primary window.
+    let desired_total = desktop_surfaces.len().max(1);
     reconcile_mirror_count(desired_total.saturating_sub(1));
     reconcile_desktop_surfaces(desired_total, desktop_surfaces, create_desktop);
 }
@@ -80,33 +82,25 @@ fn replace_destroyed_mirrors() {
     }
 }
 
-/// Surface count of the active theme (at least one) and which surfaces nest
-/// on the desktop.
-fn desired_surface_layout() -> (usize, Vec<bool>) {
-    let state = lock_state();
-    state
+/// Which surfaces of the active theme nest on the desktop, one per surface.
+fn desktop_nested_surfaces() -> Vec<bool> {
+    lock_state()
         .as_ref()
-        .map(|state| {
-            let surfaces = state
-                .active_theme
-                .as_ref()
-                .map(|theme| {
-                    theme
-                        .surfaces
-                        .iter()
-                        .map(|surface| {
-                            surface
-                                .placement
-                                .nest
-                                .resolve(surface.placement.reference.region)
-                                == SurfaceNest::Desktop
-                        })
-                        .collect::<Vec<_>>()
+        .and_then(|state| state.active_theme.as_ref())
+        .map(|theme| {
+            theme
+                .surfaces
+                .iter()
+                .map(|surface| {
+                    surface
+                        .placement
+                        .nest
+                        .resolve(surface.placement.reference.region)
+                        == SurfaceNest::Desktop
                 })
-                .unwrap_or_default();
-            (surfaces.len().max(1), surfaces)
+                .collect()
         })
-        .unwrap_or_else(|| (1, Vec::new()))
+        .unwrap_or_default()
 }
 
 /// Destroy extra mirror windows and create missing ones.
@@ -217,7 +211,7 @@ fn reconcile_desktop_surfaces(
     }
 }
 
-pub(super) unsafe fn create_desktop_surface_window() -> HWND {
+unsafe fn create_desktop_surface_window() -> HWND {
     let Some(desktop) = native_interop::find_desktop_host() else {
         return HWND::default();
     };
@@ -268,7 +262,7 @@ pub(super) unsafe fn create_desktop_surface_window_in(
     window
 }
 
-pub(super) unsafe fn create_mirror_window() -> HWND {
+unsafe fn create_mirror_window() -> HWND {
     let instance = GetModuleHandleW(PCWSTR::null()).unwrap();
     let class = native_interop::wide_str("CCUMThemeMirror");
     let wc = WNDCLASSEXW {

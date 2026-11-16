@@ -52,7 +52,7 @@ pub(super) fn now_unix_secs() -> u64 {
         .as_secs()
 }
 
-pub(super) fn update_check_interval() -> Duration {
+fn update_check_interval() -> Duration {
     Duration::from_secs(24 * 60 * 60)
 }
 
@@ -88,13 +88,13 @@ pub(super) fn schedule_auto_update_check(hwnd: HWND) {
     }
 }
 
-pub(super) fn begin_update_install(hwnd: HWND, update: AvailableUpdate) {
+fn begin_update_install(hwnd: HWND, update: AvailableUpdate) {
     match update {
         AvailableUpdate::Release(release) => begin_update_apply(hwnd, release),
     }
 }
 
-pub(super) fn show_update_prompt(hwnd: HWND, strings: Strings, update: &AvailableUpdate) -> bool {
+fn show_update_prompt(hwnd: HWND, strings: Strings, update: &AvailableUpdate) -> bool {
     let message = strings
         .update_prompt_now
         .replace("{version}", update.version());
@@ -186,12 +186,7 @@ fn finish_update_check(
         Err(error) => {
             record_update_check(UpdateStatus::Idle, checked_at, true);
             if interactive {
-                let message = format!(
-                    "{}.
-
-{}",
-                    strings.update_failed, error
-                );
+                let message = format!("{}.\n\n{}", strings.update_failed, error);
                 show_error_message(hwnd, strings.updates, &message);
             }
         }
@@ -212,7 +207,7 @@ fn record_update_check(status: UpdateStatus, checked_at: u64, publish: bool) {
     save_state_settings();
 }
 
-pub(super) fn begin_update_apply(hwnd: HWND, release: ReleaseDescriptor) {
+fn begin_update_apply(hwnd: HWND, release: ReleaseDescriptor) {
     let send_hwnd = SendHwnd::from_hwnd(controller_for(hwnd));
     let strings = {
         let mut state = lock_state();
