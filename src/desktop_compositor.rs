@@ -156,7 +156,7 @@ pub fn present(hwnd: HWND, rendered: &RenderedTheme) -> Result<(), String> {
     if rendered.width == 0 || rendered.height == 0 {
         return Err("desktop surface has no pixels".into());
     }
-    PRESENTERS.with(|presenters| {
+    let result = PRESENTERS.with(|presenters| {
         let mut presenters = presenters.borrow_mut();
         let key = hwnd.0 as isize;
         let next = (rendered.width, rendered.height);
@@ -183,7 +183,17 @@ pub fn present(hwnd: HWND, rendered: &RenderedTheme) -> Result<(), String> {
         }
         unsafe { presenters[&key].present(rendered) }
             .map_err(|error| format!("DirectComposition present failed: {error}"))
-    })
+    });
+    // A presenter that failed (device loss, Present/resize error) is never
+    // reused: dropping it makes the next frame recreate it.
+    evict_on_error(&result, || remove(hwnd));
+    result
+}
+
+fn evict_on_error<T, E>(result: &Result<T, E>, evict: impl FnOnce()) {
+    if result.is_err() {
+        evict();
+    }
 }
 
 pub fn remove(hwnd: HWND) {
@@ -198,6 +208,16 @@ pub fn clear() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_present_evicts_the_cached_presenter() {
+        let mut evicted = false;
+        super::evict_on_error(&Err::<(), _>("device lost"), || evicted = true);
+        assert!(evicted);
+        let mut evicted = false;
+        super::evict_on_error(&Ok::<(), ()>(()), || evicted = true);
+        assert!(!evicted);
+    }
+
     use super::*;
 
     #[test]
