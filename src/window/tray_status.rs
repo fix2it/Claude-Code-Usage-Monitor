@@ -14,7 +14,7 @@ pub(super) fn tray_usage_summary_lines(
 }
 
 #[cfg(test)]
-pub(super) fn usage_summary_lines(
+fn usage_summary_lines(
     data: &AppUsageData,
     providers: ProviderSet,
     language: LanguageId,
@@ -171,11 +171,11 @@ pub(super) fn usage_summary_lines_with_side_pools(
 }
 
 /// Windows cuts a tray tooltip at 127 characters (`szTip`).
-pub(super) const TRAY_TIP_MAX_CHARS: usize = 127;
+const TRAY_TIP_MAX_CHARS: usize = 127;
 
 /// The tray tooltip is a status line, not the usage numbers (those are on the
 /// widget and the icon): "updated HH:MM", or one short line per failing pool.
-pub(super) fn tray_status_from_state() -> Option<String> {
+fn tray_status_from_state() -> Option<String> {
     let state = lock_state();
     let state = state.as_ref()?;
     let errors = tray_short_error_lines(
@@ -194,7 +194,7 @@ pub(super) fn tray_status_from_state() -> Option<String> {
     Some(tray_updated_text(state.language, hour, minute))
 }
 
-pub(super) fn tray_updated_text(language: LanguageId, hour: u16, minute: u16) -> String {
+fn tray_updated_text(language: LanguageId, hour: u16, minute: u16) -> String {
     format!(
         "{} \u{2014} {} {hour:02}:{minute:02}",
         language.strings().window_title,
@@ -203,7 +203,7 @@ pub(super) fn tray_updated_text(language: LanguageId, hour: u16, minute: u16) ->
 }
 
 /// Local wall-clock hour and minute of `time`.
-pub(super) fn local_hour_minute(time: SystemTime) -> Option<(u16, u16)> {
+fn local_hour_minute(time: SystemTime) -> Option<(u16, u16)> {
     use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTimeEx};
     // FILETIME counts 100 ns ticks since 1601-01-01.
     let ticks = (time.duration_since(UNIX_EPOCH).ok()?.as_nanos() / 100) as u64
@@ -222,7 +222,7 @@ pub(super) fn local_hour_minute(time: SystemTime) -> Option<(u16, u16)> {
 }
 
 /// Short failure text for the tray, where the full message would be cut off.
-pub(super) fn tray_short_error(error: poller::PollError, language: LanguageId) -> &'static str {
+fn tray_short_error(error: poller::PollError, language: LanguageId) -> &'static str {
     use poller::PollError;
     language.text(match error {
         PollError::NoCredentials => "sign in again",
@@ -234,7 +234,7 @@ pub(super) fn tray_short_error(error: poller::PollError, language: LanguageId) -
 }
 
 /// Same failures as `tray_error_lines`, one short line each.
-pub(super) fn tray_short_error_lines(
+fn tray_short_error_lines(
     data: Option<&AppUsageData>,
     failure: Option<poller::PollFailure>,
     providers: ProviderSet,
@@ -255,7 +255,7 @@ pub(super) fn tray_short_error_lines(
 /// Short pool name for the tray: the provider key for its default pool
 /// (`claude`), the pool id for a second pool (`claude_x`, `codex_x`,
 /// `antigravity_x`), and the key plus the name for any other profile.
-pub(super) fn tray_pool_label(
+fn tray_pool_label(
     provider: ProviderId,
     account: Option<&crate::accounts::AccountProfile>,
 ) -> String {
@@ -269,13 +269,13 @@ pub(super) fn tray_pool_label(
 }
 
 /// Length as Windows counts it in `szTip`: UTF-16 code units.
-pub(super) fn tray_tip_len(text: &str) -> usize {
+fn tray_tip_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
 /// Shorten a "label: reason" line to `budget` UTF-16 units by cutting the
 /// label, so the reason at the end always stays readable.
-pub(super) fn shorten_tray_line(line: &str, budget: usize) -> String {
+fn shorten_tray_line(line: &str, budget: usize) -> String {
     if tray_tip_len(line) <= budget {
         return line.to_string();
     }
@@ -311,7 +311,7 @@ pub(super) fn shorten_tray_line(line: &str, budget: usize) -> String {
 
 /// Whole lines that fit the tray limit; the lines left over become "… +N".
 /// A line too long on its own is shortened, never cut by Windows.
-pub(super) fn fit_tray_tip(lines: &[String], language: LanguageId) -> String {
+fn fit_tray_tip(lines: &[String], language: LanguageId) -> String {
     let more = |count: usize| format!("\u{2026} +{count} {}", language.text("more"));
     let mut text = String::new();
     for (index, line) in lines.iter().enumerate() {
@@ -366,7 +366,7 @@ pub(super) fn tray_error_lines(
 
 /// Failing pools as (provider, account name, error): accounts first, the
 /// selected one leading, then a provider-wide failure no account explains.
-pub(super) fn tray_failures(
+fn tray_failures(
     data: Option<&AppUsageData>,
     failure: Option<poller::PollFailure>,
     providers: ProviderSet,
@@ -422,7 +422,7 @@ pub(super) fn tray_failures(
     failures
 }
 
-pub(super) fn tray_icon_tooltip_from_state() -> String {
+fn tray_icon_tooltip_from_state() -> String {
     tray_status_from_state().unwrap_or_else(|| {
         lock_state()
             .as_ref()
@@ -466,7 +466,7 @@ pub(super) fn sync_tray_icon(hwnd: HWND) {
                 .enumerate()
                 .filter(|(surface_index, surface)| input.surface_renders(*surface_index, surface))
                 .filter_map(|(surface_index, surface)| {
-                    input.render_icon(surface_index, surface, usage_tooltip.as_ref())
+                    input.render_icon(surface_index, surface, usage_tooltip.as_deref())
                 })
                 .collect::<Vec<_>>();
             tray_icon::sync_themed(hwnd, &icons);
@@ -511,7 +511,7 @@ impl TrayFrame<'_> {
         &self,
         surface_index: usize,
         surface: &theme_engine::SceneObject,
-        usage_tooltip: Option<&String>,
+        usage_tooltip: Option<&str>,
     ) -> Option<tray_icon::ThemedTrayIcon> {
         let surface_runtime = theme_runtime_for_surface(self.theme, surface_index, self.runtime);
         let surface_metrics =
@@ -547,7 +547,7 @@ impl TrayFrame<'_> {
         Some(tray_icon::ThemedTrayIcon {
             surface_index,
             tooltip: usage_tooltip
-                .cloned()
+                .map(str::to_owned)
                 .unwrap_or_else(|| surface.name.clone()),
             width: rendered.width,
             height: rendered.height,
@@ -557,7 +557,7 @@ impl TrayFrame<'_> {
 }
 
 // Literal zero is disabled independently of data, surface size, and runtime.
-pub(super) fn tray_surface_candidate(surface: &theme_engine::SceneObject) -> bool {
+fn tray_surface_candidate(surface: &theme_engine::SceneObject) -> bool {
     surface
         .placement
         .nest

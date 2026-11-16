@@ -242,7 +242,7 @@ fn render_surface(frame: &FrameInput, trigger: RenderTrigger, surface_index: usi
     }
 }
 
-pub(super) fn theme_for_surface(theme: &ThemeDocument, surface_index: usize) -> ThemeDocument {
+fn theme_for_surface(theme: &ThemeDocument, surface_index: usize) -> ThemeDocument {
     // Positioning reads only canvas dimensions and placement, not the scene graph.
     ThemeDocument {
         schema_version: theme.schema_version,

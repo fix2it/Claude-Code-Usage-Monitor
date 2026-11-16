@@ -21,7 +21,7 @@ impl StartupArgs {
     }
 }
 
-/// The active theme chosen at startup and the values derived from it.
+/// The active theme chosen at startup and the file it came from.
 struct StartupTheme {
     path: Option<PathBuf>,
     theme: Option<ThemeDocument>,
@@ -289,6 +289,7 @@ fn initial_app_state(
         path: active_theme_path,
         theme: active_theme,
     } = startup_theme;
+    let providers = settings.enabled_providers();
     let theme_clock_interval = active_theme
         .as_ref()
         .and_then(ThemeDocument::current_time_refresh_interval);
@@ -305,7 +306,7 @@ fn initial_app_state(
         language_override,
         language,
         install_channel,
-        providers: settings.enabled_providers(),
+        providers,
         show_antigravity_gemini: settings.antigravity_gemini_enabled(),
         show_antigravity_external: settings.antigravity_external_enabled(),
         show_antigravity_external_x: settings.antigravity_external_x_enabled(),
@@ -323,7 +324,7 @@ fn initial_app_state(
         force_notify_auth_error: false,
         auth_error_paused_polling: false,
         auth_watch_mode: poller::CredentialWatchMode::ActiveSource(
-            settings.enabled_providers().first().unwrap_or_default(),
+            providers.first().unwrap_or_default(),
         ),
         auth_watch_snapshot: Vec::new(),
         last_poll_ok: false,
@@ -415,23 +416,16 @@ unsafe fn start_timers_and_workers(hwnd: HWND, args: &StartupArgs) {
     spawn_taskbar_watchdog();
     spawn_ui_hang_watchdog();
 
-    // Initial poll
-    if !args.no_poll {
-        diagnose::log("initial poll requested");
-        request_poll(hwnd);
+    if args.no_poll {
+        return;
     }
-
-    if !args.no_poll {
-        schedule_auto_update_check(hwnd);
-    }
-    let should_check_updates = {
-        let state = lock_state();
-        state
-            .as_ref()
-            .map(|s| auto_update_check_due(s.last_update_check_unix))
-            .unwrap_or(false)
-    };
-    if should_check_updates && !args.no_poll {
+    diagnose::log("initial poll requested");
+    request_poll(hwnd);
+    schedule_auto_update_check(hwnd);
+    let should_check_updates = lock_state()
+        .as_ref()
+        .is_some_and(|s| auto_update_check_due(s.last_update_check_unix));
+    if should_check_updates {
         begin_update_check(hwnd, false);
     }
 }
