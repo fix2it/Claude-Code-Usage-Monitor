@@ -2788,12 +2788,10 @@ mod phase_animation_tests {
 
     #[test]
     fn tile_hover_arms_a_200ms_animation_without_rendering() {
-        let source = include_str!("window.rs");
+        // Normalize line endings so a CRLF checkout does not break the split.
+        let source = include_str!("window.rs").replace("\r\n", "\n");
         let setter = source
-            .split(
-                "
-fn set_tile_hover(",
-            )
+            .split("\nfn set_tile_hover(")
             .nth(1)
             .unwrap()
             .split("\n}\n")
