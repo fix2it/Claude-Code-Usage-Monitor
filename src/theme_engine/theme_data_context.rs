@@ -48,10 +48,7 @@ impl DataContext {
         insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
         let pool_o = context.insert_antigravity_display(data, runtime);
         context.insert_hover_states(data, runtime);
-        match data {
-            Some(data) => context.insert_usage(data, runtime, pool_o),
-            None => context.insert_empty_usage(runtime, pool_o),
-        }
+        context.insert_usage(data, runtime, pool_o);
         context.insert_split_pools(data, runtime);
         context
     }
@@ -291,7 +288,72 @@ impl DataContext {
     }
 
     /// Per-account, per-provider, Antigravity pool and `active` readings.
-    fn insert_usage(&mut self, data: &AppUsageData, runtime: ThemeRuntime, pool_o: bool) {
+    /// Before the first poll every reading binding exists but is empty.
+    fn insert_usage(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime, pool_o: bool) {
+        if let Some(data) = data {
+            self.insert_accounts(data, runtime.countdown);
+        }
+        for descriptor in PROVIDER_DESCRIPTORS {
+            if let Some(data) = data {
+                if let Some(account) = data
+                    .accounts
+                    .iter()
+                    .find(|account| account.provider == descriptor.id && account.selected)
+                {
+                    self.insert(
+                        &format!("{}.has_error", descriptor.key),
+                        account.error.is_some() as u8 as f64,
+                    );
+                }
+                self.insert_string(
+                    &format!("{}.account.name", descriptor.key),
+                    data.selected_account_name(descriptor.id).unwrap_or(""),
+                );
+            }
+            self.insert_provider(
+                descriptor.key,
+                data.and_then(|data| data.get(descriptor.id)),
+                descriptor.id == ProviderId::Codex,
+                runtime.countdown,
+            );
+        }
+        let pool_o_usage = data
+            .and_then(|data| data.antigravity_x())
+            .and_then(|account| account.usage.as_ref());
+        // With pool A off, pool O fills the single-pool layout alone.
+        let pool_a = if runtime.antigravity_o_only() {
+            pool_o_usage
+        } else {
+            // Never pool O's stand-in reading under pool A's label.
+            data.and_then(|data| data.antigravity_pool_a_reading())
+        };
+        self.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
+        if pool_a.is_some() {
+            // Antigravity answered this poll; pool-level gaps are "no limit
+            // data" ("--"), not a provider error.
+            self.insert("antigravity.reported", 1.0);
+        }
+        self.insert_provider("antigravity.gemini", pool_a, false, runtime.countdown);
+        // A missing external pool stays empty ("--"); never show Gemini figures in its place.
+        self.insert_provider(
+            "antigravity.external",
+            pool_a.and_then(|agy| agy.external_pool.as_deref()),
+            false,
+            runtime.countdown,
+        );
+        let active = ProviderId::ALL.into_iter().find_map(|provider| {
+            data.and_then(|data| data.get(provider))
+                .map(|usage| (provider, usage))
+        });
+        self.insert_provider(
+            "active",
+            active.map(|(_, usage)| usage),
+            active.is_some_and(|(provider, _)| provider == ProviderId::Codex),
+            runtime.countdown,
+        );
+    }
+
+    fn insert_accounts(&mut self, data: &AppUsageData, countdown: bool) {
         for account in &data.accounts {
             let key = format!(
                 "accounts.{}.{}",
@@ -308,84 +370,10 @@ impl DataContext {
                 &key,
                 account.usage.as_ref(),
                 account.provider == ProviderId::Codex,
-                runtime.countdown,
+                countdown,
             );
         }
-        self.insert_missing_pool_accounts(data, runtime.countdown);
-        for descriptor in PROVIDER_DESCRIPTORS {
-            if let Some(account) = data
-                .accounts
-                .iter()
-                .find(|account| account.provider == descriptor.id && account.selected)
-            {
-                self.insert(
-                    &format!("{}.has_error", descriptor.key),
-                    account.error.is_some() as u8 as f64,
-                );
-            }
-            self.insert_string(
-                &format!("{}.account.name", descriptor.key),
-                data.selected_account_name(descriptor.id).unwrap_or(""),
-            );
-            self.insert_provider(
-                descriptor.key,
-                data.get(descriptor.id),
-                descriptor.id == ProviderId::Codex,
-                runtime.countdown,
-            );
-        }
-        let pool_o_usage = data
-            .antigravity_x()
-            .and_then(|account| account.usage.as_ref());
-        // With pool A off, pool O fills the single-pool layout alone.
-        let pool_a = if runtime.antigravity_o_only() {
-            pool_o_usage
-        } else {
-            // Never pool O's stand-in reading under pool A's label.
-            data.antigravity_pool_a_reading()
-        };
-        self.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
-        if let Some(agy) = pool_a {
-            // Antigravity answered this poll; pool-level gaps are "no limit
-            // data" ("--"), not a provider error.
-            self.insert("antigravity.reported", 1.0);
-            self.insert_provider("antigravity.gemini", Some(agy), false, runtime.countdown);
-            // A missing external pool stays empty ("--"); never show Gemini figures in its place.
-            self.insert_provider(
-                "antigravity.external",
-                agy.external_pool.as_deref(),
-                false,
-                runtime.countdown,
-            );
-        } else {
-            self.insert_provider("antigravity.gemini", None, false, runtime.countdown);
-            self.insert_provider("antigravity.external", None, false, runtime.countdown);
-        }
-        let active = ProviderId::ALL
-            .into_iter()
-            .find_map(|provider| data.get(provider).map(|usage| (provider, usage)));
-        self.insert_provider(
-            "active",
-            active.map(|(_, usage)| usage),
-            active.is_some_and(|(provider, _)| provider == ProviderId::Codex),
-            runtime.countdown,
-        );
-    }
-
-    /// Before the first poll every reading binding exists but is empty.
-    fn insert_empty_usage(&mut self, runtime: ThemeRuntime, pool_o: bool) {
-        for descriptor in PROVIDER_DESCRIPTORS {
-            self.insert_provider(
-                descriptor.key,
-                None,
-                descriptor.id == ProviderId::Codex,
-                runtime.countdown,
-            );
-        }
-        self.insert_provider("antigravity.gemini", None, false, runtime.countdown);
-        self.insert_provider("antigravity.external", None, false, runtime.countdown);
-        self.insert_antigravity_rows(None, None, pool_o, runtime);
-        self.insert_provider("active", None, false, runtime.countdown);
+        self.insert_missing_pool_accounts(data, countdown);
     }
 
     /// Theme validation evaluates every expression even when its parent is
@@ -911,16 +899,22 @@ fn quota_windows(
     usage: Option<&UsageData>,
     codex_session_fallback: bool,
 ) -> [(&'static str, WindowBinding); 5] {
+    let binding = |section: Option<&UsageSection>, length, available, empty_gauge| WindowBinding {
+        percentage: section.map_or(0.0, |section| section.percentage),
+        available,
+        empty_gauge,
+        expected: section.and_then(|section| section_expected(section, length)),
+        resets_at: section.and_then(|section| section.resets_at),
+    };
     // An Antigravity pool window that was not reported draws an empty gauge.
     let quota = |section: Option<&UsageSection>, length| {
         let available = section.is_some_and(|section| section.available);
-        WindowBinding {
-            percentage: section.map_or(0.0, |section| section.percentage),
+        binding(
+            section,
+            length,
             available,
-            empty_gauge: name.starts_with("antigravity") && !available,
-            expected: section.and_then(|section| section_expected(section, length)),
-            resets_at: section.and_then(|section| section.resets_at),
-        }
+            name.starts_with("antigravity") && !available,
+        )
     };
     // Providers with a non-standard session slot (Qoder credit packs) give
     // its start; everyone else uses the 5-hour window.
@@ -942,13 +936,8 @@ fn quota_windows(
             section.and_then(|section| section.resets_at),
             fallback,
         );
-        WindowBinding {
-            percentage: section.map_or(0.0, |section| section.percentage),
-            available: section.is_some(),
-            empty_gauge: name == "opencode" && section.is_none(),
-            expected: section.and_then(|section| section_expected(section, length)),
-            resets_at: section.and_then(|section| section.resets_at),
-        }
+        let present = section.is_some();
+        binding(section, length, present, name == "opencode" && !present)
     };
     [
         ("session", session),

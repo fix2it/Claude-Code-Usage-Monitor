@@ -683,14 +683,14 @@ fn measured_display_metrics(
         let percent_box = advances.percent_box(index, fallback.percent_box);
         let (marker_box, origin) =
             provider_marker_column(key, advances.marker[index], fallback, &markers);
-        let phases = phases(index);
+        let mode_phases = phases(index);
         metrics.providers[index] = ProviderMetrics {
             text_box,
             percent_box,
             marker_box,
             origin,
-            text_slide: -text_box * phases.text_collapse,
-            row_width: compact_row_width(bar, text_box, percent_box, origin, phases),
+            text_slide: -text_box * mode_phases.text_collapse,
+            row_width: compact_row_width(bar, text_box, percent_box, origin, mode_phases),
         };
     }
     for (index, target) in [
@@ -699,19 +699,19 @@ fn measured_display_metrics(
         (AGY_EXTERNAL_INDEX + 3, &mut metrics.agy_external_o),
         (AGY_EXTERNAL_INDEX + 4, &mut metrics.codex_x),
     ] {
-        let phases = phases(index);
+        let mode_phases = phases(index);
         target.text_box = advances.text_box(index, target.text_box);
         target.percent_box = advances.percent_box(index, target.percent_box);
         if index != AGY_EXTERNAL_INDEX + 3 {
             target.origin = 0.0;
         }
-        target.text_slide = -target.text_box * phases.text_collapse;
+        target.text_slide = -target.text_box * mode_phases.text_collapse;
         target.row_width = compact_row_width(
             bar,
             target.text_box,
             target.percent_box,
             target.origin,
-            phases,
+            mode_phases,
         );
     }
     metrics.providers_width = metrics.providers_width(runtime);
