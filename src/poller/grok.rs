@@ -1,3 +1,4 @@
+use super::non_empty_environment;
 use std::io::Read;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -541,13 +542,6 @@ fn wait_for_command(child: &mut std::process::Child, timeout: Duration) -> bool 
             }
         }
     }
-}
-
-fn non_empty_environment(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn path_signature(kind: &str, path: &Path) -> String {

@@ -1,6 +1,5 @@
-use std::collections::hash_map::DefaultHasher;
+use super::{non_empty_environment, secret_signature};
 use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
 use std::time::SystemTime;
 
 use serde::Deserialize;
@@ -326,19 +325,6 @@ fn parse_reset_date(date: Option<&str>) -> Option<SystemTime> {
 /// Tokens go into a header, so anything that could split it is unusable.
 fn is_header_safe_token(token: &str) -> bool {
     !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_graphic())
-}
-
-fn non_empty_environment(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn secret_signature(source: &str, value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{source}|present|{}|{:x}", value.len(), hasher.finish())
 }
 
 #[cfg(test)]

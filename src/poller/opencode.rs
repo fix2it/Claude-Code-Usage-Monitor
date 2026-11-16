@@ -1,3 +1,4 @@
+use super::non_empty_environment;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -372,13 +373,6 @@ fn dashboard_config_paths() -> Vec<PathBuf> {
         );
     }
     paths
-}
-
-fn non_empty_environment(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn valid_workspace_id(value: &str) -> bool {

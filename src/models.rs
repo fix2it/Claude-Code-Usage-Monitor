@@ -197,6 +197,10 @@ pub struct AppUsageData {
     /// agy's provider reading came from pool O (pool A switched off). Such a
     /// reading is never shown or carried forward as pool A's.
     antigravity_from_pool_o: bool,
+    /// This poll's failure of a provider without account profiles. Its last
+    /// reading may be carried in as stale data, so the failure must stay
+    /// visible next to it. Not cached: the next poll decides again.
+    provider_errors: BTreeMap<ProviderId, crate::poller::PollError>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -275,6 +279,23 @@ impl AppUsageData {
                             .is_none())
             })
             .collect()
+    }
+
+    /// Failures this poll of providers without account profiles.
+    pub fn provider_errors(
+        &self,
+    ) -> impl Iterator<Item = (ProviderId, crate::poller::PollError)> + '_ {
+        self.provider_errors
+            .iter()
+            .map(|(&provider, &error)| (provider, error))
+    }
+
+    pub fn set_provider_error(&mut self, provider: ProviderId, error: crate::poller::PollError) {
+        self.provider_errors.insert(provider, error);
+    }
+
+    pub fn clear_provider_error(&mut self, provider: ProviderId) {
+        self.provider_errors.remove(&provider);
     }
 
     pub fn get(&self, provider: ProviderId) -> Option<&UsageData> {
@@ -473,6 +494,7 @@ impl FromIterator<(ProviderId, UsageData)> for AppUsageData {
             providers: iter.into_iter().collect(),
             accounts: Vec::new(),
             antigravity_from_pool_o: false,
+            provider_errors: BTreeMap::new(),
         }
     }
 }
