@@ -25,50 +25,63 @@ pub(super) fn parse(entries: &[Value], legacy: &BTreeMap<String, Value>) -> Vec<
                     && limit.percent.is_finite()
                     && limit.percent >= 0.0 =>
             {
-                let model = limit.scope.as_ref().and_then(|scope| scope.get("model"));
-                let model_id = model
-                    .and_then(|model| model.get("id"))
-                    .and_then(Value::as_str)
-                    .filter(|id| !id.trim().is_empty())
-                    .map(str::to_string);
-                let model_name = model
-                    .and_then(|model| model.get("display_name"))
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.trim().is_empty())
-                    .map(str::to_string);
-                let label = model_name
-                    .clone()
-                    .or_else(|| model_id.clone())
-                    .unwrap_or_else(|| limit.kind.replace('_', " "));
-                let mut key = slug(&limit.kind);
-                if let Some(model) = model_name.as_ref().or(model_id.as_ref()) {
-                    key.push('_');
-                    key.push_str(&slug(model));
-                } else if let Some(scope) = &limit.scope {
-                    key.push('_');
-                    key.push_str(&stable_suffix(&scope.to_string()));
-                }
-                limits.push(UsageLimit {
-                    key,
-                    kind: limit.kind,
-                    label,
-                    model: model_name.or_else(|| model_id.clone()),
-                    model_id,
-                    scope: limit.scope,
-                    is_active: limit.is_active,
-                    usage: UsageSection {
-                        available: true,
-                        percentage: limit.percent,
-                        resets_at: super::parse_iso8601(limit.resets_at.as_deref()),
-                    },
-                });
+                limits.push(array_limit(limit));
             }
             _ => crate::diagnose::log("ignored malformed entry in Claude usage limits array"),
         }
     }
 
-    // Keep older optional buckets (including future ones) available too. Only
-    // objects with an actual numeric utilization are quota buckets.
+    // Keep older optional buckets (including future ones) available too.
+    append_legacy_buckets(&mut limits, legacy);
+    // Names must not depend on array order or silently overwrite another quota.
+    resolve_key_collisions(&mut limits);
+    limits
+}
+
+/// One entry of the `limits` array; the key carries the model or a scope hash.
+fn array_limit(limit: Limit) -> UsageLimit {
+    let model = limit.scope.as_ref().and_then(|scope| scope.get("model"));
+    let model_id = model
+        .and_then(|model| model.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string);
+    let model_name = model
+        .and_then(|model| model.get("display_name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string);
+    let label = model_name
+        .clone()
+        .or_else(|| model_id.clone())
+        .unwrap_or_else(|| limit.kind.replace('_', " "));
+    let mut key = slug(&limit.kind);
+    if let Some(model) = model_name.as_ref().or(model_id.as_ref()) {
+        key.push('_');
+        key.push_str(&slug(model));
+    } else if let Some(scope) = &limit.scope {
+        key.push('_');
+        key.push_str(&stable_suffix(&scope.to_string()));
+    }
+    UsageLimit {
+        key,
+        kind: limit.kind,
+        label,
+        model: model_name.or_else(|| model_id.clone()),
+        model_id,
+        scope: limit.scope,
+        is_active: limit.is_active,
+        usage: UsageSection {
+            available: true,
+            percentage: limit.percent,
+            resets_at: super::parse_iso8601(limit.resets_at.as_deref()),
+        },
+    }
+}
+
+/// Appends legacy `seven_day_*` style buckets that the array does not already
+/// cover. Only objects with an actual numeric utilization are quota buckets.
+fn append_legacy_buckets(limits: &mut Vec<UsageLimit>, legacy: &BTreeMap<String, Value>) {
     for (key, value) in legacy {
         let Some(percentage) = value
             .get("utilization")
@@ -112,16 +125,19 @@ pub(super) fn parse(entries: &[Value], legacy: &BTreeMap<String, Value>) -> Vec<
             },
         });
     }
+}
 
-    // Names must not depend on array order or silently overwrite another quota.
+/// Gives colliding keys a stable identity suffix, then keeps one limit per key
+/// (active first, then the higher percentage).
+fn resolve_key_collisions(limits: &mut Vec<UsageLimit>) {
     let mut identities: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for limit in &limits {
+    for limit in limits.iter() {
         identities
             .entry(limit.key.clone())
             .or_default()
             .insert(identity(limit));
     }
-    for limit in &mut limits {
+    for limit in limits.iter_mut() {
         if identities[&limit.key].len() > 1 {
             limit.key = format!("{}_{}", limit.key, stable_suffix(&identity(limit)));
         }
@@ -133,7 +149,6 @@ pub(super) fn parse(entries: &[Value], legacy: &BTreeMap<String, Value>) -> Vec<
             .then(b.usage.percentage.total_cmp(&a.usage.percentage))
     });
     limits.dedup_by(|a, b| a.key == b.key);
-    limits
 }
 
 fn identity(limit: &UsageLimit) -> String {

@@ -321,95 +321,19 @@ pub(super) fn usage_data(usage: &QoderUsage) -> Option<UsageData> {
         percentage: used_percentage(ratio),
         resets_at: usage.plan_expires_at,
     });
-    let pool = |key: &str, label: &str, ratio: Option<(f64, f64)>, expires| {
-        ratio.map(|(used, total)| CreditPool {
-            key: key.into(),
-            label: label.into(),
-            used,
-            total,
-            expires_at: expires,
-        })
-    };
-    let credit_pools: Vec<CreditPool> = [
-        pool(
-            "plan",
-            "Plan Credits",
-            usage.plan_credits,
-            usage.plan_expires_at,
-        ),
-        pool("add_on", "Add-on Credits", usage.add_on_credits, None),
-        pool(
-            "ultimate_exclusive",
-            "Ultimate Exclusive Credits",
-            usage.ultimate_credits,
-            usage.ultimate_expires_at,
-        ),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let credit_pools = credit_pools(usage);
     if credit_pools.is_empty() {
         return None;
     }
-    let limits = usage
-        .ultimate_credits
-        .map(|ratio| UsageLimit {
-            key: "ultimate_exclusive".into(),
-            kind: "credits".into(),
-            label: "Ultimate Exclusive Credits".into(),
-            model: None,
-            model_id: None,
-            scope: None,
-            is_active: ratio.0 > 0.0,
-            usage: UsageSection {
-                available: true,
-                percentage: used_percentage(ratio),
-                resets_at: usage.ultimate_expires_at,
-            },
-        })
-        .into_iter()
-        .collect();
-    // Bottom row of the widget: the extra pool in use. Both in use: Ultimate
-    // in `session`, add-on in `week`. Neither in use: Ultimate (or add-on
-    // when there is no Ultimate pool).
-    let ultimate = usage
-        .ultimate_credits
-        .map(|ratio| (ratio, usage.ultimate_expires_at, "u"));
-    // Qoder does not show when add-on credits expire; they last as long as
-    // the plan.
-    let add_on = usage
-        .add_on_credits
-        .map(|ratio| (ratio, usage.plan_expires_at, "c"));
-    let in_use = |pool: &Option<((f64, f64), Option<SystemTime>, &str)>| {
-        pool.is_some_and(|((used, _), _, _)| used > 0.0)
-    };
-    let (primary, secondary) = match (in_use(&ultimate), in_use(&add_on)) {
-        (true, true) => (ultimate, add_on),
-        (false, true) => (add_on, None),
-        _ => (ultimate.or(add_on), None),
-    };
-    // Pace needs a window start Qoder does not report: assume the last
-    // PACE_WINDOW before each reset or expiry, like OpenCode's fallback.
-    let section = |pool: &Option<((f64, f64), Option<SystemTime>, &str)>| {
-        pool.map(|(ratio, resets_at, _)| UsageSection {
-            available: true,
-            percentage: used_percentage(ratio),
-            resets_at,
-        })
-    };
-    let window_start = |pool: &Option<((f64, f64), Option<SystemTime>, &str)>| {
-        pool.and_then(|(_, resets_at, _)| resets_at?.checked_sub(PACE_WINDOW))
-    };
-    let label = |pool: &Option<((f64, f64), Option<SystemTime>, &str)>| {
-        pool.map(|(_, _, label)| label.to_string())
-    };
+    let limits = ultimate_limits(usage);
+    let (primary, secondary) = bottom_row_pools(usage);
     Some(UsageData {
-        session: section(&primary).unwrap_or_default(),
-        session_label: label(&primary),
-        session_started_at: window_start(&primary),
-        week: section(&secondary),
-        week_label: label(&secondary),
-        week_started_at: window_start(&secondary),
+        session: pool_section(&primary).unwrap_or_default(),
+        session_label: pool_label(&primary),
+        session_started_at: pool_window_start(&primary),
+        week: pool_section(&secondary),
+        week_label: pool_label(&secondary),
+        week_started_at: pool_window_start(&secondary),
         weekly: plan.clone().unwrap_or_default(),
         weekly_label: plan.as_ref().map(|_| "Plan".into()),
         monthly_started_at: plan
@@ -426,6 +350,101 @@ pub(super) fn usage_data(usage: &QoderUsage) -> Option<UsageData> {
         credit_pools,
         ..Default::default()
     })
+}
+
+/// An extra credit pool on the widget's bottom row: (used, total), reset and label.
+type ExtraPool = Option<((f64, f64), Option<SystemTime>, &'static str)>;
+
+/// Every reported credit pool with absolute figures.
+fn credit_pools(usage: &QoderUsage) -> Vec<CreditPool> {
+    let pool = |key: &str, label: &str, ratio: Option<(f64, f64)>, expires| {
+        ratio.map(|(used, total)| CreditPool {
+            key: key.into(),
+            label: label.into(),
+            used,
+            total,
+            expires_at: expires,
+        })
+    };
+    [
+        pool(
+            "plan",
+            "Plan Credits",
+            usage.plan_credits,
+            usage.plan_expires_at,
+        ),
+        pool("add_on", "Add-on Credits", usage.add_on_credits, None),
+        pool(
+            "ultimate_exclusive",
+            "Ultimate Exclusive Credits",
+            usage.ultimate_credits,
+            usage.ultimate_expires_at,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// The Ultimate Exclusive pool as a limit row, when reported.
+fn ultimate_limits(usage: &QoderUsage) -> Vec<UsageLimit> {
+    usage
+        .ultimate_credits
+        .map(|ratio| UsageLimit {
+            key: "ultimate_exclusive".into(),
+            kind: "credits".into(),
+            label: "Ultimate Exclusive Credits".into(),
+            model: None,
+            model_id: None,
+            scope: None,
+            is_active: ratio.0 > 0.0,
+            usage: UsageSection {
+                available: true,
+                percentage: used_percentage(ratio),
+                resets_at: usage.ultimate_expires_at,
+            },
+        })
+        .into_iter()
+        .collect()
+}
+
+/// Pools for the widget's `session` and `week` rows.
+fn bottom_row_pools(usage: &QoderUsage) -> (ExtraPool, ExtraPool) {
+    // Bottom row of the widget: the extra pool in use. Both in use: Ultimate
+    // in `session`, add-on in `week`. Neither in use: Ultimate (or add-on
+    // when there is no Ultimate pool).
+    let ultimate = usage
+        .ultimate_credits
+        .map(|ratio| (ratio, usage.ultimate_expires_at, "u"));
+    // Qoder does not show when add-on credits expire; they last as long as
+    // the plan.
+    let add_on = usage
+        .add_on_credits
+        .map(|ratio| (ratio, usage.plan_expires_at, "c"));
+    let in_use = |pool: &ExtraPool| pool.is_some_and(|((used, _), _, _)| used > 0.0);
+    match (in_use(&ultimate), in_use(&add_on)) {
+        (true, true) => (ultimate, add_on),
+        (false, true) => (add_on, None),
+        _ => (ultimate.or(add_on), None),
+    }
+}
+
+fn pool_section(pool: &ExtraPool) -> Option<UsageSection> {
+    pool.map(|(ratio, resets_at, _)| UsageSection {
+        available: true,
+        percentage: used_percentage(ratio),
+        resets_at,
+    })
+}
+
+/// Pace needs a window start Qoder does not report: assume the last
+/// PACE_WINDOW before each reset or expiry, like OpenCode's fallback.
+fn pool_window_start(pool: &ExtraPool) -> Option<SystemTime> {
+    pool.and_then(|(_, resets_at, _)| resets_at?.checked_sub(PACE_WINDOW))
+}
+
+fn pool_label(pool: &ExtraPool) -> Option<String> {
+    pool.map(|(_, _, label)| label.to_string())
 }
 
 // ------------------------------------------------------------------ probe --
@@ -539,17 +558,7 @@ mod pty {
     pub(super) fn run_usage(exe: &Path, workdir: &Path) -> Result<String, PollError> {
         let deadline = Instant::now() + PROBE_TIMEOUT;
         unsafe {
-            let job = CreateJobObjectW(None, PCWSTR::null()).map_err(fail("job"))?;
-            let job = Job(Owned(job));
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(
-                (job.0).0,
-                JobObjectExtendedLimitInformation,
-                &limits as *const _ as *const c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-            .map_err(fail("job limits"))?;
+            let job = kill_on_close_job()?;
 
             let (mut in_read, mut in_write) = (HANDLE::default(), HANDLE::default());
             CreatePipe(&mut in_read, &mut in_write, None, 0).map_err(fail("input pipe"))?;
@@ -565,6 +574,53 @@ mod pty {
             drop(in_read);
             drop(out_write);
 
+            let process_handle = launch_in_console(exe, workdir, &console, &job)?;
+
+            // Blocking pipe reads stay on their own thread; it ends once the
+            // pseudo console closes the other end.
+            let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let reader = spawn_reader(out_read, Arc::clone(&buffer));
+
+            let result = drive(&buffer, &in_write, deadline);
+
+            // Kill the tree first, then close the console (which unblocks
+            // the reader); the reader is joined only briefly.
+            drop(job);
+            drop(in_write);
+            drop(console);
+            drop(process_handle);
+            join_briefly(reader);
+            result
+        }
+    }
+
+    /// A job object that kills the whole process tree when it closes.
+    unsafe fn kill_on_close_job() -> Result<Job, PollError> {
+        unsafe {
+            let job = CreateJobObjectW(None, PCWSTR::null()).map_err(fail("job"))?;
+            let job = Job(Owned(job));
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                (job.0).0,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .map_err(fail("job limits"))?;
+            Ok(job)
+        }
+    }
+
+    /// Starts `exe` suspended on the pseudo console, assigns it to `job` and
+    /// resumes it; returns the process handle.
+    unsafe fn launch_in_console(
+        exe: &Path,
+        workdir: &Path,
+        console: &Console,
+        job: &Job,
+    ) -> Result<Owned, PollError> {
+        unsafe {
             let mut size = 0usize;
             let _ = InitializeProcThreadAttributeList(None, 1, None, &mut size);
             let mut attribute_buffer = vec![0u8; size];
@@ -619,43 +675,37 @@ mod pty {
             }
             ResumeThread(thread_handle.0);
             drop(thread_handle);
+            Ok(process_handle)
+        }
+    }
 
-            // Blocking pipe reads stay on their own thread; it ends once the
-            // pseudo console closes the other end.
-            let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
-            let reader_buffer = Arc::clone(&buffer);
-            let reader = std::thread::spawn(move || {
-                let out_read = out_read;
-                let mut chunk = vec![0u8; 65536];
-                loop {
-                    let mut read = 0u32;
-                    let ok = ReadFile(out_read.0, Some(&mut chunk), Some(&mut read), None);
-                    if ok.is_err() || read == 0 {
-                        break;
-                    }
-                    reader_buffer
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner())
-                        .extend_from_slice(&chunk[..read as usize]);
+    /// Copies pseudo-console output into `buffer` until the pipe closes.
+    fn spawn_reader(out_read: Owned, buffer: Arc<Mutex<Vec<u8>>>) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let out_read = out_read;
+            let mut chunk = vec![0u8; 65536];
+            loop {
+                let mut read = 0u32;
+                let ok = unsafe { ReadFile(out_read.0, Some(&mut chunk), Some(&mut read), None) };
+                if ok.is_err() || read == 0 {
+                    break;
                 }
-            });
-
-            let result = drive(&buffer, &in_write, deadline);
-
-            // Kill the tree first, then close the console (which unblocks
-            // the reader); the reader is joined only briefly.
-            drop(job);
-            drop(in_write);
-            drop(console);
-            drop(process_handle);
-            let join_deadline = Instant::now() + Duration::from_secs(2);
-            while !reader.is_finished() && Instant::now() < join_deadline {
-                std::thread::sleep(Duration::from_millis(50));
+                buffer
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .extend_from_slice(&chunk[..read as usize]);
             }
-            if reader.is_finished() {
-                let _ = reader.join();
-            }
-            result
+        })
+    }
+
+    /// Waits up to two seconds for the reader thread, then leaves it detached.
+    fn join_briefly(reader: std::thread::JoinHandle<()>) {
+        let join_deadline = Instant::now() + Duration::from_secs(2);
+        while !reader.is_finished() && Instant::now() < join_deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if reader.is_finished() {
+            let _ = reader.join();
         }
     }
 
