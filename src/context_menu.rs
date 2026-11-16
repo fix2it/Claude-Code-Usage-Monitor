@@ -368,9 +368,32 @@ pub fn rendered_label(
 
 pub fn classic_context_menu() -> ContextMenuDocument {
     use ContextMenuAction as Action;
-    use ContextMenuProvider as Provider;
 
-    let frequency = ContextMenuItem::submenu(
+    let frequency = classic_frequency_menu();
+    let providers = classic_providers_menu();
+    let settings = classic_settings_menu();
+
+    ContextMenuDocument {
+        schema_version: CONTEXT_MENU_SCHEMA_VERSION,
+        id: CLASSIC_CONTEXT_MENU_ID.into(),
+        name: "Classic v1".into(),
+        items: vec![
+            ContextMenuItem::action("refresh", "Refresh", Action::Refresh),
+            frequency,
+            providers,
+            settings,
+            ContextMenuItem::action("toggle-widget", "Show widget", Action::ToggleWidget),
+            ContextMenuItem::action("open-dashboard", "Open Dashboard", Action::OpenDashboard),
+            ContextMenuItem::separator("root-separator"),
+            ContextMenuItem::action("exit", "Exit", Action::Exit),
+        ],
+    }
+}
+
+fn classic_frequency_menu() -> ContextMenuItem {
+    use ContextMenuAction as Action;
+
+    ContextMenuItem::submenu(
         "update-frequency",
         "Update frequency",
         vec![
@@ -403,7 +426,13 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 },
             ),
         ],
-    );
+    )
+}
+
+fn classic_providers_menu() -> ContextMenuItem {
+    use ContextMenuAction as Action;
+    use ContextMenuProvider as Provider;
+
     let child = |id, label, action, render: &str| {
         let mut item = ContextMenuItem::action(id, &format!("{CHILD_INDENT}{label}"), action);
         item.render = Expression(render.into());
@@ -420,7 +449,7 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             ),
         )
     };
-    let providers = ContextMenuItem::submenu(
+    ContextMenuItem::submenu(
         "providers",
         "Providers",
         vec![
@@ -527,7 +556,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 },
             ),
         ],
-    );
+    )
+}
+
+fn classic_settings_menu() -> ContextMenuItem {
+    use ContextMenuAction as Action;
+
     let languages = std::iter::once(ContextMenuItem::action(
         "language-system",
         "System default",
@@ -549,7 +583,7 @@ pub fn classic_context_menu() -> ContextMenuDocument {
             }),
     )
     .collect();
-    let settings = ContextMenuItem::submenu(
+    ContextMenuItem::submenu(
         "settings",
         "Settings",
         vec![
@@ -568,23 +602,7 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::CheckForUpdates,
             ),
         ],
-    );
-
-    ContextMenuDocument {
-        schema_version: CONTEXT_MENU_SCHEMA_VERSION,
-        id: CLASSIC_CONTEXT_MENU_ID.into(),
-        name: "Classic v1".into(),
-        items: vec![
-            ContextMenuItem::action("refresh", "Refresh", Action::Refresh),
-            frequency,
-            providers,
-            settings,
-            ContextMenuItem::action("toggle-widget", "Show widget", Action::ToggleWidget),
-            ContextMenuItem::action("open-dashboard", "Open Dashboard", Action::OpenDashboard),
-            ContextMenuItem::separator("root-separator"),
-            ContextMenuItem::action("exit", "Exit", Action::Exit),
-        ],
-    }
+    )
 }
 
 pub fn dashboard_v2_context_menu() -> ContextMenuDocument {

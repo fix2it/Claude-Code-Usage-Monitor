@@ -290,47 +290,8 @@ pub(super) fn show_context_menu_document(
             } else {
                 (point.x, point.y)
             };
-            let foreground_before = GetForegroundWindow();
-            // A taskbar-hosted surface is a child window: it can never be
-            // foreground, so SetForegroundWindow(hwnd) fails. Right after start
-            // nothing is foreground; the taskbar then activates a moment later
-            // and that activation cancels the first menu. Activate the top-level
-            // host now, so the menu opens with the foreground already settled.
-            let mut foreground_ok = SetForegroundWindow(hwnd).as_bool();
-            if !foreground_ok {
-                let root = GetAncestor(hwnd, GA_ROOT);
-                if !root.is_invalid() && root != hwnd {
-                    foreground_ok = SetForegroundWindow(root).as_bool();
-                }
-            }
-            diagnose::log(format!(
-                "menu open hwnd={:#x} top={:#x} fg_before={:#x} set_fg={foreground_ok} fg_after={:#x}",
-                hwnd.0 as usize,
-                GetAncestor(hwnd, GA_ROOT).0 as usize,
-                foreground_before.0 as usize,
-                GetForegroundWindow().0 as usize
-            ));
-            let opened_at = std::time::Instant::now();
-            set_menu_tracking(true);
-            let selected = TrackPopupMenu(
-                display_menu,
-                TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NOANIMATION,
-                menu_x,
-                menu_y,
-                None,
-                hwnd,
-                None,
-            )
-            .0 as usize;
-            // KB135788: let the owner's queue run once so the next menu
-            // dismisses on an outside click instead of lingering.
-            let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-            diagnose::log(format!(
-                "menu closed selected={selected} after_ms={} fg={:#x}",
-                opened_at.elapsed().as_millis(),
-                GetForegroundWindow().0 as usize
-            ));
-            run_deferred_menu_work(set_menu_tracking(false));
+            activate_menu_owner(hwnd);
+            let selected = track_menu(hwnd, display_menu, menu_x, menu_y);
             ROOT_MENU_HANDLE.store(0, Ordering::Relaxed);
             let _ = DestroyMenu(menu);
 
@@ -342,16 +303,7 @@ pub(super) fn show_context_menu_document(
                 break;
             };
             if is_provider_toggle(&action) {
-                // Apply synchronously. PostMessageW would dispatch after the
-                // next menu was built, so its checkmark would still be stale.
-                if let Some(command) = context_menu_static_command(&action) {
-                    let _ = SendMessageW(
-                        controller_for(hwnd),
-                        WM_COMMAND,
-                        Some(WPARAM(command as usize)),
-                        Some(LPARAM(0)),
-                    );
-                }
+                apply_provider_toggle(hwnd, &action);
                 // The root menu is gone after this round; stop capturing so
                 // later WM_INITMENUPOPUP events cannot overwrite the anchor.
                 CAPTURE_SUBMENU_ANCHOR.store(false, Ordering::Relaxed);
@@ -361,6 +313,76 @@ pub(super) fn show_context_menu_document(
             execute_context_menu_action(hwnd, action, origin);
             break;
         }
+    }
+}
+
+/// Activates the menu owner before a popup opens and logs the foreground change.
+unsafe fn activate_menu_owner(hwnd: HWND) {
+    unsafe {
+        let foreground_before = GetForegroundWindow();
+        // A taskbar-hosted surface is a child window: it can never be
+        // foreground, so SetForegroundWindow(hwnd) fails. Right after start
+        // nothing is foreground; the taskbar then activates a moment later
+        // and that activation cancels the first menu. Activate the top-level
+        // host now, so the menu opens with the foreground already settled.
+        let mut foreground_ok = SetForegroundWindow(hwnd).as_bool();
+        if !foreground_ok {
+            let root = GetAncestor(hwnd, GA_ROOT);
+            if !root.is_invalid() && root != hwnd {
+                foreground_ok = SetForegroundWindow(root).as_bool();
+            }
+        }
+        diagnose::log(format!(
+            "menu open hwnd={:#x} top={:#x} fg_before={:#x} set_fg={foreground_ok} fg_after={:#x}",
+            hwnd.0 as usize,
+            GetAncestor(hwnd, GA_ROOT).0 as usize,
+            foreground_before.0 as usize,
+            GetForegroundWindow().0 as usize
+        ));
+    }
+}
+
+/// Shows `display_menu` modally and returns the selected command id (0 = none).
+unsafe fn track_menu(hwnd: HWND, display_menu: HMENU, menu_x: i32, menu_y: i32) -> usize {
+    unsafe {
+        let opened_at = std::time::Instant::now();
+        set_menu_tracking(true);
+        let selected = TrackPopupMenu(
+            display_menu,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NOANIMATION,
+            menu_x,
+            menu_y,
+            None,
+            hwnd,
+            None,
+        )
+        .0 as usize;
+        // KB135788: let the owner's queue run once so the next menu
+        // dismisses on an outside click instead of lingering.
+        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
+        diagnose::log(format!(
+            "menu closed selected={selected} after_ms={} fg={:#x}",
+            opened_at.elapsed().as_millis(),
+            GetForegroundWindow().0 as usize
+        ));
+        run_deferred_menu_work(set_menu_tracking(false));
+        selected
+    }
+}
+
+/// Applies a provider toggle synchronously so the reopened menu shows the new check.
+fn apply_provider_toggle(hwnd: HWND, action: &ContextMenuAction) {
+    // Apply synchronously. PostMessageW would dispatch after the
+    // next menu was built, so its checkmark would still be stale.
+    if let Some(command) = context_menu_static_command(action) {
+        let _ = unsafe {
+            SendMessageW(
+                controller_for(hwnd),
+                WM_COMMAND,
+                Some(WPARAM(command as usize)),
+                Some(LPARAM(0)),
+            )
+        };
     }
 }
 
@@ -555,66 +577,77 @@ pub(super) fn context_menu_checked_with_origin(
         ContextMenuAction::ToggleClaudePoolsOneWidget => state.claude_pools_one_widget,
         ContextMenuAction::ToggleCodexPoolsOneWidget => state.codex_pools_one_widget,
         ContextMenuAction::ToggleAntigravityPoolsOneWidget => state.antigravity_pools_one_widget,
-        ContextMenuAction::ToggleWidget => state
-            .active_theme
-            .as_ref()
-            .and_then(|theme| {
-                let effective = theme_engine::apply_mouse_action_overrides(
-                    theme,
-                    &state.mouse_action_overrides,
-                );
-                context_menu_widget_origin(&effective).map(|(surface_index, _)| {
-                    let runtime = theme_runtime_for_surface(
-                        &effective,
-                        surface_index,
-                        theme_runtime_from_state(state),
-                    );
-                    let metrics = state.prepared_metrics.as_ref().map_or_else(
-                        || theme_engine::display_metrics(&effective, state.data.as_ref(), runtime),
-                        |metrics| theme_engine::metrics_for_phase(metrics.clone(), runtime),
-                    );
-                    theme_engine::surface_should_render_with_metrics(
-                        &effective,
-                        surface_index,
-                        state.data.as_ref(),
-                        runtime,
-                        &metrics,
-                    )
-                })
-            })
-            .unwrap_or(false),
-        ContextMenuAction::SetLanguage { language } => {
-            if language.eq_ignore_ascii_case("system") {
-                state.language_override.is_none()
-            } else {
-                state
-                    .language_override
-                    .is_some_and(|current| current.code().eq_ignore_ascii_case(language))
-            }
+        ContextMenuAction::ToggleWidget => widget_checked(state),
+        ContextMenuAction::SetLanguage { language } => language_checked(state, language),
+        ContextMenuAction::ToggleLayerRender { target } => {
+            layer_render_checked(state, target, origin)
         }
-        ContextMenuAction::ToggleLayerRender { target } => state
-            .active_theme
-            .as_ref()
-            .and_then(|theme| {
-                let effective = theme_engine::apply_mouse_action_overrides(
-                    theme,
-                    &state.mouse_action_overrides,
-                );
-                // STATE is already locked here. Match the action's first-surface
-                // fallback without calling the helper that locks STATE again.
-                let origin_surface = origin.map_or(0, |(surface_index, _)| *surface_index);
-                toggle_layer_render_state_with_metrics(
-                    &effective,
-                    origin_surface,
-                    target,
-                    state.data.as_ref(),
-                    theme_runtime_from_state(state),
-                    state.prepared_metrics.as_ref(),
-                )
-            })
-            .unwrap_or(false),
         _ => false,
     }
+}
+
+/// Whether the widget surface the menu toggles is currently drawn.
+fn widget_checked(state: &AppState) -> bool {
+    state
+        .active_theme
+        .as_ref()
+        .and_then(|theme| {
+            let effective =
+                theme_engine::apply_mouse_action_overrides(theme, &state.mouse_action_overrides);
+            context_menu_widget_origin(&effective).map(|(surface_index, _)| {
+                let runtime = theme_runtime_for_surface(
+                    &effective,
+                    surface_index,
+                    theme_runtime_from_state(state),
+                );
+                let metrics = state.prepared_metrics.as_ref().map_or_else(
+                    || theme_engine::display_metrics(&effective, state.data.as_ref(), runtime),
+                    |metrics| theme_engine::metrics_for_phase(metrics.clone(), runtime),
+                );
+                theme_engine::surface_should_render_with_metrics(
+                    &effective,
+                    surface_index,
+                    state.data.as_ref(),
+                    runtime,
+                    &metrics,
+                )
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Whether `language` is the active language choice ("system" = no override).
+fn language_checked(state: &AppState, language: &str) -> bool {
+    if language.eq_ignore_ascii_case("system") {
+        state.language_override.is_none()
+    } else {
+        state
+            .language_override
+            .is_some_and(|current| current.code().eq_ignore_ascii_case(language))
+    }
+}
+
+/// Whether a `toggle_layer_render` target draws for the menu's origin surface.
+fn layer_render_checked(state: &AppState, target: &str, origin: Option<&(usize, String)>) -> bool {
+    state
+        .active_theme
+        .as_ref()
+        .and_then(|theme| {
+            let effective =
+                theme_engine::apply_mouse_action_overrides(theme, &state.mouse_action_overrides);
+            // STATE is already locked here. Match the action's first-surface
+            // fallback without calling the helper that locks STATE again.
+            let origin_surface = origin.map_or(0, |(surface_index, _)| *surface_index);
+            toggle_layer_render_state_with_metrics(
+                &effective,
+                origin_surface,
+                target,
+                state.data.as_ref(),
+                theme_runtime_from_state(state),
+                state.prepared_metrics.as_ref(),
+            )
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
