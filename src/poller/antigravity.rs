@@ -510,24 +510,6 @@ pub(super) fn fetch_antigravity_models_response(
     Ok(response)
 }
 
-#[allow(dead_code)]
-pub(super) fn fetch_antigravity_model_quota(
-    base_url: &str,
-    token: &str,
-    project: Option<&str>,
-) -> Result<UsageSection, PollError> {
-    let response = fetch_antigravity_models_response(base_url, token, project)?;
-
-    best_antigravity_section(response.models.into_iter().filter_map(|(model, info)| {
-        let quota = info.quota_info?;
-        if !is_antigravity_display_model(&model) {
-            return None;
-        }
-        antigravity_section_from_quota(quota)
-    }))
-    .ok_or(PollError::RequestFailed)
-}
-
 pub(super) fn fetch_antigravity_quota_summary(
     base_url: &str,
     token: &str,
@@ -786,14 +768,6 @@ where
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.resets_at.cmp(&b.resets_at))
     })
-}
-
-pub(super) fn is_antigravity_display_model(model: &str) -> bool {
-    model.starts_with("gemini")
-        || model.starts_with("claude")
-        || model.starts_with("gpt")
-        || model.starts_with("image")
-        || model.starts_with("imagen")
 }
 
 /// OpenCode's Google login: `credential.value` for the `google` integration.

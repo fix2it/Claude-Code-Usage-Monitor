@@ -2,7 +2,6 @@ code = "zh-TW"
 native_name = "繁體中文"
 locale_patterns = ["zh-tw", "zh-hk", "zh-mo", "zh-hant"]
 order = 7
-update_via_winget = "透過 WinGet 更新"
 windows_font_name = "microsoft-jhenghei"
 windows_font_file = "msjh.ttc"
 

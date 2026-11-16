@@ -1685,7 +1685,6 @@ fn show_error_message(hwnd: HWND, title: &str, message: &str) {
 fn begin_update_install(hwnd: HWND, update: AvailableUpdate) {
     match update {
         AvailableUpdate::Release(release) => begin_update_apply(hwnd, release),
-        AvailableUpdate::Winget { .. } => begin_winget_update(hwnd),
     }
 }
 
@@ -1890,38 +1889,6 @@ fn begin_update_apply(hwnd: HWND, release: ReleaseDescriptor) {
             }
         }
     });
-}
-
-fn begin_winget_update(hwnd: HWND) {
-    let (strings, previous_status) = {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if matches!(
-            state.update_status,
-            UpdateStatus::Checking | UpdateStatus::Applying
-        ) {
-            return;
-        }
-        let previous_status = std::mem::replace(&mut state.update_status, UpdateStatus::Applying);
-        publish_update_status(state);
-        (state.language.strings(), previous_status)
-    };
-
-    match updater::begin_winget_update() {
-        Ok(()) => unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-        },
-        Err(error) => {
-            if let Some(state) = lock_state().as_mut() {
-                state.update_status = previous_status;
-                publish_update_status(state);
-            }
-            let message = format!("{}.\n\n{}", strings.update_failed, error);
-            show_error_message(hwnd, strings.updates, &message);
-        }
-    }
 }
 
 const STARTUP_REGISTRY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -3712,9 +3679,9 @@ const ANTIGRAVITY_CROSSFADE_TICK_MS: u32 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Easing {
-    /// Constant-speed interpolation, kept as the reference behaviour and used
-    /// by unit tests. Stage 3 moved the live hover animations to Smoothstep.
-    #[allow(dead_code)]
+    /// Constant-speed interpolation, kept as the reference behaviour for unit
+    /// tests. Stage 3 moved the live hover animations to Smoothstep.
+    #[cfg(test)]
     Linear,
     /// Ease-in-out now used by every live hover and view-mode animation.
     Smoothstep,
@@ -3724,6 +3691,7 @@ impl Easing {
     fn apply(self, progress: f64) -> f64 {
         let p = progress.clamp(0.0, 1.0);
         match self {
+            #[cfg(test)]
             Easing::Linear => p,
             Easing::Smoothstep => p * p * (3.0 - 2.0 * p),
         }
@@ -3765,7 +3733,7 @@ impl PhaseAnimation {
     }
 
     /// Reference linear interpolation, exercised by unit tests.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn linear(start: f64, target: f64, duration: std::time::Duration) -> Self {
         Self::new(start, target, duration, Easing::Linear)
     }

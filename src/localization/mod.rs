@@ -18,7 +18,6 @@ struct Locale {
     native_name: &'static str,
     locale_patterns: &'static [&'static str],
     windows_font: Option<(&'static str, &'static str)>,
-    update_via_winget_label: &'static str,
     strings: Strings,
     translations: &'static [(&'static str, &'static str)],
 }
@@ -63,10 +62,6 @@ impl LanguageId {
             .binary_search_by(|(key, _)| (*key).cmp(english))
             .map(|index| locale.translations[index].1)
             .unwrap_or(english)
-    }
-
-    pub fn update_via_winget_label(self) -> &'static str {
-        self.locale().update_via_winget_label
     }
 
     pub fn provider_auth_error(self, provider: ProviderId) -> (&'static str, &'static str) {
@@ -214,10 +209,6 @@ pub fn detect_system_language() -> LanguageId {
         .or_else(default_ui_locale)
         .or_else(default_locale_name)
         .unwrap_or(LanguageId::English)
-}
-
-pub fn update_via_winget(language: LanguageId) -> &'static str {
-    language.update_via_winget_label()
 }
 
 fn preferred_ui_languages() -> Vec<String> {

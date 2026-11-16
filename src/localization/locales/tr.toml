@@ -2,7 +2,6 @@ code = "tr"
 native_name = "Türkçe"
 locale_patterns = ["tr"]
 order = 11
-update_via_winget = "WinGet ile güncelle"
 
 [strings]
 window_title = "Claude Code Kullanım İzleyicisi"

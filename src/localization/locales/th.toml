@@ -2,7 +2,6 @@ code = "th"
 native_name = "ไทย"
 locale_patterns = ["th"]
 order = 13
-update_via_winget = "อัปเดตผ่าน WinGet"
 windows_font_name = "leelawadee-ui"
 windows_font_file = "LeelawUI.ttf"
 

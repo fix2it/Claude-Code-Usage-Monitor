@@ -334,7 +334,7 @@ impl SettingsFile {
         self.show_antigravity = enabled;
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn set_antigravity_external_enabled(&mut self, enabled: bool) {
         let gemini = self.antigravity_gemini_enabled();
         self.show_antigravity_external = Some(enabled);

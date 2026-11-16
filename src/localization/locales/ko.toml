@@ -2,7 +2,6 @@ code = "ko"
 native_name = "한국어"
 locale_patterns = ["ko"]
 order = 6
-update_via_winget = "WinGet으로 업데이트"
 windows_font_name = "malgun-gothic"
 windows_font_file = "malgun.ttf"
 

@@ -93,16 +93,16 @@ More long functions (round 3):
 Round 4:
 - F48 | S1 | src/theme_engine/theme_rendering.rs:117 | each surface render builds the full usage `DataContext` twice (incl. formatted dynamic limit keys) | proposal: build once per frame, patch canvas-size values | open
 - F49 | M2 | src/poller/copilot.rs:331 (+ cursor, grok, opencode) | env-value normalization duplicated in 4 pollers; secret-signature logic duplicated in copilot and cursor | proposal: shared helpers in poller.rs | open
-- F50 | M5 | src/updater.rs:48 | `InstallChannel::Winget` dead in production (`allow(dead_code)`), plus its update path | proposal: remove or gate under cfg(test) | open
+- F50 | M5 | src/updater.rs:48 | `InstallChannel::Winget` dead in production (`allow(dead_code)`), plus its update path | proposal: remove or gate under cfg(test) | fixed (refactor/4-dead-code)
 - F51 | M4 | src/studio_app/warp.rs:425-564 | test `warp_renders_partial_textures_at_zoom_and_frees_after_paint` 140 lines (L6: test shape) | proposal: split | open
 Round 5:
 - F53 | S1 | src/window.rs:4328 | hover setters for Claude, Codex, Antigravity, OpenCode, Qoder, agy external repeat state-change + animation + timer logic | proposal: one generic hover-animation helper with per-provider eligibility | open
 - F54 | S1 | src/window.rs:1490-1588 | `sync_tray_icon` (~100) mixes state collection, surface filter, render, shell sync | proposal: extract themed-icon build | open
 - F55 | S1/M6 | src/desktop_compositor.rs:130 | `Present(1, …)` (vsync wait) on the UI thread for every desktop-surface paint | proposal: measure; `Present(0, …)` or DXGI_PRESENT_DO_NOT_WAIT / waitable swap chain | open
 Dead code:
-- F34 | S1 | src/poller/antigravity.rs:514,791 | `fetch_antigravity_model_quota` (`#[allow(dead_code)]`) and its only helper `is_antigravity_display_model` unused | proposal: delete | open
-- F17 | S5 | src/app_settings.rs:338 | `set_antigravity_external_enabled` only called from tests (1089) | proposal: `#[cfg(test)]` or remove | open
-- F18 | S1 | src/window.rs:3771,3813 | `Easing::Linear` / `PhaseAnimation::linear` used only by tests | proposal: gate behind `#[cfg(test)]` | open
+- F34 | S1 | src/poller/antigravity.rs:514,791 | `fetch_antigravity_model_quota` (`#[allow(dead_code)]`) and its only helper `is_antigravity_display_model` unused | proposal: delete | fixed (refactor/4-dead-code)
+- F17 | S5 | src/app_settings.rs:338 | `set_antigravity_external_enabled` only called from tests (1089) | proposal: `#[cfg(test)]` or remove | fixed (refactor/4-dead-code)
+- F18 | S1 | src/window.rs:3771,3813 | `Easing::Linear` / `PhaseAnimation::linear` used only by tests | proposal: gate behind `#[cfg(test)]` | fixed (refactor/4-dead-code)
 
 ## Borderline
 
