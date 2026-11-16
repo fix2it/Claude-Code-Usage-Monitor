@@ -102,32 +102,8 @@ struct AppState {
     pub(super) show_antigravity_external: bool,
     /// External models of agy pool o (pool a's is `show_antigravity_external`).
     pub(super) show_antigravity_external_x: bool,
-    crossfade_opacity: f64,
-    antigravity_hovered: bool,
-    crossfade_animation: Option<PhaseAnimation>,
-    pub(super) antigravity_tile_rect: Option<(f64, f64, f64, f64)>,
-    pub(super) claude_hovered: bool,
-    pub(super) claude_crossfade_opacity: f64,
-    pub(super) claude_crossfade_animation: Option<PhaseAnimation>,
-    pub(super) claude_tile_rect: Option<(f64, f64, f64, f64)>,
-    pub(super) codex_hovered: bool,
-    pub(super) codex_crossfade_opacity: f64,
-    pub(super) codex_crossfade_animation: Option<PhaseAnimation>,
-    pub(super) codex_tile_rect: Option<(f64, f64, f64, f64)>,
-    pub(super) opencode_tile_rect: Option<(f64, f64, f64, f64)>,
-    pub(super) qoder_tile_rect: Option<(f64, f64, f64, f64)>,
-    opencode_hovered: bool,
-    qoder_hovered: bool,
-    opencode_crossfade_opacity: f64,
-    qoder_crossfade_opacity: f64,
-    opencode_crossfade_animation: Option<PhaseAnimation>,
-    qoder_crossfade_animation: Option<PhaseAnimation>,
-    /// The agy external-models widget has its own hover area and crossfade.
-    pub(super) agy_external_tile_rect: Option<(f64, f64, f64, f64)>,
-    agy_external_hovered: bool,
-    agy_external_crossfade_opacity: f64,
-    agy_external_crossfade_animation: Option<PhaseAnimation>,
-    split_hovers: [SplitHover; 4],
+    /// Hover state and hit-test rects of the provider and split-pool tiles.
+    pub(super) tiles: tiles::Tiles,
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
     view_mode: u8,
@@ -200,17 +176,7 @@ impl AppState {
     /// All animation slots share the crossfade timer, including the view-mode
     /// transition. The timer stops only when every slot has settled.
     pub(super) fn is_any_animation_active(&self) -> bool {
-        self.crossfade_animation.is_some()
-            || self.claude_crossfade_animation.is_some()
-            || self.codex_crossfade_animation.is_some()
-            || self.opencode_crossfade_animation.is_some()
-            || self.qoder_crossfade_animation.is_some()
-            || self.agy_external_crossfade_animation.is_some()
-            || self.widget_animations.iter().any(Option::is_some)
-            || self
-                .split_hovers
-                .iter()
-                .any(|hover| hover.animation.is_some())
+        self.tiles.any_animating() || self.widget_animations.iter().any(Option::is_some)
     }
 
     pub(super) fn stop_crossfade_timer_if_idle(&self, hwnd: HWND) {
@@ -239,6 +205,16 @@ impl AppState {
             }
     }
 
+    /// The "Pools on one widget" choice of a two-pool provider.
+    pub(super) fn pools_one_widget_mut(&mut self, provider: ProviderId) -> Option<&mut bool> {
+        match provider {
+            ProviderId::Claude => Some(&mut self.claude_pools_one_widget),
+            ProviderId::Codex => Some(&mut self.codex_pools_one_widget),
+            ProviderId::Antigravity => Some(&mut self.antigravity_pools_one_widget),
+            _ => None,
+        }
+    }
+
     pub(super) fn is_dual_mode_active(&self, provider: ProviderId) -> bool {
         let (main_id, x_id) = match provider {
             ProviderId::Claude => ("default", "claude_x"),
@@ -248,14 +224,6 @@ impl AppState {
         self.is_account_profile_enabled(provider, main_id, true)
             && self.is_account_profile_enabled(provider, x_id, false)
     }
-}
-
-#[derive(Default)]
-struct SplitHover {
-    rect: Option<(f64, f64, f64, f64)>,
-    hovered: bool,
-    phase: f64,
-    animation: Option<PhaseAnimation>,
 }
 
 #[derive(Clone, Debug)]
@@ -881,9 +849,9 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         .with_show_fable_x(state.show_fable_x)
         .with_pool_layouts(
             state.claude_pools_one_widget,
+            state.codex_pools_one_widget,
             state.antigravity_pools_one_widget,
         )
-        .with_codex_pool_layout(state.codex_pools_one_widget)
         .with_pool_split_support(
             state
                 .active_theme
@@ -892,16 +860,16 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         )
         .with_view_mode(state.view_mode)
         .with_mode_phase(state.mode_phase)
-        .with_opencode_state(state.opencode_crossfade_opacity)
-        .with_qoder_state(state.qoder_crossfade_opacity)
-        .with_agy_external_state(state.agy_external_crossfade_opacity)
-        .with_split_hover_phases(std::array::from_fn(|i| state.split_hovers[i].phase))
+        .with_opencode_state(state.tiles[Tile::OpenCode].phase)
+        .with_qoder_state(state.tiles[Tile::Qoder].phase)
+        .with_agy_external_state(state.tiles[Tile::AgyExternal].phase)
+        .with_split_hover_phases(state.tiles.split_phases())
         .with_nest(nest)
         .with_floating_card_opacity(opacity)
         .with_antigravity_pools(
             state.show_antigravity_gemini,
             effective_antigravity_external(state),
-            state.crossfade_opacity,
+            state.tiles[Tile::Antigravity].phase,
         )
         .with_antigravity_external_x(state.show_antigravity_external_x)
         .with_antigravity_x(
@@ -911,16 +879,16 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
         )
         .with_antigravity_a(state.accounts.antigravity_a_enabled())
         .with_claude_state(
-            state.claude_hovered,
+            state.tiles[Tile::Claude].hovered,
             state.is_account_profile_enabled(ProviderId::Claude, "default", true),
             state.is_account_profile_enabled(ProviderId::Claude, "claude_x", false),
-            state.claude_crossfade_opacity,
+            state.tiles[Tile::Claude].phase,
         )
         .with_codex_state(
-            state.codex_hovered,
+            state.tiles[Tile::Codex].hovered,
             state.is_account_profile_enabled(ProviderId::Codex, "default", true),
             state.is_account_profile_enabled(ProviderId::Codex, "codex_x", false),
-            state.codex_crossfade_opacity,
+            state.tiles[Tile::Codex].phase,
         );
     app_settings::widget_mode_keys()
         .zip(state.widget_modes.iter())
@@ -3031,31 +2999,7 @@ pub fn run() {
                 show_antigravity_gemini: settings.antigravity_gemini_enabled(),
                 show_antigravity_external: settings.antigravity_external_enabled(),
                 show_antigravity_external_x: settings.antigravity_external_x_enabled(),
-                crossfade_opacity: 1.0,
-                antigravity_hovered: false,
-                crossfade_animation: None,
-                antigravity_tile_rect: None,
-                claude_hovered: false,
-                claude_crossfade_opacity: 0.0,
-                claude_crossfade_animation: None,
-                claude_tile_rect: None,
-                codex_hovered: false,
-                codex_crossfade_opacity: 0.0,
-                codex_crossfade_animation: None,
-                codex_tile_rect: None,
-                opencode_tile_rect: None,
-                qoder_tile_rect: None,
-                opencode_hovered: false,
-                qoder_hovered: false,
-                opencode_crossfade_opacity: 0.0,
-                qoder_crossfade_opacity: 0.0,
-                opencode_crossfade_animation: None,
-                qoder_crossfade_animation: None,
-                agy_external_tile_rect: None,
-                agy_external_hovered: false,
-                agy_external_crossfade_opacity: 0.0,
-                agy_external_crossfade_animation: None,
-                split_hovers: std::array::from_fn(|_| SplitHover::default()),
+                tiles: tiles::Tiles::default(),
                 view_mode: settings.view_mode,
                 mode_phase: (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0),
                 widget_modes: widget_modes_from_settings(&settings),
@@ -3290,43 +3234,16 @@ fn render_layered_impl(trigger: RenderTrigger) {
                 trigger == RenderTrigger::Full
                     || state.widget_animations.iter().any(Option::is_some)
             }) {
-                if state.antigravity_tile_rect.is_none()
-                    || state.claude_tile_rect.is_none()
-                    || state.codex_tile_rect.is_none()
-                    || state.opencode_tile_rect.is_none()
-                    || state.qoder_tile_rect.is_none()
-                    || state.agy_external_tile_rect.is_none()
-                    || state.split_hovers.iter().any(|hover| hover.rect.is_none())
-                {
-                    let ids = [
-                        mouse::ANTIGRAVITY_HOVER_OBJECT,
-                        mouse::CLAUDE_HOVER_OBJECT,
-                        mouse::CODEX_HOVER_OBJECT,
-                        mouse::OPENCODE_HOVER_OBJECT,
-                        mouse::QODER_HOVER_OBJECT,
-                        mouse::AGY_EXTERNAL_HOVER_OBJECT,
-                        "claude_x-provider",
-                        "antigravity_o-provider",
-                        "agy_external_o-provider",
-                        "codex_x-provider",
-                    ];
+                if state.tiles.rects_incomplete(0) {
                     let bounds = theme_engine::object_bounds_for_ids_with_metrics(
                         &theme,
                         0,
                         usage_data.as_ref(),
                         surface_runtime,
-                        &ids,
+                        &tiles::Tiles::object_ids(),
                         &surface_metrics,
                     );
-                    state.antigravity_tile_rect = bounds[0];
-                    state.claude_tile_rect = bounds[1];
-                    state.codex_tile_rect = bounds[2];
-                    state.opencode_tile_rect = bounds[3];
-                    state.qoder_tile_rect = bounds[4];
-                    state.agy_external_tile_rect = bounds[5];
-                    for (hover, rect) in state.split_hovers.iter_mut().zip(&bounds[6..]) {
-                        hover.rect = *rect;
-                    }
+                    state.tiles.set_rects(0, &bounds);
                 }
             }
         }
@@ -3957,11 +3874,6 @@ fn check_language_change() {
     }
 }
 
-const ANTIGRAVITY_CROSSFADE_DURATION_MS: u64 = 200;
-const CODEX_CROSSFADE_DURATION_MS: u64 = 200;
-const CLAUDE_CROSSFADE_DURATION_MS: u64 = 200;
-const OPENCODE_CROSSFADE_DURATION_MS: u64 = 200;
-const QODER_CROSSFADE_DURATION_MS: u64 = 200;
 const MODE_TRANSITION_DURATION_MS: u64 = 200;
 const ANTIGRAVITY_CROSSFADE_TICK_MS: u32 = 16;
 
@@ -4123,15 +4035,7 @@ fn prepared_metrics(
 
 /// Drop cached provider hit-test rects when widget geometry changes.
 fn invalidate_hover_tile_rects(state: &mut AppState) {
-    state.antigravity_tile_rect = None;
-    state.claude_tile_rect = None;
-    state.codex_tile_rect = None;
-    state.opencode_tile_rect = None;
-    state.qoder_tile_rect = None;
-    state.agy_external_tile_rect = None;
-    for hover in &mut state.split_hovers {
-        hover.rect = None;
-    }
+    state.tiles.clear_rects();
 }
 
 /// Toggle the opt-in Fable column and invalidate the geometry-dependent hover
@@ -4163,9 +4067,7 @@ fn toggle_antigravity_models(state: &mut AppState, gemini: bool) -> bool {
     let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
         && state.providers.contains(ProviderId::Antigravity);
     if !any_pool {
-        state.antigravity_hovered = false;
-        state.crossfade_opacity = 1.0;
-        state.crossfade_animation = None;
+        state.tiles.reset(Tile::Antigravity);
     }
     gemini
 }
@@ -4181,13 +4083,80 @@ fn set_antigravity_shown(state: &mut AppState, on: bool) {
             state.accounts.set_antigravity_a_enabled(true);
         }
     } else {
-        state.antigravity_hovered = false;
-        state.crossfade_opacity = 1.0;
-        state.crossfade_animation = None;
-        state.agy_external_hovered = false;
-        state.agy_external_crossfade_opacity = 0.0;
-        state.agy_external_crossfade_animation = None;
+        state.tiles.reset(Tile::Antigravity);
+        state.tiles.reset(Tile::AgyExternal);
     }
+}
+
+/// Main and X pools of Claude and Codex: the X profile's id, menu name and
+/// config directory, and the provider's tile.
+fn account_pool_defaults(
+    provider: ProviderId,
+) -> Option<(&'static str, &'static str, &'static str, Tile)> {
+    match provider {
+        ProviderId::Claude => Some(("claude_x", "Claude Code X", "~/.claude_x", Tile::Claude)),
+        ProviderId::Codex => Some(("codex_x", "Codex X", "~/.codex_x", Tile::Codex)),
+        _ => None,
+    }
+}
+
+/// "Claude (Main)" / "Claude Code X" and the Codex pair. A missing profile is
+/// created first. Switching off the last pool turns the provider off (refused
+/// when it is the only provider); switching a pool on while the provider is
+/// off turns it on. Returns true when the provider set changed.
+fn toggle_account_pool(state: &mut AppState, provider: ProviderId, main: bool) -> bool {
+    let Some((x_id, x_name, x_config_dir, tile)) = account_pool_defaults(provider) else {
+        return false;
+    };
+    let target_id = if main { "default" } else { x_id };
+    let provider_on = state.providers.contains(provider);
+    let pools = match provider {
+        ProviderId::Claude => &mut state.accounts.claude,
+        _ => &mut state.accounts.codex,
+    };
+    if !pools.profiles.iter().any(|profile| profile.id == target_id) {
+        pools.profiles.push(if main {
+            crate::accounts::AccountProfile::default()
+        } else {
+            crate::accounts::AccountProfile {
+                id: x_id.into(),
+                name: x_name.into(),
+                config_dir: x_config_dir.into(),
+                credentials_path: String::new(),
+                enabled: false,
+            }
+        });
+        pools.used_ids.insert(target_id.into());
+    }
+    let main_on = provider_on && pools.is_profile_enabled("default", true);
+    let x_on = provider_on && pools.is_profile_enabled(x_id, false);
+    let (current, other) = if main {
+        (main_on, x_on)
+    } else {
+        (x_on, main_on)
+    };
+    let target = !current;
+    if !target && !other && state.providers.len() <= 1 && provider_on {
+        // Keep at least one provider active.
+        return false;
+    }
+    if let Some(profile) = pools
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.id == target_id)
+    {
+        profile.enabled = target;
+    }
+    let any_pool = target || other;
+    let provider_changed = any_pool != provider_on;
+    state.providers.set(provider, any_pool);
+    if !any_pool {
+        state.tiles.reset(tile);
+    }
+    // A pool switch can add or drop the Fable column, which moves every
+    // widget's hover area.
+    invalidate_metrics(state);
+    provider_changed
 }
 
 /// "Antigravity (Main)": agy pool a, like Claude's main pool. Switching off
@@ -4432,45 +4401,15 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
         let mut render = false;
         let mut active = false;
         let mode_was_active = state.widget_animations.iter().any(Option::is_some);
-        for (slot, value) in [
-            (&mut state.crossfade_animation, &mut state.crossfade_opacity),
-            (
-                &mut state.claude_crossfade_animation,
-                &mut state.claude_crossfade_opacity,
-            ),
-            (
-                &mut state.codex_crossfade_animation,
-                &mut state.codex_crossfade_opacity,
-            ),
-            (
-                &mut state.opencode_crossfade_animation,
-                &mut state.opencode_crossfade_opacity,
-            ),
-            (
-                &mut state.qoder_crossfade_animation,
-                &mut state.qoder_crossfade_opacity,
-            ),
-            (
-                &mut state.agy_external_crossfade_animation,
-                &mut state.agy_external_crossfade_opacity,
-            ),
-        ] {
-            let (changed, more) = PhaseAnimation::tick_slot(slot, value, throttle);
-            render |= changed;
-            active |= more;
-        }
+        let (changed, more) = state.tiles.tick(throttle);
+        render |= changed;
+        active |= more;
         for (slot, (_, phase)) in state
             .widget_animations
             .iter_mut()
             .zip(state.widget_modes.iter_mut())
         {
             let (changed, more) = PhaseAnimation::tick_slot(slot, phase, throttle);
-            render |= changed;
-            active |= more;
-        }
-        for hover in &mut state.split_hovers {
-            let (changed, more) =
-                PhaseAnimation::tick_slot(&mut hover.animation, &mut hover.phase, throttle);
             render |= changed;
             active |= more;
         }
@@ -4507,202 +4446,42 @@ pub(super) fn tick_animations(hwnd: HWND, throttle: bool) {
     }
 }
 
-fn hover_phase_animation(start: f64, target: f64, duration_ms: u64) -> PhaseAnimation {
-    PhaseAnimation::hover(start, target, Duration::from_millis(duration_ms))
-}
-
-pub(super) fn set_split_hover(hwnd: HWND, index: usize, hovered: bool) {
-    let changed = {
-        let mut state = lock_state();
-        let Some(hover) = state
-            .as_mut()
-            .and_then(|state| state.split_hovers.get_mut(index))
-        else {
-            return;
-        };
-        if hover.hovered == hovered {
-            false
-        } else {
-            hover.hovered = hovered;
-            hover.animation = Some(hover_phase_animation(
-                hover.phase,
-                if hovered { 1.0 } else { 0.0 },
-                CLAUDE_CROSSFADE_DURATION_MS,
-            ));
-            true
-        }
-    };
-    if changed {
-        ensure_crossfade_timer(hwnd);
-    }
-}
-
-pub(super) fn set_claude_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if state.claude_hovered != hovered {
-            state.claude_hovered = hovered;
-            // The single-pool Fable row also follows Claude's hover phase.
-            // Keep it current even while Fable is off, so toggling Fable over
-            // an already-hovered tile immediately reveals the correct row.
-            let target = if hovered { 1.0 } else { 0.0 };
-            state.claude_crossfade_animation = Some(hover_phase_animation(
-                state.claude_crossfade_opacity,
-                target,
-                CLAUDE_CROSSFADE_DURATION_MS,
-            ));
-            should_animate = true;
-        }
-    }
-    if should_animate {
-        ensure_crossfade_timer(hwnd);
-    }
-}
-
-/// Updates the hover state when the cursor enters or leaves the Codex tile with a 200ms crossfade animation.
-pub(super) fn set_codex_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if state.codex_hovered != hovered {
-            state.codex_hovered = hovered;
-            if state.is_dual_mode_active(ProviderId::Codex) {
-                let target = if hovered { 1.0 } else { 0.0 };
-                state.codex_crossfade_animation = Some(hover_phase_animation(
-                    state.codex_crossfade_opacity,
-                    target,
-                    CODEX_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
-        }
-    }
-    if should_animate {
-        ensure_crossfade_timer(hwnd);
-    }
-}
-
-pub(super) fn set_antigravity_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
+/// Whether entering (or leaving) `tile` animates its phase. A tile whose
+/// provider has nothing to reveal keeps its phase but still records hover.
+fn tile_hover_animates(state: &AppState, tile: Tile, hovered: bool) -> bool {
+    match tile {
+        // The single-pool Fable row also follows Claude's hover phase. Keep
+        // it current even while Fable is off, so toggling Fable over an
+        // already-hovered tile immediately reveals the correct row.
+        Tile::Claude | Tile::Split(_) => true,
+        Tile::Codex => state.is_dual_mode_active(ProviderId::Codex),
         // Dual mode fades Gemini to Claude/GPT; a single pool fades to the
         // hidden one.
-        let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
-            && state.providers.contains(ProviderId::Antigravity);
-        if state.antigravity_hovered != hovered {
-            state.antigravity_hovered = hovered;
-            if any_pool {
-                let target = if hovered { 0.0 } else { 1.0 };
-                state.crossfade_animation = Some(hover_phase_animation(
-                    state.crossfade_opacity,
-                    target,
-                    ANTIGRAVITY_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
+        Tile::Antigravity => {
+            (state.show_antigravity_gemini || state.show_antigravity_external)
+                && state.providers.contains(ProviderId::Antigravity)
         }
-    }
-    if should_animate {
-        ensure_crossfade_timer(hwnd);
-    }
-}
-
-/// Drives the OpenCode hover phase (Stage 6's split gauge consumes it).
-/// Unlike the three dual-mode providers this is gated on the provider being
-/// enabled, not on dual-mode account selection.
-pub(super) fn set_opencode_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if state.opencode_hovered != hovered {
-            state.opencode_hovered = hovered;
-            if state.providers.contains(ProviderId::OpenCode) {
-                let target = if hovered { 1.0 } else { 0.0 };
-                state.opencode_crossfade_animation = Some(hover_phase_animation(
-                    state.opencode_crossfade_opacity,
-                    target,
-                    OPENCODE_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
-        }
-    }
-    if should_animate {
-        ensure_crossfade_timer(hwnd);
-    }
-}
-
-/// Drives the Qoder hover phase (its dual bottom row swaps on hover).
-/// Unlike the three dual-mode providers this is gated on the provider being
-/// enabled, not on dual-mode account selection.
-pub(super) fn set_qoder_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if state.qoder_hovered != hovered {
-            state.qoder_hovered = hovered;
-            // Only a second extra pool has anything to reveal on hover.
+        Tile::OpenCode => state.providers.contains(ProviderId::OpenCode),
+        // Only a second extra pool has anything to reveal on hover.
+        Tile::Qoder => {
             let has_second_pool = state
                 .data
                 .as_ref()
                 .and_then(|data| data.get(ProviderId::Qoder))
                 .is_some_and(|usage| usage.week.is_some());
-            if state.providers.contains(ProviderId::Qoder) && (has_second_pool || !hovered) {
-                let target = if hovered { 1.0 } else { 0.0 };
-                state.qoder_crossfade_animation = Some(hover_phase_animation(
-                    state.qoder_crossfade_opacity,
-                    target,
-                    QODER_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
+            state.providers.contains(ProviderId::Qoder) && (has_second_pool || !hovered)
         }
-    }
-    if should_animate {
-        ensure_crossfade_timer(hwnd);
+        Tile::AgyExternal => state.providers.contains(ProviderId::Antigravity) || !hovered,
     }
 }
 
-/// Drives the hover crossfade of the agy external-models widget, which is
-/// shown only while agy splits its external models into their own widget.
-pub(super) fn set_agy_external_hover(hwnd: HWND, hovered: bool) {
-    let mut should_animate = false;
-    {
-        let mut state = lock_state();
-        let Some(state) = state.as_mut() else {
-            return;
-        };
-        if state.agy_external_hovered != hovered {
-            state.agy_external_hovered = hovered;
-            if state.providers.contains(ProviderId::Antigravity) || !hovered {
-                let target = if hovered { 1.0 } else { 0.0 };
-                state.agy_external_crossfade_animation = Some(hover_phase_animation(
-                    state.agy_external_crossfade_opacity,
-                    target,
-                    QODER_CROSSFADE_DURATION_MS,
-                ));
-                should_animate = true;
-            }
-        }
-    }
-    if should_animate {
+/// The cursor entered or left `tile`. Arms the animation timer, never renders.
+fn set_tile_hover(hwnd: HWND, tile: Tile, hovered: bool) {
+    let animating = lock_state().as_mut().is_some_and(|state| {
+        let animate = tile_hover_animates(state, tile, hovered);
+        state.tiles.set_hovered(tile, hovered, animate)
+    });
+    if animating {
         ensure_crossfade_timer(hwnd);
     }
 }
@@ -4747,39 +4526,23 @@ fn reload_external_settings(hwnd: HWND) {
         state.widget_modes = widget_modes_from_settings(&settings);
         let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
             && state.providers.contains(ProviderId::Antigravity);
-        if !any_pool {
-            state.antigravity_hovered = false;
-            state.crossfade_opacity = 1.0;
-            state.crossfade_animation = None;
-        }
-        let codex_active = state.providers.contains(ProviderId::Codex);
-        if !codex_active {
-            state.codex_hovered = false;
-            state.codex_crossfade_opacity = 0.0;
-            state.codex_crossfade_animation = None;
-        }
-        let claude_active = state.providers.contains(ProviderId::Claude);
-        if !claude_active {
-            state.claude_hovered = false;
-            state.claude_crossfade_opacity = 0.0;
-            state.claude_crossfade_animation = None;
-        }
-        let opencode_active = state.providers.contains(ProviderId::OpenCode);
-        if !opencode_active {
-            state.opencode_hovered = false;
-            state.opencode_crossfade_opacity = 0.0;
-            state.opencode_crossfade_animation = None;
-        }
-        let qoder_active = state.providers.contains(ProviderId::Qoder);
-        if !qoder_active {
-            state.qoder_hovered = false;
-            state.qoder_crossfade_opacity = 0.0;
-            state.qoder_crossfade_animation = None;
-        }
-        if !state.providers.contains(ProviderId::Antigravity) {
-            state.agy_external_hovered = false;
-            state.agy_external_crossfade_opacity = 0.0;
-            state.agy_external_crossfade_animation = None;
+        for (tile, shown) in [
+            (Tile::Antigravity, any_pool),
+            (Tile::Codex, state.providers.contains(ProviderId::Codex)),
+            (Tile::Claude, state.providers.contains(ProviderId::Claude)),
+            (
+                Tile::OpenCode,
+                state.providers.contains(ProviderId::OpenCode),
+            ),
+            (Tile::Qoder, state.providers.contains(ProviderId::Qoder)),
+            (
+                Tile::AgyExternal,
+                state.providers.contains(ProviderId::Antigravity),
+            ),
+        ] {
+            if !shown {
+                state.tiles.reset(tile);
+            }
         }
         state.stop_crossfade_timer_if_idle(hwnd);
         invalidate_metrics(state);
@@ -4917,6 +4680,8 @@ mod taskbar_collision;
 use positioning::*;
 mod animation_timer;
 mod mouse;
+mod tiles;
+use tiles::Tile;
 mod widget_tooltip;
 use mouse::*;
 mod window_context_menu;
@@ -5898,28 +5663,64 @@ mod phase_animation_tests {
     use std::time::Duration;
 
     #[test]
-    fn hover_setters_arm_200ms_animations_without_rendering() {
+    fn tile_hover_arms_a_200ms_animation_without_rendering() {
         let source = include_str!("window.rs");
-        let setters = source
-            .split("pub(super) fn set_claude_hover")
+        let setter = source
+            .split(
+                "
+fn set_tile_hover(",
+            )
             .nth(1)
             .unwrap()
-            .split("fn reload_external_settings")
+            .split("\n}\n")
             .next()
             .unwrap();
-        assert!(!setters.contains("render_layered_animation()"));
-        assert_eq!(setters.matches("ensure_crossfade_timer(hwnd)").count(), 6);
-        for duration in [
-            super::ANTIGRAVITY_CROSSFADE_DURATION_MS,
-            super::CLAUDE_CROSSFADE_DURATION_MS,
-            super::CODEX_CROSSFADE_DURATION_MS,
-            super::OPENCODE_CROSSFADE_DURATION_MS,
-            super::QODER_CROSSFADE_DURATION_MS,
-        ] {
-            for (start, target) in [(0.0, 1.0), (1.0, 0.0)] {
-                let animation = super::hover_phase_animation(start, target, duration);
-                assert_eq!(animation.duration, Duration::from_millis(200));
-            }
+        assert!(!setter.contains("render_layered"));
+        assert!(setter.contains("ensure_crossfade_timer(hwnd)"));
+
+        let mut tiles = super::tiles::Tiles::default();
+        for tile in super::Tile::ALL {
+            assert!(tiles.set_hovered(tile, true, true));
+            let animation = tiles[tile].animation.as_ref().unwrap();
+            assert_eq!(animation.duration, Duration::from_millis(200));
+            // agy fades its Gemini row out (1 -> 0); every other tile fades in.
+            let expected = if tile == super::Tile::Antigravity {
+                0.0
+            } else {
+                1.0
+            };
+            assert_eq!(animation.target, expected, "{tile:?}");
+            assert!(
+                !tiles.set_hovered(tile, true, true),
+                "no restart while hovered"
+            );
+        }
+    }
+
+    #[test]
+    fn tile_table_matches_the_theme_objects() {
+        let ids = super::tiles::Tiles::object_ids();
+        assert_eq!(
+            &ids[..6],
+            &[
+                "antigravity-provider",
+                "claude-provider",
+                "codex-provider",
+                "opencode-provider",
+                "qoder-provider",
+                crate::theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET,
+            ]
+        );
+        let mut tiles = super::tiles::Tiles::default();
+        let bounds: Vec<_> = (0..ids.len())
+            .map(|i| Some((i as f64, 0.0, 1.0, 1.0)))
+            .collect();
+        tiles.set_rects(0, &bounds);
+        for (i, tile) in super::Tile::ALL.into_iter().enumerate() {
+            assert_eq!(tiles.rect(0, tile), bounds[i], "{tile:?}");
+        }
+        for pool in crate::theme_engine::SplitPool::ALL {
+            assert_eq!(super::Tile::Split(pool).object_id(), pool.object_id());
         }
     }
 
@@ -6027,26 +5828,20 @@ mod phase_animation_tests {
         use super::placement_regression_tests::{placement, state_for};
         use crate::theme_engine::ThemeDocument;
 
-        fn set_slot(state: &mut AppState, index: usize, value: Option<PhaseAnimation>) {
-            match index {
-                0 => state.crossfade_animation = value,
-                1 => state.claude_crossfade_animation = value,
-                2 => state.codex_crossfade_animation = value,
-                3 => state.opencode_crossfade_animation = value,
-                4 => state.qoder_crossfade_animation = value,
-                5 => state.agy_external_crossfade_animation = value,
-                _ => state.widget_animations[index - 6] = value,
-            }
-        }
-
         let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
         assert!(!state.is_any_animation_active());
         let active = || Some(PhaseAnimation::linear(0.0, 1.0, Duration::from_millis(200)));
 
-        for index in 0..6 + crate::theme_engine::WIDGET_SLOTS {
-            set_slot(&mut state, index, active());
+        for tile in super::Tile::ALL {
+            assert!(state.tiles.set_hovered(tile, true, true));
+            assert!(state.is_any_animation_active(), "{tile:?}");
+            state.tiles.reset(tile);
+            assert!(!state.is_any_animation_active(), "{tile:?}");
+        }
+        for index in 0..crate::theme_engine::WIDGET_SLOTS {
+            state.widget_animations[index] = active();
             assert!(state.is_any_animation_active(), "slot {index}");
-            set_slot(&mut state, index, None);
+            state.widget_animations[index] = None;
             assert!(!state.is_any_animation_active(), "slot {index}");
         }
     }
@@ -6057,18 +5852,16 @@ mod phase_animation_tests {
         use crate::theme_engine::ThemeDocument;
 
         let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
-        state.antigravity_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-        state.claude_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-        state.codex_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-        state.opencode_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-        assert!(state.claude_tile_rect.is_some());
+        state
+            .tiles
+            .set_rects(0, &[Some((1.0, 2.0, 3.0, 4.0)); super::Tile::ALL.len()]);
+        assert!(state.tiles.rect(0, super::Tile::Claude).is_some());
 
         invalidate_hover_tile_rects(&mut state);
 
-        assert!(state.antigravity_tile_rect.is_none());
-        assert!(state.claude_tile_rect.is_none());
-        assert!(state.codex_tile_rect.is_none());
-        assert!(state.opencode_tile_rect.is_none());
+        for tile in super::Tile::ALL {
+            assert!(state.tiles.rect(0, tile).is_none(), "{tile:?}");
+        }
     }
 
     #[test]
@@ -6077,19 +5870,17 @@ mod phase_animation_tests {
         use crate::theme_engine::ThemeDocument;
 
         fn seed_rects(state: &mut AppState) {
-            state.antigravity_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-            state.claude_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-            state.codex_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
-            state.opencode_tile_rect = Some((1.0, 2.0, 3.0, 4.0));
+            state
+                .tiles
+                .set_rects(0, &[Some((1.0, 2.0, 3.0, 4.0)); super::Tile::ALL.len()]);
         }
         fn assert_rects_cleared(state: &AppState) {
-            assert!(
-                state.antigravity_tile_rect.is_none(),
-                "antigravity rect survives"
-            );
-            assert!(state.claude_tile_rect.is_none(), "claude rect survives");
-            assert!(state.codex_tile_rect.is_none(), "codex rect survives");
-            assert!(state.opencode_tile_rect.is_none(), "opencode rect survives");
+            for tile in super::Tile::ALL {
+                assert!(
+                    state.tiles.rect(0, tile).is_none(),
+                    "{tile:?} rect survives"
+                );
+            }
         }
 
         let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
