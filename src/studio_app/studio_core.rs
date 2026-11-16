@@ -394,9 +394,7 @@ impl StudioApp {
                 ui.allocate_ui_with_layout(
                     ui.available_size(),
                     egui::Layout::bottom_up(egui::Align::Min),
-                    |ui| {
-                        self.nav_footer(ui);
-                    },
+                    |ui| self.nav_footer(ui),
                 );
             });
     }

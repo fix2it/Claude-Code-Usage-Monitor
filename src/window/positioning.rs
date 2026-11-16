@@ -357,10 +357,7 @@ fn custom_theme_position() -> Option<(HWND, ThemeDocument, f64)> {
 /// `None` while dragging or without a taskbar.
 fn legacy_taskbar_target() -> Option<(HWND, bool, i32, HWND)> {
     let state = lock_state();
-    let s = match state.as_ref() {
-        Some(s) => s,
-        None => return None,
-    };
+    let s = state.as_ref()?;
 
     // Don't fight the user's drag
     if s.dragging {
@@ -381,16 +378,14 @@ fn legacy_taskbar_target() -> Option<(HWND, bool, i32, HWND)> {
 /// Stores the computed tray offset; true when it changed and needs saving.
 fn store_tray_offset(tray_offset: i32) -> bool {
     let mut state = lock_state();
-    if let Some(s) = state.as_mut() {
-        if s.tray_offset != tray_offset {
-            s.tray_offset = tray_offset;
-            true
-        } else {
-            false
-        }
-    } else {
-        false
+    let Some(s) = state.as_mut() else {
+        return false;
+    };
+    let changed = s.tray_offset != tray_offset;
+    if changed {
+        s.tray_offset = tray_offset;
     }
+    changed
 }
 
 /// Screen coordinates for both child and popup legacy widgets. The tray sits

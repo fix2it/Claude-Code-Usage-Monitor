@@ -382,10 +382,10 @@ fn profile_status(
         }
         Ok(None) => {
             ui.weak(if provider == ProviderId::Claude {
-            language.text("Uses CLAUDE_CONFIG_DIR when set; otherwise detects CLI, Desktop or WSL credentials.")
-        } else {
-            language.text("Uses CODEX_HOME when set; otherwise ~/.codex/auth.json.")
-        });
+                language.text("Uses CLAUDE_CONFIG_DIR when set; otherwise detects CLI, Desktop or WSL credentials.")
+            } else {
+                language.text("Uses CODEX_HOME when set; otherwise ~/.codex/auth.json.")
+            });
         }
         Ok(Some(path)) => {
             ui.weak(path.display().to_string());
