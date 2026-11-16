@@ -1343,6 +1343,32 @@ fn usage_summary_lines(
     show_antigravity_external: bool,
     detailed_at: Option<SystemTime>,
 ) -> Vec<String> {
+    usage_summary_lines_with_side_pools(
+        data,
+        providers,
+        language,
+        countdown,
+        show_antigravity_gemini,
+        show_antigravity_external,
+        detailed_at,
+        false,
+    )
+}
+
+/// `side_pools` adds a line for every enabled pool that is not the provider's
+/// own reading (Claude X, Codex X, agy O next to pool A), so a split tile's
+/// numbers are also in the widget tooltip.
+#[allow(clippy::too_many_arguments)]
+fn usage_summary_lines_with_side_pools(
+    data: &AppUsageData,
+    providers: ProviderSet,
+    language: LanguageId,
+    countdown: bool,
+    show_antigravity_gemini: bool,
+    show_antigravity_external: bool,
+    detailed_at: Option<SystemTime>,
+    side_pools: bool,
+) -> Vec<String> {
     let strings = language.strings();
     let shown = |percentage: f64| {
         if countdown {
@@ -1425,6 +1451,40 @@ fn usage_summary_lines(
                 continue;
             }
             lines.push(quota_line(&label(None), usage));
+        }
+    }
+    if side_pools {
+        for account in data.accounts.iter().filter(|account| {
+            providers.contains(account.provider)
+                && !account.selected
+                && !account.is_antigravity_pool_a()
+        }) {
+            let label = format!(
+                "{} ({})",
+                language.text(account.provider.descriptor().display_name),
+                account.profile.name
+            );
+            if !account.is_side_pool() || show_antigravity_gemini {
+                match &account.usage {
+                    Some(usage) => lines.push(quota_line(&label, usage)),
+                    None => lines.push(format!("{label}: --")),
+                }
+            }
+            if account.is_side_pool() && show_antigravity_external {
+                let label = format!(
+                    "{} (Claude/GPT, {})",
+                    language.text(account.provider.descriptor().display_name),
+                    account.profile.name
+                );
+                match account
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.external_pool.as_deref())
+                {
+                    Some(external) => lines.push(quota_line(&label, external)),
+                    None => lines.push(format!("{label}: --")),
+                }
+            }
         }
     }
     lines
@@ -5179,6 +5239,119 @@ mod tray_usage_summary_tests {
                 false,
             ),
             ["Claude Code 5h: 5% | 7d: 42%"]
+        );
+    }
+
+    /// F58/F61: the widget tooltip lists every enabled side pool with its own
+    /// numbers (Claude X, Codex X, agy O); the tray summary is unchanged.
+    #[test]
+    fn widget_summary_lists_side_pools_with_their_own_numbers() {
+        use crate::accounts::{AccountProfile, AccountSettings, ANTIGRAVITY_X_ID};
+        use crate::models::AccountUsage;
+
+        let account = |provider, profile: AccountProfile, usage, selected| AccountUsage {
+            provider,
+            profile,
+            source_signature: String::new(),
+            source_path: None,
+            usage,
+            error: None,
+            selected,
+        };
+        let named = |id: &str, name: &str| AccountProfile {
+            id: id.into(),
+            name: name.into(),
+            enabled: true,
+            ..Default::default()
+        };
+        let mut data: AppUsageData = [
+            (ProviderId::Claude, usage(10.0, 20.0, None)),
+            (ProviderId::Codex, usage(30.0, 40.0, None)),
+            (ProviderId::Antigravity, usage(50.0, 60.0, None)),
+        ]
+        .into_iter()
+        .collect();
+        data.accounts = vec![
+            account(
+                ProviderId::Claude,
+                named("default", "O"),
+                Some(usage(10.0, 20.0, None)),
+                true,
+            ),
+            account(
+                ProviderId::Claude,
+                named("claude_x", "X"),
+                Some(usage(71.0, 72.0, None)),
+                false,
+            ),
+            account(
+                ProviderId::Codex,
+                named("default", "O"),
+                Some(usage(30.0, 40.0, None)),
+                true,
+            ),
+            account(ProviderId::Codex, named("codex_x", "X"), None, false),
+            account(
+                ProviderId::Antigravity,
+                AccountSettings::antigravity_a_profile(),
+                Some(usage(50.0, 60.0, None)),
+                true,
+            ),
+            account(
+                ProviderId::Antigravity,
+                named(ANTIGRAVITY_X_ID, "OpenCode"),
+                Some(crate::models::UsageData {
+                    external_pool: Some(Box::new(usage(91.0, 92.0, None))),
+                    ..usage(81.0, 82.0, None)
+                }),
+                false,
+            ),
+        ];
+        let providers = ProviderSet::from_enabled([
+            ProviderId::Claude,
+            ProviderId::Codex,
+            ProviderId::Antigravity,
+        ]);
+        let widget = usage_summary_lines_with_side_pools(
+            &data,
+            providers,
+            LanguageId::English,
+            false,
+            true,
+            true,
+            None,
+            true,
+        );
+        let tray = usage_summary_lines(
+            &data,
+            providers,
+            LanguageId::English,
+            false,
+            true,
+            true,
+            None,
+        );
+        assert_eq!(widget[..tray.len()], tray[..]);
+        let side = &widget[tray.len()..];
+        assert_eq!(side.len(), 4, "{side:?}");
+        assert!(
+            side[0].starts_with("Claude Code (X)") && side[0].contains("71%"),
+            "{side:?}"
+        );
+        assert!(
+            side[1].ends_with("(X): --") && side[1].starts_with("Codex"),
+            "{side:?}"
+        );
+        assert!(
+            side[2].contains("(OpenCode)") && side[2].contains("81%"),
+            "{side:?}"
+        );
+        assert!(!tray
+            .iter()
+            .any(|line| line.contains("71%") || line.contains("81%") || line.contains("91%")));
+        assert!(
+            side[3].contains("(Claude/GPT, OpenCode)") && side[3].contains("91%"),
+            "{side:?}"
         );
     }
 

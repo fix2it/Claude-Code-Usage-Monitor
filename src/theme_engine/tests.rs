@@ -2198,6 +2198,11 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
             if object.id.starts_with("fable-dual-x-") {
                 continue;
             }
+            // No Claude X / Codex X profile either: an unpolled second pool
+            // reads "no data", never the first pool's numbers (F62).
+            if object.id.starts_with("claude-x-") || object.id.starts_with("codex-x-") {
+                continue;
+            }
             // Likewise there is no OpenCode agy pool, so its external row is empty.
             if object.id.starts_with("antigravity-ext-o-") {
                 continue;
@@ -7632,4 +7637,45 @@ fn reused_render_resources_reproduce_the_first_frame() {
     let again = render(1.0);
     assert_eq!((again.width, again.height), (first.width, first.height));
     assert_eq!(again.pixels, first.pixels);
+}
+
+/// F62: a second pool that has not been polled yet shows "--", never the
+/// first pool's session, weekly or reset numbers.
+#[test]
+fn unpolled_second_pool_never_shows_first_pool_reading() {
+    let mut data = AppUsageData::default();
+    for (provider, value) in [(ProviderId::Claude, 43.0), (ProviderId::Codex, 35.0)] {
+        data.insert(provider, agy_pool_fixture(value, None));
+        data.accounts.push(crate::models::AccountUsage {
+            provider,
+            profile: crate::accounts::AccountProfile {
+                id: "default".into(),
+                enabled: true,
+                ..Default::default()
+            },
+            source_signature: String::new(),
+            source_path: None,
+            usage: Some(agy_pool_fixture(value, None)),
+            error: None,
+            selected: true,
+        });
+    }
+    let context = dual_context(Some(&data), dual_fable_runtime());
+    for (key, own) in [
+        ("accounts.claude.claude_x", "accounts.claude.default"),
+        ("accounts.codex.codex_x", "accounts.codex.default"),
+    ] {
+        assert_eq!(
+            context.get(&format!("{own}.session.available")),
+            Some(1.0),
+            "{own}"
+        );
+        for window in ["session", "weekly"] {
+            assert_eq!(
+                context.get(&format!("{key}.{window}.available")),
+                Some(0.0),
+                "{key}.{window}"
+            );
+        }
+    }
 }
