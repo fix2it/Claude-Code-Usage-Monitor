@@ -130,3 +130,62 @@ Required: `cargo test` — run by orchestrator: 738 passed, 0 failed, 12 ignored
 ## Result
 
 Stopped incomplete: 5-pass limit reached, still new findings in pass 5, coverage items only partly read in depth. 55 open findings: L4 ×4 (F1, F46, F47, F52), L5 ×49 (F19 demoted from L4 by orchestrator), L6 ×2 (F33, F51, listed in the L5 block). No L1–L3 findings. Duplicates dropped: none reported.
+
+---
+
+# Pool-split audit (2026-11-16)
+
+- HEAD: 45cdadbe8f99ee34fc49867530eaab9989754333 (refactor/3-render-hot-path), branch audit/pool-split
+- Levels: 1–6. Surface: only the pool-split path (pools on one widget flags for Claude/Codex/agy, saved positions, mirrors, agy pools A/O + external models, runtime toggles, data/width/hover/tooltips per split tile, custom themes).
+- Reviewer: Codex CLI `codex_x exec -m gpt-6.1-terra`, read-only, effort high (confirmed from log header, 4 rounds). Orchestrator verified every finding against code; severities adjusted where noted.
+- Working tree note: an uncommitted edit in src/window.rs (pixel-buffer recycle) from another session was present; out of scope, not committed.
+
+## Coverage checklist (pool-split path)
+- [x] P1 flags: defaults, persistence, legacy load, menu conditions, toggle handler
+- [x] P2 ThemeRuntime builders, widget_count family
+- [x] P3 per-pool metrics/bindings, agy A/O + external rows
+- [x] P4 render of split tiles, hover rects, tooltips
+- [~] P5 placement/width after split (split tiles have no own saved positions: placement is per surface)
+- [x] P6 mirrors with split
+- [x] P7 runtime toggles, reload, poll-driven layout change
+- [x] P8 custom themes: capability check, fallback
+- [~] P9 tests (gaps only, read selectively)
+
+## Findings
+
+### Level 4 — Medium
+- F58 | P4 | src/window/widget_tooltip.rs:112, src/window.rs:1337-1400 `usage_summary_lines` | usage-summary tooltip shows only the selected pool per provider (`data.get(provider)`); Claude X, Codex X, agy O quotas are absent, also when they have their own split tile | user hovers a split X/O tile and sees no numbers for it | proposal: add per-account lines for enabled side pools | open (reviewer: 3; orchestrator: 4, widget itself shows correct numbers)
+- F62 | P3/P7 | src/theme_engine.rs:2930-2950 (Claude; same pattern for Codex) | when the `claude_x`/`codex_x` account entry is missing (pool just enabled, before its poll) the split namespace is filled from the selected provider reading minus limits | X tile briefly shows the first pool's session/weekly numbers and reset time | proposal: empty/"--" binding for a missing account | open
+
+### Level 5 — Minor
+- F56 | P4/P6 | src/window/mouse.rs:722 `tile_hover_at`, src/window.rs:3076 rect cache | tile hit-testing and tile rects only for surface 0 | split (and other) tiles on a mirror surface of a custom theme get no hover readings | open
+- F63 | P4/P7 | src/window/message_loop.rs:191 `WM_APP_USAGE_UPDATED` | poll that changes the layout (agy O appears/disappears) rerenders without `revalidate_mouse_hover`, unlike menu toggles | stationary cursor keeps the old tile hover until the next mouse move | open
+- F66 | P6/P8 | src/theme_engine.rs:4125 `supports_pool_splitting` | capability checked on the primary surface only; a mirror surface with the combined layout gets split bindings | custom theme mirror can lose the second pool's display | open (reviewer: 4; orchestrator: 5, needs a mixed custom theme)
+Duplication (input to part 5):
+- F57 | P7 | src/window/message_loop.rs:996-1104 (Claude) and 1105-~1210 (Codex) | pool enable/disable handlers duplicated (~110 lines each: profile creation, last-pool guard, provider state, refresh) | proposal: one `toggle_pool(provider, pool)` with provider defaults | open
+- F59 | P1 | src/context_menu.rs:434-480 | three "pools on one widget" menu entries repeat the same provider+two-pools eligibility | proposal: parameterized entry builder | open
+- F64 | P2 | src/theme_engine.rs:1633-1645 | `claude_separate` / `codex_separate` identical predicates (and `with_pool_layouts` + `with_codex_pool_layout` split API at 1439-1448) | proposal: one `pool_separate(provider)`, one builder taking all three flags | open
+- F67 | P3/P4 | src/window.rs:3082-3118, src/window.rs:182-184, theme_engine.rs:1186-1189 | per-provider tile rects + `split_hovers[4]` + string id list kept as parallel hand-written arrays (ids order must match bounds indices) | proposal: table of (provider, pool, object id) driving rects, hovers, bindings | open
+Long functions on this path (already in ledger, relevant for part 5): F6 `sync_surface_windows_with`, F8 `render_layered_impl`, F11 `wnd_proc`, F12 `display_metrics`, F13 `from_usage_with_runtime` (split namespace copies 2900-3170), F14 `insert_provider`.
+
+### Level 6 — Preferences
+- F60 | P7 | src/window/message_loop.rs:884-905 | flag selection by `if id == …` chain | proposal: map command → `&mut bool` accessor | open
+- F61 | P9 | src/window/widget_tooltip.rs:320 tests | no tooltip test with distinct main/side pool values (would catch F58) | open
+- F65 | P9 | src/theme_engine/tests.rs:6599 (~150 lines), 6751 (~135 lines) | long split tests | proposal: split into focused tests | open
+- F68 | P8 | src/theme_engine.rs:4127 | split capability requires all four providers' split objects; a custom theme with only Claude split cannot split anything (documented design) | proposal: per-provider capability, plus tests for partial/mixed themes (placement_regression_tests.rs:120) | open (reviewer: 4; orchestrator: 6, deliberate documented rule)
+
+## Validation (pool-split audit)
+- `cargo clippy --all-targets` — exit 0, 7 warnings (bin) + 13 (tests).
+- `cargo test` — 737 passed, 0 failed, 12 ignored (75.8 s).
+
+## Score table (pool-split audit)
+
+| Раунд | Охват | Модель и усилие | Оценка | Новые / в ledger | Самая серьёзная новая | Почему дальше / стоп |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | весь путь P1–P9 | gpt-6.1-terra, high | 7.5 | 2 / 2 | мелкая (нет наведения на зеркале) | новые находки |
+| 2 | подсказки, ширина, переключения | gpt-6.1-terra, high | 7 | 4 / 6 | средняя (F58 подсказка без второго пула) | новые находки |
+| 3 | данные пулов, позиции, тесты | gpt-6.1-terra, high | 6.5 | 4 / 10 | средняя (F62 чужие цифры на плитке X) | новые находки |
+| 4 | позиции, зеркала, кастомные темы | gpt-6.1-terra, high | 7 | 2 / 12 (+F67 оркестратор) | мелкая после пересмотра (F66) | стоп: находки ещё идут, но мельчают; не принято |
+
+## Result (pool-split audit)
+Stopped incomplete after 4 passes (still new findings, P5/P9 read selectively). 13 new (F56–F68): L4 ×2 (F58, F62), L5 ×7 (F56, F57, F59, F63, F64, F66, F67), L6 ×4 (F60, F61, F65, F68). No L1–L3. Duplicates dropped: 1 (mirror hover in round 2).
