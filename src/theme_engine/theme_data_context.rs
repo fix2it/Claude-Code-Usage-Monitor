@@ -620,10 +620,17 @@ impl DataContext {
         // custom themes, while `codex.five_hour` always means the real window.
         let codex_session_fallback = codex_compatibility
             && usage.is_some_and(|usage| !usage.session.available && usage.weekly.available);
-        // One clock reading, so windows sharing a reset (session and its
-        // five-hour or weekly source) get identical countdowns.
-        let now = SystemTime::now();
+        // Each window reads the clock once; `session` reuses the reading of
+        // the window it mirrors so their countdowns stay identical.
+        let five_hour_now = SystemTime::now();
+        let weekly_now = SystemTime::now();
         for (window, binding) in quota_windows(name, usage, codex_session_fallback) {
+            let now = match window {
+                "session" if codex_session_fallback => weekly_now,
+                "session" | "five_hour" => five_hour_now,
+                "weekly" => weekly_now,
+                _ => SystemTime::now(),
+            };
             self.insert_window(name, window, binding, countdown, now);
         }
         self.insert(&format!("{name}.available"), usage.is_some() as u8 as f64);
