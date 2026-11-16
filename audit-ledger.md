@@ -49,12 +49,12 @@ Hot paths:
 - F4 | S1 | src/theme_engine/theme_rendering.rs:141 | `crate::theme::is_dark_mode()` (registry read) on every floating-card frame | proposal: cache dark-mode flag, invalidate on WM_SETTINGCHANGE | fixed (refactor/3-render-hot-path)
 Long functions (> ~100 lines):
 - F5 | S1 | src/window.rs:1266-1404 | `usage_summary_lines` (~140 lines), compact/detailed formatting duplicated (root of F1) | proposal: extract provider-label and quota-window formatter helpers | fixed (refactor/1-level4-fixes)
-- F6 | S1 | src/window.rs:2240-2418 | `sync_surface_windows_with` (~180) | proposal: split primary recovery / mirror reconcile / desktop-surface reconcile | open
-- F7 | S1 | src/window.rs:2597-2988 | `run` (~390) | proposal: split instance setup, state init, loop start | open
-- F8 | S1 | src/window.rs:3011-3219 | `render_layered_impl` (~210) | proposal: frame prep / hover bounds / per-surface present | open
-- F9 | S1 | src/window.rs:3370-3653 | `do_poll_once` (~280) | proposal: progress publish / success apply / failure handling | open
-- F10 | S1 | src/window.rs:4498-4601 | `reload_external_settings` (~100) | proposal: state apply vs refresh actions | open
-- F11 | S1 | src/window/message_loop.rs:32-1377 | `wnd_proc` (~1350 lines) | proposal: per-message handler fns (timers, settings commands, lifecycle) | open
+- F6 | S1 | src/window.rs:2240-2418 | `sync_surface_windows_with` (~180) | proposal: split primary recovery / mirror reconcile / desktop-surface reconcile | fixed (refactor/6-window-split; surfaces.rs: recreate_primary_surface / replace_destroyed_mirrors / reconcile_mirror_count / reconcile_desktop_surfaces)
+- F7 | S1 | src/window.rs:2597-2988 | `run` (~390) | proposal: split instance setup, state init, loop start | fixed (refactor/6-window-split; startup.rs: acquire_single_instance / load_startup_theme / initial_app_state / show_initial_widget / start_timers_and_workers)
+- F8 | S1 | src/window.rs:3011-3219 | `render_layered_impl` (~210) | proposal: frame prep / hover bounds / per-surface present | fixed (refactor/6-window-split; render.rs: frame_input / refresh_tile_rects / render_surface)
+- F9 | S1 | src/window.rs:3370-3653 | `do_poll_once` (~280) | proposal: progress publish / success apply / failure handling | fixed (refactor/6-window-split; poll.rs: PollRequest / publish_poll_progress / apply_poll_success / apply_poll_failure)
+- F10 | S1 | src/window.rs:4498-4601 | `reload_external_settings` (~100) | proposal: state apply vs refresh actions | fixed (refactor/6-window-split; window.rs: apply_external_settings / reset_hidden_tiles)
+- F11 | S1 | src/window/message_loop.rs:32-1377 | `wnd_proc` (~1350 lines) | proposal: per-message handler fns (timers, settings commands, lifecycle) | fixed (refactor/6-window-split; wnd_proc 1140 -> 152 lines, on_* handlers; WM_COMMAND in menu_commands.rs)
 - F12 | S1 | src/theme_engine.rs:2227-2435 | `display_metrics` (~210) | proposal: per-provider metric builder | open
 - F13 | S1 | src/theme_engine.rs:2675-3167 | `from_usage_with_runtime` (~490) | proposal: split runtime / provider / pool binding population | partly fixed (refactor/5-pool-table): pool-account fallbacks, split Claude/Codex bindings and agy pool O moved into DataContext helpers; runtime/provider population left for part 7
 - F14 | S1 | src/theme_engine.rs:3238-3558 | `insert_provider` (~320) | proposal: quota-window, reset-time, provider-specific helpers | open
@@ -66,7 +66,7 @@ Long functions (> ~100 lines):
 Duplication:
 - F22 | S1 | src/theme_engine.rs:3051 | split-pool binding prep duplicated for Claude and Codex (clear fields, copy namespaces, hover bindings; double map scan) | proposal: one shared pool-binding helper, single pass | fixed (refactor/5-pool-table): bind_account_pools, one retain pass per map
 More long functions:
-- F23 | S1 | src/window.rs:1779-1882 | `begin_update_check` | proposal: extract result handling / completion notify | open
+- F23 | S1 | src/window.rs:1779-1882 | `begin_update_check` | proposal: extract result handling / completion notify | fixed (refactor/6-window-split; update_flow.rs: mark_update_check_started / finish_update_check / record_update_check)
 - F24 | S1 | src/window/positioning.rs:277-382 | `position_at_taskbar` | proposal: taskbar selection vs placement apply | open
 - F25 | S1 | src/window/positioning.rs:516-646 | `position_custom_theme_internal` | proposal: placement resolve vs positioning | open
 - F26 | S1 | src/theme_engine.rs:469-579 | `parse_mouse_actions` | proposal: per-action-kind parsers | open
@@ -97,7 +97,7 @@ Round 4:
 - F51 | M4 | src/studio_app/warp.rs:425-564 | test `warp_renders_partial_textures_at_zoom_and_frees_after_paint` 140 lines (L6: test shape) | proposal: split | open
 Round 5:
 - F53 | S1 | src/window.rs:4328 | hover setters for Claude, Codex, Antigravity, OpenCode, Qoder, agy external repeat state-change + animation + timer logic | proposal: one generic hover-animation helper with per-provider eligibility | fixed (refactor/5-pool-table): set_tile_hover + tile_hover_animates over the Tile table
-- F54 | S1 | src/window.rs:1490-1588 | `sync_tray_icon` (~100) mixes state collection, surface filter, render, shell sync | proposal: extract themed-icon build | open
+- F54 | S1 | src/window.rs:1490-1588 | `sync_tray_icon` (~100) mixes state collection, surface filter, render, shell sync | proposal: extract themed-icon build | fixed (refactor/6-window-split; tray_status.rs: TrayFrame (surface_renders, render_icon))
 - F55 | S1/M6 | src/desktop_compositor.rs:130 | `Present(1, …)` (vsync wait) on the UI thread for every desktop-surface paint | proposal: measure; `Present(0, …)` or DXGI_PRESENT_DO_NOT_WAIT / waitable swap chain | fixed (refactor/2: Present(0); composition flip-model swap chain does not tear, DWM syncs; not measured with GPU tools)
 Dead code:
 - F34 | S1 | src/poller/antigravity.rs:514,791 | `fetch_antigravity_model_quota` (`#[allow(dead_code)]`) and its only helper `is_antigravity_display_model` unused | proposal: delete | fixed (refactor/4-dead-code)
