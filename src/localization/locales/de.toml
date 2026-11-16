@@ -2,7 +2,6 @@ code = "de"
 native_name = "Deutsch"
 locale_patterns = ["de"]
 order = 4
-update_via_winget = "Mit WinGet aktualisieren"
 
 [strings]
 window_title = "Claude Code Nutzungsmonitor"

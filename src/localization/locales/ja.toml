@@ -2,7 +2,6 @@ code = "ja"
 native_name = "日本語"
 locale_patterns = ["ja"]
 order = 5
-update_via_winget = "WinGet で更新"
 windows_font_name = "yu-gothic-ui"
 windows_font_file = "YuGothM.ttc"
 

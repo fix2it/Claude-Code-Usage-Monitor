@@ -2,7 +2,6 @@ code = "nl"
 native_name = "Nederlands"
 locale_patterns = ["nl"]
 order = 1
-update_via_winget = "Bijwerken via WinGet"
 
 [strings]
 window_title = "Claude Code Gebruiksmonitor"

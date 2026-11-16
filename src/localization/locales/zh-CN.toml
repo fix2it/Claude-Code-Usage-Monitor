@@ -2,7 +2,6 @@ code = "zh-CN"
 native_name = "简体中文"
 locale_patterns = ["zh"]
 order = 8
-update_via_winget = "通过 WinGet 更新"
 windows_font_name = "microsoft-yahei"
 windows_font_file = "msyh.ttc"
 

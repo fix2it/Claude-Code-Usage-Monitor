@@ -2,7 +2,6 @@ code = "ru"
 native_name = "Русский"
 locale_patterns = ["ru"]
 order = 9
-update_via_winget = "Обновить через WinGet"
 
 [strings]
 window_title = "Монитор использования Claude Code"

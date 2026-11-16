@@ -2,9 +2,8 @@
 
 Fork builds always update through the portable channel: they query this
 fork's GitHub Releases (`fix2it/Claude-Code-Usage-Monitor`) only, wherever the
-executable is installed. The WinGet channel code inherited from the original
-project is kept but inactive, so the upstream WinGet package can never replace
-a fork build. An equal or older release means the installation is up to date,
+executable is installed. The WinGet channel inherited from the original project
+was removed, so the upstream WinGet package can never replace a fork build. An equal or older release means the installation is up to date,
 and a failed check is reported as an error.
 
 The portable updater accepts only the exact `claude-code-usage-monitor.exe`
@@ -47,5 +46,4 @@ SemVer precedence, streamed size limits, known SHA-256 vectors, corrupt and
 truncated bodies, interrupted and failed I/O, partial-file cleanup, helper
 arguments, and Windows file locking. Tests do not download or execute updates.
 The release workflow runs these tests before building a release.
-Channel tests also cover source isolation and the inactive WinGet code
-(version parsing and source errors).
+Channel tests also check that the fork always uses the portable channel.
