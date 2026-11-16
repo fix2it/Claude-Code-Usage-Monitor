@@ -2477,6 +2477,7 @@ fn tray_reposition_is_suppressed() -> bool {
 mod lifecycle;
 use lifecycle::{controller_for, kill_controller_timer, set_controller_timer, WM_APP_RECONCILE};
 mod host_geometry;
+mod menu_commands;
 mod message_loop;
 mod poll;
 mod render;
@@ -2486,6 +2487,7 @@ mod tray_status;
 mod update_flow;
 
 use host_geometry::*;
+use menu_commands::*;
 use message_loop::wnd_proc;
 use poll::*;
 use render::*;
