@@ -1608,6 +1608,9 @@ fn sync_tray_icon(hwnd: HWND) {
                 })
                 .collect::<Vec<_>>();
             tray_icon::sync_themed(hwnd, &icons);
+            for icon in icons {
+                theme_engine::recycle_pixel_buffer(icon.pixels);
+            }
             return;
         }
     }
@@ -3188,6 +3191,7 @@ fn render_layered_impl(trigger: RenderTrigger) {
         positioned.placement.offset_y = placement.offset_y;
         let hosted = position_custom_theme(target_hwnd, &positioned, scale);
         if !hosted {
+            theme_engine::recycle_pixel_buffer(rendered.pixels);
             continue;
         }
         if desktop_nested {
