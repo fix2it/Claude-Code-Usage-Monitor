@@ -80,100 +80,9 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         WM_ERASEBKGND => LRESULT(1),
         WM_DISPLAYCHANGE | WM_DPICHANGED_MSG | WM_SETTINGCHANGE => {
-            if let Some(state) = lock_state().as_mut() {
-                invalidate_metrics(state);
-                invalidate_hover_tile_rects(state);
-            }
-            if msg == WM_DPICHANGED_MSG {
-                CURRENT_DPI.store((wparam.0 & 0xFFFF) as u32, Ordering::Relaxed);
-            }
-            if msg == WM_SETTINGCHANGE {
-                check_theme_change();
-                check_language_change();
-            }
-            lifecycle::schedule_reconcile(controller_for(hwnd));
-            LRESULT(0)
+            on_display_change(hwnd, msg, wparam)
         }
-        WM_TIMER => {
-            let timer_id = wparam.0;
-            match timer_id {
-                TIMER_POLL => {
-                    // Credential discovery can launch WSL and decrypt local
-                    // caches. The poll worker also handles the paused state.
-                    request_scheduled_poll(hwnd);
-                }
-                TIMER_COUNTDOWN => {
-                    if let Some(state) = lock_state().as_mut() {
-                        invalidate_metrics(state);
-                    }
-                    render_layered();
-                    sync_tray_icon(hwnd);
-                    schedule_countdown_timer();
-                }
-                TIMER_CLOCK => {
-                    if let Some(state) = lock_state().as_mut() {
-                        invalidate_metrics(state);
-                    }
-                    render_layered();
-                    let refresh_tray = lock_state()
-                        .as_ref()
-                        .is_some_and(|state| state.tray_theme_uses_current_time);
-                    if refresh_tray {
-                        sync_tray_icon(hwnd);
-                    }
-                    schedule_clock_timer();
-                }
-                TIMER_RESET_POLL => {
-                    let should_poll = {
-                        let state = lock_state();
-                        state
-                            .as_ref()
-                            .map(|s| !s.auth_error_paused_polling)
-                            .unwrap_or(false)
-                    };
-                    if should_poll {
-                        request_scheduled_poll(hwnd);
-                    }
-                }
-                TIMER_UPDATE_CHECK => {
-                    begin_update_check(hwnd, false);
-                }
-                TIMER_WINDOW_STATE => {
-                    // Re-showing a floating surface re-asserts topmost; the
-                    // timer repeats, so skipping while the menu is open is safe.
-                    if !window_context_menu::menu_session_active() {
-                        sync_theme_window_visibility();
-                    }
-                }
-                TIMER_MOUSE_CLICK => {
-                    let _ = kill_controller_timer(Some(hwnd), TIMER_MOUSE_CLICK);
-                    let pending = lock_state()
-                        .as_mut()
-                        .and_then(|state| state.pending_mouse_click.take());
-                    if let Some(pending) = pending {
-                        let _ = dispatch_mouse_event(
-                            pending.surface_index,
-                            &pending.object_id,
-                            MouseEventKind::Click,
-                        );
-                    }
-                }
-                TIMER_TRAY_HOVER => {
-                    clear_tray_mouse_hover_if_left(hwnd);
-                }
-                widget_tooltip::REFRESH_TIMER => widget_tooltip::refresh(),
-                TIMER_TRAY_REPOSITION => {
-                    let _ = kill_controller_timer(Some(hwnd), TIMER_TRAY_REPOSITION);
-                    lifecycle::reconcile_surfaces();
-                }
-                TIMER_CROSSFADE_SCHEDULE => {
-                    // Legacy fallback when the multimedia timer is unavailable.
-                    tick_animations(hwnd, false);
-                }
-                _ => {}
-            }
-            LRESULT(0)
-        }
+        WM_TIMER => on_timer(hwnd, wparam),
         native_interop::WM_APP_ANIMATION_TICK => {
             animation_timer::tick_dequeued();
             tick_animations(hwnd, false);
@@ -188,25 +97,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
             schedule_tray_reposition(hwnd);
             LRESULT(0)
         }
-        WM_APP_USAGE_UPDATED => {
-            if let Some(state) = lock_state().as_mut() {
-                invalidate_metrics(state);
-            }
-            check_theme_change();
-            check_language_change();
-            render_layered();
-            // A poll can change the layout (agy pool O appears or goes away)
-            // under a stationary cursor; recheck hover on every visible
-            // surface against the new rects (posted, after this render).
-            super::mouse::request_hover_revalidation(hwnd);
-            schedule_countdown_timer();
-            schedule_clock_timer();
-            suppress_tray_reposition_for(Duration::from_millis(
-                TRAY_ICON_UPDATE_REPOSITION_SUPPRESS_MS,
-            ));
-            sync_tray_icon(hwnd);
-            LRESULT(0)
-        }
+        WM_APP_USAGE_UPDATED => on_usage_updated(hwnd),
         WM_APP_SETTINGS_UPDATED => {
             reload_external_settings(hwnd);
             LRESULT(0)
@@ -252,192 +143,8 @@ pub(super) unsafe extern "system" fn wnd_proc(
             set_surface_cursor(hwnd);
             LRESULT(1)
         }
-        WM_LBUTTONDOWN => {
-            widget_tooltip::hide();
-            unsafe {
-                let _ = SetCapture(hwnd);
-            }
-            let mut pt = POINT::default();
-            let _ = unsafe { GetCursorPos(&mut pt) };
-            let rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
-            let mut state = lock_state();
-            if let Some(s) = state.as_mut() {
-                s.pending_drag = true;
-                s.is_snapped = false;
-                s.drag_start_cursor = pt;
-                s.drag_start_origin = POINT {
-                    x: rect.left,
-                    y: rect.top,
-                };
-                s.drag_start_client_x = pt.x - rect.left;
-            }
-            LRESULT(0)
-        }
-        WM_MOUSEMOVE => {
-            let mut pt = POINT::default();
-            let _ = unsafe { GetCursorPos(&mut pt) };
-
-            let (should_start_drag, is_dragging) = {
-                let mut state = lock_state();
-                if let Some(s) = state.as_mut() {
-                    if s.pending_drag && !s.dragging {
-                        let cx_drag = unsafe { GetSystemMetrics(SM_CXDRAG) };
-                        let cy_drag = unsafe { GetSystemMetrics(SM_CYDRAG) };
-                        let dx = (pt.x - s.drag_start_cursor.x).abs();
-                        let dy = (pt.y - s.drag_start_cursor.y).abs();
-                        if dx >= cx_drag || dy >= cy_drag {
-                            (true, false)
-                        } else {
-                            (false, false)
-                        }
-                    } else {
-                        (false, s.dragging)
-                    }
-                } else {
-                    (false, false)
-                }
-            };
-
-            if should_start_drag {
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.is_switching_window_style = true;
-                        // Native reparenting can dispatch layout messages. They
-                        // must already see a drag and leave its position alone.
-                        s.dragging = true;
-                        s.pending_drag = false;
-                    }
-                }
-                native_interop::make_popup(hwnd, true);
-                unsafe {
-                    let _ = SetCapture(hwnd);
-                }
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.is_switching_window_style = false;
-                    }
-                }
-            }
-
-            let is_now_dragging = should_start_drag || is_dragging;
-            if is_now_dragging {
-                let drag_info = {
-                    let state = lock_state();
-                    state.as_ref().map(|s| {
-                        (
-                            s.drag_start_client_x,
-                            s.drag_start_cursor,
-                            s.drag_start_origin,
-                            widget_frame_for_state(s, None),
-                        )
-                    })
-                };
-
-                if let Some((start_client_x, start_cursor, start_origin, frame)) = drag_info {
-                    let origin_x = pt.x - start_client_x;
-                    let origin_y = pt.y - (start_cursor.y - start_origin.y);
-                    let virtual_rect = frame.content_rect(POINT {
-                        x: origin_x,
-                        y: origin_y,
-                    });
-                    let widget_w = frame.content_width;
-                    let widget_h = frame.height;
-
-                    let taskbars = native_interop::find_taskbars();
-                    let target_taskbar = taskbars.into_iter().find(|tb| {
-                        let tb_rect = tb.rect;
-                        let extended = RECT {
-                            left: tb_rect.left - 20,
-                            top: tb_rect.top - 20,
-                            right: tb_rect.right + 20,
-                            bottom: tb_rect.bottom + 20,
-                        };
-                        pt.x >= extended.left
-                            && pt.x <= extended.right
-                            && pt.y >= extended.top
-                            && pt.y <= extended.bottom
-                    });
-
-                    let mut snapped_pos = None;
-                    let mut now_snapped = false;
-                    if let Some((taskbar, free_dock_slot)) = target_taskbar.and_then(|taskbar| {
-                        positioning::taskbar_free_dock_slot(
-                            taskbar.hwnd,
-                            taskbar.rect,
-                            virtual_rect,
-                        )
-                        .map(|slot| (taskbar, slot))
-                    }) {
-                        let capacity_ok = positioning::is_taskbar_capacity_sufficient(
-                            taskbar.rect,
-                            free_dock_slot,
-                            widget_w,
-                            widget_h,
-                        );
-                        if capacity_ok {
-                            let was_snapped = {
-                                let state = lock_state();
-                                state.as_ref().is_some_and(|s| s.is_snapped)
-                            };
-                            if positioning::should_snap_to_slot(
-                                virtual_rect,
-                                free_dock_slot,
-                                was_snapped,
-                            ) {
-                                now_snapped = true;
-                                let is_horizontal =
-                                    native_interop::is_taskbar_horizontal(taskbar.rect);
-                                if is_horizontal {
-                                    let snapped_x = virtual_rect.left.clamp(
-                                        free_dock_slot.left,
-                                        free_dock_slot.right - widget_w,
-                                    ) - frame.inset;
-                                    let snapped_y = compute_anchor_y(
-                                        taskbar.rect.top,
-                                        taskbar.rect.bottom - taskbar.rect.top,
-                                        widget_h,
-                                    );
-                                    snapped_pos = Some((snapped_x, snapped_y));
-                                } else {
-                                    let snapped_x = taskbar.rect.left - frame.inset;
-                                    let snapped_y = origin_y.clamp(
-                                        free_dock_slot.top,
-                                        free_dock_slot.bottom - widget_h,
-                                    );
-                                    snapped_pos = Some((snapped_x, snapped_y));
-                                }
-                            }
-                        }
-                    }
-
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            s.is_snapped = now_snapped;
-                        }
-                    }
-
-                    let (final_x, final_y) = snapped_pos.unwrap_or((origin_x, origin_y));
-                    unsafe {
-                        let _ = SetWindowPos(
-                            hwnd,
-                            Some(HWND_TOPMOST),
-                            final_x,
-                            final_y,
-                            0,
-                            0,
-                            SWP_NOACTIVATE | SWP_NOSIZE,
-                        );
-                    }
-                    super::mouse::request_hover_revalidation(hwnd);
-                }
-            } else {
-                update_mouse_hover(hwnd, lparam);
-            }
-            LRESULT(0)
-        }
+        WM_LBUTTONDOWN => on_left_button_down(hwnd),
+        WM_MOUSEMOVE => on_mouse_move(hwnd, lparam),
         WM_MOUSELEAVE => {
             clear_mouse_hover(hwnd);
             LRESULT(0)
@@ -456,712 +163,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
             }
             LRESULT(0)
         }
-        WM_LBUTTONUP => {
-            let released = release_drag_capture_with(
-                || {
-                    lock_state()
-                        .as_mut()
-                        .map(|s| {
-                            DragRelease::take(
-                                &mut s.dragging,
-                                &mut s.pending_drag,
-                                &mut s.is_snapped,
-                            )
-                        })
-                        .unwrap_or_default()
-                },
-                || {
-                    let _ = ReleaseCapture();
-                },
-            );
-            let suppressed = {
-                let mut state = lock_state();
-                state.as_mut().is_some_and(|state| {
-                    let suppressed = state.suppress_next_left_up;
-                    state.suppress_next_left_up = false;
-                    suppressed
-                })
-            };
-            if suppressed {
-                return LRESULT(0);
-            }
-            let mut pt = POINT::default();
-            let _ = unsafe { GetCursorPos(&mut pt) };
-
-            if released.dragging {
-                let widget_rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
-                let frame = lock_state()
-                    .as_ref()
-                    .map(|s| widget_frame_for_state(s, None));
-                let Some(current_frame) = frame else {
-                    return LRESULT(0);
-                };
-                let widget_rect = current_frame.content_rect(POINT {
-                    x: widget_rect.left,
-                    y: widget_rect.top,
-                });
-                let widget_w = current_frame.content_width;
-                let widget_h = current_frame.height;
-
-                let taskbars = native_interop::find_taskbars();
-                let target_dock = taskbars.iter().enumerate().find_map(|(idx, tb)| {
-                    let free_dock_slot =
-                        positioning::taskbar_free_dock_slot(tb.hwnd, tb.rect, widget_rect)?;
-                    let capacity_ok = positioning::is_taskbar_capacity_sufficient(
-                        tb.rect,
-                        free_dock_slot,
-                        widget_w,
-                        widget_h,
-                    );
-                    if !capacity_ok {
-                        return None;
-                    }
-                    if positioning::should_snap_to_slot(
-                        widget_rect,
-                        free_dock_slot,
-                        released.snapped,
-                    ) {
-                        Some((idx, tb, free_dock_slot))
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some((target_idx, taskbar, free_dock_slot)) = target_dock {
-                    let displays = native_interop::find_monitors();
-                    let Some(handle) =
-                        native_interop::monitor_for_taskbar(&taskbars, &displays, taskbar.hwnd)
-                    else {
-                        render_layered();
-                        return LRESULT(0);
-                    };
-                    let Some(monitor_index) =
-                        positioning::monitor_index_for_handle(&displays, handle)
-                    else {
-                        render_layered();
-                        return LRESULT(0);
-                    };
-                    let tray = native_interop::find_child_window(taskbar.hwnd, "TrayNotifyWnd")
-                        .and_then(native_interop::get_window_rect_safe);
-                    let reference = positioning::system_tray_reference(taskbar.rect, tray);
-                    const TRAY_SNAP_THRESHOLD: i32 = 8;
-                    let (screen_x, screen_y, tray_offset) =
-                        if native_interop::is_taskbar_horizontal(taskbar.rect) {
-                            let left = widget_rect
-                                .left
-                                .clamp(free_dock_slot.left, free_dock_slot.right - widget_w);
-                            let tray_dist = (reference.left - left - widget_w).max(0);
-                            if tray_dist <= TRAY_SNAP_THRESHOLD {
-                                (0, 0, 0)
-                            } else {
-                                ((left - taskbar.rect.left).max(1), 0, tray_dist)
-                            }
-                        } else {
-                            let top = widget_rect
-                                .top
-                                .clamp(free_dock_slot.top, free_dock_slot.bottom - widget_h);
-                            let tray_dist = (reference.top - top - widget_h).max(0);
-                            if tray_dist <= TRAY_SNAP_THRESHOLD {
-                                (0, 0, 0)
-                            } else {
-                                (0, (top - taskbar.rect.top).max(1), tray_dist)
-                            }
-                        };
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            s.embedded = true;
-                            s.is_snapped = false;
-                            s.taskbar_index = target_idx;
-                            s.auto_ejected = false;
-                            s.auto_ejected_for_capacity = false;
-                            s.auto_ejected_origin = None;
-                            s.auto_ejected_host = None;
-                            s.tray_offset = tray_offset;
-                            s.placement_override = Some(PlacementOverride {
-                                nest: "taskbar".into(),
-                                monitor_index,
-                                monitor_device: native_interop::monitor_device_name(handle),
-                                screen_x,
-                                screen_y,
-                                tray_offset,
-                                floating_host: None,
-                            });
-                        }
-                    }
-                    save_state_settings();
-                    native_interop::embed_as_child(hwnd, taskbar.hwnd);
-                    position_at_taskbar();
-                    render_layered();
-                } else {
-                    // Locked widgets cannot be dropped as floating: return them
-                    // to the bar so they can only be moved along it.
-                    let locked = lock_state().as_ref().is_some_and(taskbar_lock_applies);
-                    if locked {
-                        let taskbar = {
-                            let mut state = lock_state();
-                            state.as_mut().and_then(|s| {
-                                s.embedded = true;
-                                s.is_switching_window_style = true;
-                                s.is_snapped = false;
-                                s.auto_ejected = false;
-                                s.auto_ejected_for_capacity = false;
-                                s.auto_ejected_origin = None;
-                                s.auto_ejected_host = None;
-                                // The drag leaves the configured taskbar host
-                                // and saved dock placement unchanged.
-                                s.taskbar_hwnd.map(|h| h.to_hwnd())
-                            })
-                        };
-                        // SetParent/style changes can synchronously re-enter
-                        // wnd_proc. Release STATE before calling Win32.
-                        if let Some(taskbar) = taskbar {
-                            native_interop::embed_as_child(hwnd, taskbar);
-                        }
-                        if let Some(s) = lock_state().as_mut() {
-                            s.is_switching_window_style = false;
-                        }
-                        save_state_settings();
-                        position_at_taskbar();
-                        render_layered();
-                        return LRESULT(0);
-                    }
-                    let displays = native_interop::find_monitors();
-                    let (monitor_idx, display) = positioning::monitor_for_point(&displays, pt);
-                    let floating_frame = lock_state().as_ref().and_then(|s| {
-                        floating_frame_for_state(s, monitor_idx, monitor_scale(display))
-                    });
-                    let Some(floating_frame) = floating_frame else {
-                        return LRESULT(0);
-                    };
-
-                    // Keep the grabbed content in place as the card expands around it.
-                    let widget_w = floating_frame.width;
-                    let widget_h = floating_frame.height;
-                    let clamped_x = (widget_rect.left - floating_frame.inset).clamp(
-                        display.rect.left,
-                        (display.rect.right - widget_w).max(display.rect.left),
-                    );
-                    let clamped_y = widget_rect.top.clamp(
-                        display.rect.top,
-                        (display.rect.bottom - widget_h).max(display.rect.top),
-                    );
-
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            let floating_host = floating_host_for_state(s);
-                            s.embedded = false;
-                            s.is_snapped = false;
-                            s.auto_ejected = false;
-                            s.auto_ejected_for_capacity = false;
-                            s.auto_ejected_origin = None;
-                            s.auto_ejected_host = None;
-                            s.placement_override = Some(PlacementOverride {
-                                nest: "floating".into(),
-                                monitor_index: monitor_idx,
-                                monitor_device: native_interop::monitor_device_name(display.handle),
-                                screen_x: clamped_x,
-                                screen_y: clamped_y,
-                                tray_offset: 0,
-                                floating_host,
-                            });
-                        }
-                    }
-                    save_state_settings();
-                    unsafe {
-                        let _ = SetWindowPos(
-                            hwnd,
-                            Some(HWND_TOPMOST),
-                            clamped_x,
-                            clamped_y,
-                            widget_w,
-                            widget_h,
-                            SWP_NOACTIVATE,
-                        );
-                    }
-                    render_layered();
-                }
-            } else if released.pending {
-                // A release with no drag: either an authored JSON click action
-                // or, when the object has none, an immediate view-mode bounce.
-                handle_view_mode_click(hwnd, lparam);
-            }
-            LRESULT(0)
-        }
-        WM_CAPTURECHANGED => {
-            let mut state = lock_state();
-            if let Some(s) = state.as_mut() {
-                if !s.is_switching_window_style {
-                    s.dragging = false;
-                    s.pending_drag = false;
-                    s.is_snapped = false;
-                }
-            }
-            LRESULT(0)
-        }
-        WM_APP_TASKBAR_COLLISION => {
-            let action = wparam.0;
-            let mut state = lock_state();
-            let Some(s) = state.as_mut() else {
-                return LRESULT(0);
-            };
-            // A queued result can outlive a drag, placement change, or sample.
-            if taskbar_collision_action(s) != Some(action) {
-                return LRESULT(0);
-            }
-
-            if action == 1 && !s.auto_ejected && s.embedded {
-                s.auto_ejected_host = floating_host_for_state(s);
-                s.auto_ejected = true;
-                let widget_rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
-                let frame = widget_frame_for_state(s, Some(SurfaceNest::Floating));
-                let widget_w = frame.width;
-                let widget_h = frame.height;
-                let floating_rect = RECT {
-                    left: widget_rect.left - frame.inset,
-                    top: widget_rect.top,
-                    right: widget_rect.left - frame.inset + widget_w,
-                    bottom: widget_rect.top + widget_h,
-                };
-
-                let taskbar_rect = s
-                    .taskbar_hwnd
-                    .and_then(|h| native_interop::get_window_rect_safe(h.to_hwnd()))
-                    .unwrap_or_default();
-                // Capacity fallback can return as soon as the authored layout
-                // fits. App collisions retain their existing extra clearance.
-                s.auto_ejected_for_capacity =
-                    positioning::taskbar_surface_is_clipped(taskbar_rect, widget_rect);
-
-                let displays = native_interop::find_monitors();
-                let mon = displays
-                    .iter()
-                    .find(|d| {
-                        taskbar_rect.left >= d.rect.left
-                            && taskbar_rect.right <= d.rect.right
-                            && taskbar_rect.top >= d.rect.top
-                            && taskbar_rect.bottom <= d.rect.bottom
-                    })
-                    .or_else(|| displays.first());
-                let mon_rect = mon.map(|m| m.rect).unwrap_or(RECT {
-                    left: 0,
-                    top: 0,
-                    right: 1920,
-                    bottom: 1080,
-                });
-
-                // Include the card when leaving a vertical taskbar, and keep
-                // the added inset inside the monitor at either screen edge.
-                let mut pt = positioning::auto_eject_origin(floating_rect, taskbar_rect, mon_rect);
-                pt.x = pt.x.clamp(
-                    mon_rect.left,
-                    (mon_rect.right - widget_w).max(mon_rect.left),
-                );
-                pt.y =
-                    pt.y.clamp(mon_rect.top, (mon_rect.bottom - widget_h).max(mon_rect.top));
-
-                s.auto_ejected_origin = Some(pt);
-                s.is_switching_window_style = true;
-                // Parenting/style changes can synchronously re-enter wnd_proc.
-                drop(state);
-                native_interop::make_popup(hwnd, true);
-                if let Some(s) = lock_state().as_mut() {
-                    s.is_switching_window_style = false;
-                }
-
-                unsafe {
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        pt.x,
-                        pt.y,
-                        widget_w,
-                        widget_h,
-                        SWP_NOACTIVATE,
-                    );
-                }
-                diagnose::log(format!(
-                    "taskbar collision: auto-ejected widget to floating taskbar={taskbar_rect:?} widget={widget_rect:?}"
-                ));
-                render_layered();
-            } else if action == 0 && s.auto_ejected {
-                s.auto_ejected = false;
-                s.auto_ejected_for_capacity = false;
-                s.auto_ejected_origin = None;
-                s.auto_ejected_host = None;
-                let taskbar_hwnd = s.taskbar_hwnd.map(|h| h.to_hwnd());
-                s.is_switching_window_style = true;
-                drop(state);
-                if let Some(tb) = taskbar_hwnd {
-                    native_interop::embed_as_child(hwnd, tb);
-                }
-                if let Some(s) = lock_state().as_mut() {
-                    s.is_switching_window_style = false;
-                }
-                diagnose::log("taskbar collision resolved: re-docked widget to taskbar");
-                position_at_taskbar();
-                render_layered();
-            } else if action == TASKBAR_COLLISION_REPOSITION {
-                drop(state);
-                diagnose::log("taskbar geometry changed: repositioning docked widget");
-                position_at_taskbar();
-                render_layered();
-            }
-            LRESULT(0)
-        }
-        WM_COMMAND => {
-            let id = wparam.0 as u16;
-            match id {
-                IDM_DASHBOARD => {
-                    crate::dashboard::show(controller_for(hwnd));
-                }
-                1 => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            s.force_notify_auth_error = true;
-                        }
-                    }
-                    render_layered();
-                    request_poll(hwnd);
-                }
-                IDM_VERSION_ACTION => perform_update_action(hwnd),
-                2 => {
-                    let _ =
-                        PostMessageW(Some(controller_for(hwnd)), WM_CLOSE, WPARAM(0), LPARAM(0));
-                }
-                IDM_START_WITH_WINDOWS => {
-                    set_startup_enabled(!is_startup_enabled());
-                }
-                IDM_LOCK_TASKBAR => {
-                    toggle_taskbar_lock(hwnd);
-                }
-                IDM_SHOW_PACE => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            s.show_pace = !s.show_pace;
-                            invalidate_metrics(s);
-                        }
-                    }
-                    save_state_settings();
-                    render_layered();
-                    sync_tray_icon(hwnd);
-                }
-                IDM_SHOW_FABLE => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            super::toggle_show_fable(s);
-                        }
-                    }
-                    save_state_settings();
-                    render_layered();
-                    // The Fable column changes the root width: a right-pinned
-                    // window moves its left edge, so Win32 sends no
-                    // WM_MOUSELEAVE for a cursor it moved out from under.
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                }
-                IDM_SHOW_FABLE_X => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            super::toggle_show_fable_x(s);
-                        }
-                    }
-                    save_state_settings();
-                    render_layered();
-                    // The Fable column changes the root width: a right-pinned
-                    // window moves its left edge, so Win32 sends no
-                    // WM_MOUSELEAVE for a cursor it moved out from under.
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                }
-                IDM_CLAUDE_POOLS_ONE_WIDGET
-                | IDM_ANTIGRAVITY_POOLS_ONE_WIDGET
-                | IDM_CODEX_POOLS_ONE_WIDGET => {
-                    let provider = match id {
-                        IDM_CLAUDE_POOLS_ONE_WIDGET => ProviderId::Claude,
-                        IDM_CODEX_POOLS_ONE_WIDGET => ProviderId::Codex,
-                        _ => ProviderId::Antigravity,
-                    };
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            if let Some(one_widget) = s.pools_one_widget_mut(provider) {
-                                *one_widget = !*one_widget;
-                            }
-                            super::invalidate_metrics(s);
-                        }
-                    }
-                    save_state_settings();
-                    position_at_taskbar();
-                    render_layered();
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                }
-                IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
-                    let new_interval = match id {
-                        IDM_FREQ_1MIN => POLL_1_MIN,
-                        IDM_FREQ_5MIN => POLL_5_MIN,
-                        IDM_FREQ_15MIN => POLL_15_MIN,
-                        IDM_FREQ_1HOUR => POLL_1_HOUR,
-                        _ => POLL_15_MIN,
-                    };
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            s.poll_interval_ms = new_interval;
-                        }
-                    }
-                    save_state_settings();
-                    // Reset the poll timer with the new interval
-                    set_controller_timer(Some(hwnd), TIMER_POLL, new_interval, None);
-                }
-                IDM_PROVIDER_ANTIGRAVITY_GEMINI | IDM_PROVIDER_ANTIGRAVITY_EXTERNAL => {
-                    let mut should_reposition = false;
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            should_reposition = super::toggle_antigravity_models(
-                                s,
-                                id == IDM_PROVIDER_ANTIGRAVITY_GEMINI,
-                            );
-                            s.stop_crossfade_timer_if_idle(hwnd);
-                        }
-                    }
-                    save_state_settings();
-                    if should_reposition {
-                        position_at_taskbar();
-                    }
-                    render_layered();
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
-                IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            super::toggle_antigravity_external_x(s);
-                        }
-                    }
-                    save_state_settings();
-                    // The external-models widget can appear or go away.
-                    position_at_taskbar();
-                    render_layered();
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                }
-                IDM_PROVIDER_ANTIGRAVITY_A => {
-                    let mut should_reposition = false;
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            should_reposition = super::toggle_antigravity_a(s);
-                            // Pool A off leaves pool O alone in one row.
-                            super::invalidate_hover_tile_rects(s);
-                            invalidate_metrics(s);
-                        }
-                    }
-                    save_state_settings();
-                    if should_reposition {
-                        position_at_taskbar();
-                    }
-                    render_layered();
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
-                IDM_PROVIDER_ANTIGRAVITY_X => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            super::toggle_antigravity_pool_o(s);
-                            // Pool O adds a marker column and a second row.
-                            super::invalidate_hover_tile_rects(s);
-                            invalidate_metrics(s);
-                        }
-                    }
-                    save_state_settings();
-                    position_at_taskbar();
-                    render_layered();
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
-                IDM_PROVIDER_CLAUDE_MAIN
-                | IDM_PROVIDER_CLAUDE_X
-                | IDM_PROVIDER_CODEX_MAIN
-                | IDM_PROVIDER_CODEX_X => {
-                    let (provider, main) = match id {
-                        IDM_PROVIDER_CLAUDE_MAIN => (ProviderId::Claude, true),
-                        IDM_PROVIDER_CLAUDE_X => (ProviderId::Claude, false),
-                        IDM_PROVIDER_CODEX_MAIN => (ProviderId::Codex, true),
-                        _ => (ProviderId::Codex, false),
-                    };
-                    let mut should_reposition = false;
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            should_reposition = super::toggle_account_pool(s, provider, main);
-                            s.stop_crossfade_timer_if_idle(hwnd);
-                        }
-                    }
-                    save_state_settings();
-                    if should_reposition {
-                        position_at_taskbar();
-                    }
-                    render_layered();
-                    super::mouse::revalidate_mouse_hover(hwnd);
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
-                id if ProviderId::from_native_menu_command_id(id).is_some() => {
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            let provider = ProviderId::from_native_menu_command_id(id)
-                                .expect("provider menu command was matched above");
-                            let changed = s.providers.toggle(provider);
-                            // Tile widths depend on the provider count.
-                            invalidate_metrics(s);
-                            for (provider, tile) in [
-                                (ProviderId::Claude, Tile::Claude),
-                                (ProviderId::Codex, Tile::Codex),
-                            ] {
-                                if !s.providers.contains(provider) {
-                                    s.tiles.reset(tile);
-                                }
-                            }
-                            if provider == ProviderId::Antigravity && changed {
-                                let enabled = s.providers.contains(ProviderId::Antigravity);
-                                // The child External choice survives parent toggles.
-                                s.show_antigravity_gemini = enabled;
-                                if !enabled {
-                                    s.tiles.reset(Tile::Antigravity);
-                                }
-                            }
-                            s.stop_crossfade_timer_if_idle(hwnd);
-                        }
-                    }
-                    save_state_settings();
-                    position_at_taskbar();
-                    render_layered();
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
-                id if id == IDM_LANG_SYSTEM || language_from_menu_command_id(id).is_some() => {
-                    let language_override = if id == IDM_LANG_SYSTEM {
-                        None
-                    } else {
-                        language_from_menu_command_id(id)
-                    };
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            apply_language_to_state(s, language_override);
-                        }
-                    }
-                    save_state_settings();
-                    render_layered();
-                }
-                _ => {}
-            }
-            LRESULT(0)
-        }
-        _ if msg == WM_APP_TRAY => {
-            // Explorer can deliver this synchronously, including while a shell
-            // call has re-entered our window procedure. Return before taking
-            // STATE, opening windows, or calling back into Explorer.
-            if let Err(error) = PostMessageW(
-                Some(controller_for(hwnd)),
-                native_interop::WM_APP_TRAY_DISPATCH,
-                wparam,
-                lparam,
-            ) {
-                diagnose::log_error("unable to queue tray callback", error);
-            }
-            LRESULT(0)
-        }
-        _ if msg == native_interop::WM_APP_TRAY_DISPATCH => {
-            let tray_message = lparam.0 as u32;
-            if let Some(surface_index) = tray_icon::themed_surface_index(wparam.0 as u32) {
-                let root_id = lock_state().as_ref().and_then(|state| {
-                    state
-                        .active_theme
-                        .as_ref()
-                        .and_then(|theme| theme.surfaces.get(surface_index))
-                        .map(|surface| surface.id.clone())
-                });
-                if let Some(root_id) = root_id {
-                    match tray_message {
-                        WM_MOUSEMOVE => {
-                            update_tray_mouse_hover(hwnd, surface_index, root_id);
-                            return LRESULT(0);
-                        }
-                        WM_LBUTTONUP => {
-                            let suppressed = {
-                                let mut state = lock_state();
-                                state.as_mut().is_some_and(|state| {
-                                    let suppressed = state.suppress_next_left_up;
-                                    state.suppress_next_left_up = false;
-                                    suppressed
-                                })
-                            };
-                            if suppressed {
-                                return LRESULT(0);
-                            }
-                            if mouse_handler_exists(surface_index, &root_id, MouseEventKind::Click)
-                            {
-                                schedule_or_dispatch_click(hwnd, surface_index, root_id);
-                            } else if !mouse_handler_exists(
-                                surface_index,
-                                &root_id,
-                                MouseEventKind::DoubleClick,
-                            ) {
-                                crate::dashboard::show(controller_for(hwnd));
-                            }
-                            return LRESULT(0);
-                        }
-                        WM_LBUTTONDBLCLK => {
-                            if mouse_handler_exists(
-                                surface_index,
-                                &root_id,
-                                MouseEventKind::DoubleClick,
-                            ) {
-                                dispatch_double_click(hwnd, surface_index, root_id);
-                            } else {
-                                crate::dashboard::show(controller_for(hwnd));
-                            }
-                            return LRESULT(0);
-                        }
-                        WM_RBUTTONUP | WM_CONTEXTMENU => {
-                            if !dispatch_mouse_event(
-                                surface_index,
-                                &root_id,
-                                MouseEventKind::RightClick,
-                            ) {
-                                show_context_menu_document(hwnd, None, None);
-                            }
-                            return LRESULT(0);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            match tray_icon::handle_message(lparam) {
-                tray_icon::TrayAction::OpenDashboard => {
-                    crate::dashboard::show(controller_for(hwnd));
-                }
-                tray_icon::TrayAction::ShowContextMenu => {
-                    show_context_menu_document(hwnd, None, None);
-                }
-                tray_icon::TrayAction::None => {}
-            }
-            LRESULT(0)
-        }
+        WM_LBUTTONUP => on_left_button_up(hwnd, lparam),
+        WM_CAPTURECHANGED => on_capture_changed(),
+        WM_APP_TASKBAR_COLLISION => on_taskbar_collision(hwnd, wparam),
+        WM_COMMAND => on_command(hwnd, wparam),
+        _ if msg == WM_APP_TRAY => on_tray_callback(hwnd, wparam, lparam),
+        _ if msg == native_interop::WM_APP_TRAY_DISPATCH => on_tray_dispatch(hwnd, wparam, lparam),
         _ if msg == taskbar_created_message() => {
             sync_tray_icon(hwnd);
             lifecycle::schedule_reconcile(controller_for(hwnd));
@@ -1173,6 +180,989 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+unsafe fn on_display_change(hwnd: HWND, msg: u32, wparam: WPARAM) -> LRESULT {
+    if let Some(state) = lock_state().as_mut() {
+        invalidate_metrics(state);
+        invalidate_hover_tile_rects(state);
+    }
+    if msg == WM_DPICHANGED_MSG {
+        CURRENT_DPI.store((wparam.0 & 0xFFFF) as u32, Ordering::Relaxed);
+    }
+    if msg == WM_SETTINGCHANGE {
+        check_theme_change();
+        check_language_change();
+    }
+    lifecycle::schedule_reconcile(controller_for(hwnd));
+    LRESULT(0)
+}
+
+unsafe fn on_timer(hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    let timer_id = wparam.0;
+    match timer_id {
+        TIMER_POLL => {
+            // Credential discovery can launch WSL and decrypt local
+            // caches. The poll worker also handles the paused state.
+            request_scheduled_poll(hwnd);
+        }
+        TIMER_COUNTDOWN => {
+            if let Some(state) = lock_state().as_mut() {
+                invalidate_metrics(state);
+            }
+            render_layered();
+            sync_tray_icon(hwnd);
+            schedule_countdown_timer();
+        }
+        TIMER_CLOCK => {
+            if let Some(state) = lock_state().as_mut() {
+                invalidate_metrics(state);
+            }
+            render_layered();
+            let refresh_tray = lock_state()
+                .as_ref()
+                .is_some_and(|state| state.tray_theme_uses_current_time);
+            if refresh_tray {
+                sync_tray_icon(hwnd);
+            }
+            schedule_clock_timer();
+        }
+        TIMER_RESET_POLL => {
+            let should_poll = {
+                let state = lock_state();
+                state
+                    .as_ref()
+                    .map(|s| !s.auth_error_paused_polling)
+                    .unwrap_or(false)
+            };
+            if should_poll {
+                request_scheduled_poll(hwnd);
+            }
+        }
+        TIMER_UPDATE_CHECK => {
+            begin_update_check(hwnd, false);
+        }
+        TIMER_WINDOW_STATE => {
+            // Re-showing a floating surface re-asserts topmost; the
+            // timer repeats, so skipping while the menu is open is safe.
+            if !window_context_menu::menu_session_active() {
+                sync_theme_window_visibility();
+            }
+        }
+        TIMER_MOUSE_CLICK => {
+            let _ = kill_controller_timer(Some(hwnd), TIMER_MOUSE_CLICK);
+            let pending = lock_state()
+                .as_mut()
+                .and_then(|state| state.pending_mouse_click.take());
+            if let Some(pending) = pending {
+                let _ = dispatch_mouse_event(
+                    pending.surface_index,
+                    &pending.object_id,
+                    MouseEventKind::Click,
+                );
+            }
+        }
+        TIMER_TRAY_HOVER => {
+            clear_tray_mouse_hover_if_left(hwnd);
+        }
+        widget_tooltip::REFRESH_TIMER => widget_tooltip::refresh(),
+        TIMER_TRAY_REPOSITION => {
+            let _ = kill_controller_timer(Some(hwnd), TIMER_TRAY_REPOSITION);
+            lifecycle::reconcile_surfaces();
+        }
+        TIMER_CROSSFADE_SCHEDULE => {
+            // Legacy fallback when the multimedia timer is unavailable.
+            tick_animations(hwnd, false);
+        }
+        _ => {}
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_usage_updated(hwnd: HWND) -> LRESULT {
+    if let Some(state) = lock_state().as_mut() {
+        invalidate_metrics(state);
+    }
+    check_theme_change();
+    check_language_change();
+    render_layered();
+    // A poll can change the layout (agy pool O appears or goes away)
+    // under a stationary cursor; recheck hover on every visible
+    // surface against the new rects (posted, after this render).
+    super::mouse::request_hover_revalidation(hwnd);
+    schedule_countdown_timer();
+    schedule_clock_timer();
+    suppress_tray_reposition_for(Duration::from_millis(
+        TRAY_ICON_UPDATE_REPOSITION_SUPPRESS_MS,
+    ));
+    sync_tray_icon(hwnd);
+    LRESULT(0)
+}
+
+unsafe fn on_left_button_down(hwnd: HWND) -> LRESULT {
+    widget_tooltip::hide();
+    unsafe {
+        let _ = SetCapture(hwnd);
+    }
+    let mut pt = POINT::default();
+    let _ = unsafe { GetCursorPos(&mut pt) };
+    let rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
+    let mut state = lock_state();
+    if let Some(s) = state.as_mut() {
+        s.pending_drag = true;
+        s.is_snapped = false;
+        s.drag_start_cursor = pt;
+        s.drag_start_origin = POINT {
+            x: rect.left,
+            y: rect.top,
+        };
+        s.drag_start_client_x = pt.x - rect.left;
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_mouse_move(hwnd: HWND, lparam: LPARAM) -> LRESULT {
+    let mut pt = POINT::default();
+    let _ = unsafe { GetCursorPos(&mut pt) };
+
+    let (should_start_drag, is_dragging) = {
+        let mut state = lock_state();
+        if let Some(s) = state.as_mut() {
+            if s.pending_drag && !s.dragging {
+                let cx_drag = unsafe { GetSystemMetrics(SM_CXDRAG) };
+                let cy_drag = unsafe { GetSystemMetrics(SM_CYDRAG) };
+                let dx = (pt.x - s.drag_start_cursor.x).abs();
+                let dy = (pt.y - s.drag_start_cursor.y).abs();
+                if dx >= cx_drag || dy >= cy_drag {
+                    (true, false)
+                } else {
+                    (false, false)
+                }
+            } else {
+                (false, s.dragging)
+            }
+        } else {
+            (false, false)
+        }
+    };
+
+    if should_start_drag {
+        {
+            let mut state = lock_state();
+            if let Some(s) = state.as_mut() {
+                s.is_switching_window_style = true;
+                // Native reparenting can dispatch layout messages. They
+                // must already see a drag and leave its position alone.
+                s.dragging = true;
+                s.pending_drag = false;
+            }
+        }
+        native_interop::make_popup(hwnd, true);
+        unsafe {
+            let _ = SetCapture(hwnd);
+        }
+        {
+            let mut state = lock_state();
+            if let Some(s) = state.as_mut() {
+                s.is_switching_window_style = false;
+            }
+        }
+    }
+
+    let is_now_dragging = should_start_drag || is_dragging;
+    if is_now_dragging {
+        let drag_info = {
+            let state = lock_state();
+            state.as_ref().map(|s| {
+                (
+                    s.drag_start_client_x,
+                    s.drag_start_cursor,
+                    s.drag_start_origin,
+                    widget_frame_for_state(s, None),
+                )
+            })
+        };
+
+        if let Some((start_client_x, start_cursor, start_origin, frame)) = drag_info {
+            let origin_x = pt.x - start_client_x;
+            let origin_y = pt.y - (start_cursor.y - start_origin.y);
+            let virtual_rect = frame.content_rect(POINT {
+                x: origin_x,
+                y: origin_y,
+            });
+            let widget_w = frame.content_width;
+            let widget_h = frame.height;
+
+            let taskbars = native_interop::find_taskbars();
+            let target_taskbar = taskbars.into_iter().find(|tb| {
+                let tb_rect = tb.rect;
+                let extended = RECT {
+                    left: tb_rect.left - 20,
+                    top: tb_rect.top - 20,
+                    right: tb_rect.right + 20,
+                    bottom: tb_rect.bottom + 20,
+                };
+                pt.x >= extended.left
+                    && pt.x <= extended.right
+                    && pt.y >= extended.top
+                    && pt.y <= extended.bottom
+            });
+
+            let mut snapped_pos = None;
+            let mut now_snapped = false;
+            if let Some((taskbar, free_dock_slot)) = target_taskbar.and_then(|taskbar| {
+                positioning::taskbar_free_dock_slot(taskbar.hwnd, taskbar.rect, virtual_rect)
+                    .map(|slot| (taskbar, slot))
+            }) {
+                let capacity_ok = positioning::is_taskbar_capacity_sufficient(
+                    taskbar.rect,
+                    free_dock_slot,
+                    widget_w,
+                    widget_h,
+                );
+                if capacity_ok {
+                    let was_snapped = {
+                        let state = lock_state();
+                        state.as_ref().is_some_and(|s| s.is_snapped)
+                    };
+                    if positioning::should_snap_to_slot(virtual_rect, free_dock_slot, was_snapped) {
+                        now_snapped = true;
+                        let is_horizontal = native_interop::is_taskbar_horizontal(taskbar.rect);
+                        if is_horizontal {
+                            let snapped_x = virtual_rect
+                                .left
+                                .clamp(free_dock_slot.left, free_dock_slot.right - widget_w)
+                                - frame.inset;
+                            let snapped_y = compute_anchor_y(
+                                taskbar.rect.top,
+                                taskbar.rect.bottom - taskbar.rect.top,
+                                widget_h,
+                            );
+                            snapped_pos = Some((snapped_x, snapped_y));
+                        } else {
+                            let snapped_x = taskbar.rect.left - frame.inset;
+                            let snapped_y = origin_y
+                                .clamp(free_dock_slot.top, free_dock_slot.bottom - widget_h);
+                            snapped_pos = Some((snapped_x, snapped_y));
+                        }
+                    }
+                }
+            }
+
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.is_snapped = now_snapped;
+                }
+            }
+
+            let (final_x, final_y) = snapped_pos.unwrap_or((origin_x, origin_y));
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    final_x,
+                    final_y,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOSIZE,
+                );
+            }
+            super::mouse::request_hover_revalidation(hwnd);
+        }
+    } else {
+        update_mouse_hover(hwnd, lparam);
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_left_button_up(hwnd: HWND, lparam: LPARAM) -> LRESULT {
+    let released = release_drag_capture_with(
+        || {
+            lock_state()
+                .as_mut()
+                .map(|s| DragRelease::take(&mut s.dragging, &mut s.pending_drag, &mut s.is_snapped))
+                .unwrap_or_default()
+        },
+        || {
+            let _ = ReleaseCapture();
+        },
+    );
+    let suppressed = {
+        let mut state = lock_state();
+        state.as_mut().is_some_and(|state| {
+            let suppressed = state.suppress_next_left_up;
+            state.suppress_next_left_up = false;
+            suppressed
+        })
+    };
+    if suppressed {
+        return LRESULT(0);
+    }
+    let mut pt = POINT::default();
+    let _ = unsafe { GetCursorPos(&mut pt) };
+
+    if released.dragging {
+        let widget_rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
+        let frame = lock_state()
+            .as_ref()
+            .map(|s| widget_frame_for_state(s, None));
+        let Some(current_frame) = frame else {
+            return LRESULT(0);
+        };
+        let widget_rect = current_frame.content_rect(POINT {
+            x: widget_rect.left,
+            y: widget_rect.top,
+        });
+        let widget_w = current_frame.content_width;
+        let widget_h = current_frame.height;
+
+        let taskbars = native_interop::find_taskbars();
+        let target_dock = taskbars.iter().enumerate().find_map(|(idx, tb)| {
+            let free_dock_slot =
+                positioning::taskbar_free_dock_slot(tb.hwnd, tb.rect, widget_rect)?;
+            let capacity_ok = positioning::is_taskbar_capacity_sufficient(
+                tb.rect,
+                free_dock_slot,
+                widget_w,
+                widget_h,
+            );
+            if !capacity_ok {
+                return None;
+            }
+            if positioning::should_snap_to_slot(widget_rect, free_dock_slot, released.snapped) {
+                Some((idx, tb, free_dock_slot))
+            } else {
+                None
+            }
+        });
+
+        if let Some((target_idx, taskbar, free_dock_slot)) = target_dock {
+            let displays = native_interop::find_monitors();
+            let Some(handle) =
+                native_interop::monitor_for_taskbar(&taskbars, &displays, taskbar.hwnd)
+            else {
+                render_layered();
+                return LRESULT(0);
+            };
+            let Some(monitor_index) = positioning::monitor_index_for_handle(&displays, handle)
+            else {
+                render_layered();
+                return LRESULT(0);
+            };
+            let tray = native_interop::find_child_window(taskbar.hwnd, "TrayNotifyWnd")
+                .and_then(native_interop::get_window_rect_safe);
+            let reference = positioning::system_tray_reference(taskbar.rect, tray);
+            const TRAY_SNAP_THRESHOLD: i32 = 8;
+            let (screen_x, screen_y, tray_offset) =
+                if native_interop::is_taskbar_horizontal(taskbar.rect) {
+                    let left = widget_rect
+                        .left
+                        .clamp(free_dock_slot.left, free_dock_slot.right - widget_w);
+                    let tray_dist = (reference.left - left - widget_w).max(0);
+                    if tray_dist <= TRAY_SNAP_THRESHOLD {
+                        (0, 0, 0)
+                    } else {
+                        ((left - taskbar.rect.left).max(1), 0, tray_dist)
+                    }
+                } else {
+                    let top = widget_rect
+                        .top
+                        .clamp(free_dock_slot.top, free_dock_slot.bottom - widget_h);
+                    let tray_dist = (reference.top - top - widget_h).max(0);
+                    if tray_dist <= TRAY_SNAP_THRESHOLD {
+                        (0, 0, 0)
+                    } else {
+                        (0, (top - taskbar.rect.top).max(1), tray_dist)
+                    }
+                };
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.embedded = true;
+                    s.is_snapped = false;
+                    s.taskbar_index = target_idx;
+                    s.auto_ejected = false;
+                    s.auto_ejected_for_capacity = false;
+                    s.auto_ejected_origin = None;
+                    s.auto_ejected_host = None;
+                    s.tray_offset = tray_offset;
+                    s.placement_override = Some(PlacementOverride {
+                        nest: "taskbar".into(),
+                        monitor_index,
+                        monitor_device: native_interop::monitor_device_name(handle),
+                        screen_x,
+                        screen_y,
+                        tray_offset,
+                        floating_host: None,
+                    });
+                }
+            }
+            save_state_settings();
+            native_interop::embed_as_child(hwnd, taskbar.hwnd);
+            position_at_taskbar();
+            render_layered();
+        } else {
+            // Locked widgets cannot be dropped as floating: return them
+            // to the bar so they can only be moved along it.
+            let locked = lock_state().as_ref().is_some_and(taskbar_lock_applies);
+            if locked {
+                let taskbar = {
+                    let mut state = lock_state();
+                    state.as_mut().and_then(|s| {
+                        s.embedded = true;
+                        s.is_switching_window_style = true;
+                        s.is_snapped = false;
+                        s.auto_ejected = false;
+                        s.auto_ejected_for_capacity = false;
+                        s.auto_ejected_origin = None;
+                        s.auto_ejected_host = None;
+                        // The drag leaves the configured taskbar host
+                        // and saved dock placement unchanged.
+                        s.taskbar_hwnd.map(|h| h.to_hwnd())
+                    })
+                };
+                // SetParent/style changes can synchronously re-enter
+                // wnd_proc. Release STATE before calling Win32.
+                if let Some(taskbar) = taskbar {
+                    native_interop::embed_as_child(hwnd, taskbar);
+                }
+                if let Some(s) = lock_state().as_mut() {
+                    s.is_switching_window_style = false;
+                }
+                save_state_settings();
+                position_at_taskbar();
+                render_layered();
+                return LRESULT(0);
+            }
+            let displays = native_interop::find_monitors();
+            let (monitor_idx, display) = positioning::monitor_for_point(&displays, pt);
+            let floating_frame = lock_state()
+                .as_ref()
+                .and_then(|s| floating_frame_for_state(s, monitor_idx, monitor_scale(display)));
+            let Some(floating_frame) = floating_frame else {
+                return LRESULT(0);
+            };
+
+            // Keep the grabbed content in place as the card expands around it.
+            let widget_w = floating_frame.width;
+            let widget_h = floating_frame.height;
+            let clamped_x = (widget_rect.left - floating_frame.inset).clamp(
+                display.rect.left,
+                (display.rect.right - widget_w).max(display.rect.left),
+            );
+            let clamped_y = widget_rect.top.clamp(
+                display.rect.top,
+                (display.rect.bottom - widget_h).max(display.rect.top),
+            );
+
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    let floating_host = floating_host_for_state(s);
+                    s.embedded = false;
+                    s.is_snapped = false;
+                    s.auto_ejected = false;
+                    s.auto_ejected_for_capacity = false;
+                    s.auto_ejected_origin = None;
+                    s.auto_ejected_host = None;
+                    s.placement_override = Some(PlacementOverride {
+                        nest: "floating".into(),
+                        monitor_index: monitor_idx,
+                        monitor_device: native_interop::monitor_device_name(display.handle),
+                        screen_x: clamped_x,
+                        screen_y: clamped_y,
+                        tray_offset: 0,
+                        floating_host,
+                    });
+                }
+            }
+            save_state_settings();
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    clamped_x,
+                    clamped_y,
+                    widget_w,
+                    widget_h,
+                    SWP_NOACTIVATE,
+                );
+            }
+            render_layered();
+        }
+    } else if released.pending {
+        // A release with no drag: either an authored JSON click action
+        // or, when the object has none, an immediate view-mode bounce.
+        handle_view_mode_click(hwnd, lparam);
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_capture_changed() -> LRESULT {
+    let mut state = lock_state();
+    if let Some(s) = state.as_mut() {
+        if !s.is_switching_window_style {
+            s.dragging = false;
+            s.pending_drag = false;
+            s.is_snapped = false;
+        }
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_taskbar_collision(hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    let action = wparam.0;
+    let mut state = lock_state();
+    let Some(s) = state.as_mut() else {
+        return LRESULT(0);
+    };
+    // A queued result can outlive a drag, placement change, or sample.
+    if taskbar_collision_action(s) != Some(action) {
+        return LRESULT(0);
+    }
+
+    if action == 1 && !s.auto_ejected && s.embedded {
+        s.auto_ejected_host = floating_host_for_state(s);
+        s.auto_ejected = true;
+        let widget_rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
+        let frame = widget_frame_for_state(s, Some(SurfaceNest::Floating));
+        let widget_w = frame.width;
+        let widget_h = frame.height;
+        let floating_rect = RECT {
+            left: widget_rect.left - frame.inset,
+            top: widget_rect.top,
+            right: widget_rect.left - frame.inset + widget_w,
+            bottom: widget_rect.top + widget_h,
+        };
+
+        let taskbar_rect = s
+            .taskbar_hwnd
+            .and_then(|h| native_interop::get_window_rect_safe(h.to_hwnd()))
+            .unwrap_or_default();
+        // Capacity fallback can return as soon as the authored layout
+        // fits. App collisions retain their existing extra clearance.
+        s.auto_ejected_for_capacity =
+            positioning::taskbar_surface_is_clipped(taskbar_rect, widget_rect);
+
+        let displays = native_interop::find_monitors();
+        let mon = displays
+            .iter()
+            .find(|d| {
+                taskbar_rect.left >= d.rect.left
+                    && taskbar_rect.right <= d.rect.right
+                    && taskbar_rect.top >= d.rect.top
+                    && taskbar_rect.bottom <= d.rect.bottom
+            })
+            .or_else(|| displays.first());
+        let mon_rect = mon.map(|m| m.rect).unwrap_or(RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        });
+
+        // Include the card when leaving a vertical taskbar, and keep
+        // the added inset inside the monitor at either screen edge.
+        let mut pt = positioning::auto_eject_origin(floating_rect, taskbar_rect, mon_rect);
+        pt.x = pt.x.clamp(
+            mon_rect.left,
+            (mon_rect.right - widget_w).max(mon_rect.left),
+        );
+        pt.y =
+            pt.y.clamp(mon_rect.top, (mon_rect.bottom - widget_h).max(mon_rect.top));
+
+        s.auto_ejected_origin = Some(pt);
+        s.is_switching_window_style = true;
+        // Parenting/style changes can synchronously re-enter wnd_proc.
+        drop(state);
+        native_interop::make_popup(hwnd, true);
+        if let Some(s) = lock_state().as_mut() {
+            s.is_switching_window_style = false;
+        }
+
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                pt.x,
+                pt.y,
+                widget_w,
+                widget_h,
+                SWP_NOACTIVATE,
+            );
+        }
+        diagnose::log(format!(
+            "taskbar collision: auto-ejected widget to floating taskbar={taskbar_rect:?} widget={widget_rect:?}"
+        ));
+        render_layered();
+    } else if action == 0 && s.auto_ejected {
+        s.auto_ejected = false;
+        s.auto_ejected_for_capacity = false;
+        s.auto_ejected_origin = None;
+        s.auto_ejected_host = None;
+        let taskbar_hwnd = s.taskbar_hwnd.map(|h| h.to_hwnd());
+        s.is_switching_window_style = true;
+        drop(state);
+        if let Some(tb) = taskbar_hwnd {
+            native_interop::embed_as_child(hwnd, tb);
+        }
+        if let Some(s) = lock_state().as_mut() {
+            s.is_switching_window_style = false;
+        }
+        diagnose::log("taskbar collision resolved: re-docked widget to taskbar");
+        position_at_taskbar();
+        render_layered();
+    } else if action == TASKBAR_COLLISION_REPOSITION {
+        drop(state);
+        diagnose::log("taskbar geometry changed: repositioning docked widget");
+        position_at_taskbar();
+        render_layered();
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_command(hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    let id = wparam.0 as u16;
+    match id {
+        IDM_DASHBOARD => {
+            crate::dashboard::show(controller_for(hwnd));
+        }
+        1 => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.force_notify_auth_error = true;
+                }
+            }
+            render_layered();
+            request_poll(hwnd);
+        }
+        IDM_VERSION_ACTION => perform_update_action(hwnd),
+        2 => {
+            let _ = PostMessageW(Some(controller_for(hwnd)), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+        IDM_START_WITH_WINDOWS => {
+            set_startup_enabled(!is_startup_enabled());
+        }
+        IDM_LOCK_TASKBAR => {
+            toggle_taskbar_lock(hwnd);
+        }
+        IDM_SHOW_PACE => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.show_pace = !s.show_pace;
+                    invalidate_metrics(s);
+                }
+            }
+            save_state_settings();
+            render_layered();
+            sync_tray_icon(hwnd);
+        }
+        IDM_SHOW_FABLE => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    super::toggle_show_fable(s);
+                }
+            }
+            save_state_settings();
+            render_layered();
+            // The Fable column changes the root width: a right-pinned
+            // window moves its left edge, so Win32 sends no
+            // WM_MOUSELEAVE for a cursor it moved out from under.
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+        }
+        IDM_SHOW_FABLE_X => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    super::toggle_show_fable_x(s);
+                }
+            }
+            save_state_settings();
+            render_layered();
+            // The Fable column changes the root width: a right-pinned
+            // window moves its left edge, so Win32 sends no
+            // WM_MOUSELEAVE for a cursor it moved out from under.
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+        }
+        IDM_CLAUDE_POOLS_ONE_WIDGET
+        | IDM_ANTIGRAVITY_POOLS_ONE_WIDGET
+        | IDM_CODEX_POOLS_ONE_WIDGET => {
+            let provider = match id {
+                IDM_CLAUDE_POOLS_ONE_WIDGET => ProviderId::Claude,
+                IDM_CODEX_POOLS_ONE_WIDGET => ProviderId::Codex,
+                _ => ProviderId::Antigravity,
+            };
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    if let Some(one_widget) = s.pools_one_widget_mut(provider) {
+                        *one_widget = !*one_widget;
+                    }
+                    super::invalidate_metrics(s);
+                }
+            }
+            save_state_settings();
+            position_at_taskbar();
+            render_layered();
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+        }
+        IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
+            let new_interval = match id {
+                IDM_FREQ_1MIN => POLL_1_MIN,
+                IDM_FREQ_5MIN => POLL_5_MIN,
+                IDM_FREQ_15MIN => POLL_15_MIN,
+                IDM_FREQ_1HOUR => POLL_1_HOUR,
+                _ => POLL_15_MIN,
+            };
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.poll_interval_ms = new_interval;
+                }
+            }
+            save_state_settings();
+            // Reset the poll timer with the new interval
+            set_controller_timer(Some(hwnd), TIMER_POLL, new_interval, None);
+        }
+        IDM_PROVIDER_ANTIGRAVITY_GEMINI | IDM_PROVIDER_ANTIGRAVITY_EXTERNAL => {
+            let mut should_reposition = false;
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    should_reposition =
+                        super::toggle_antigravity_models(s, id == IDM_PROVIDER_ANTIGRAVITY_GEMINI);
+                    s.stop_crossfade_timer_if_idle(hwnd);
+                }
+            }
+            save_state_settings();
+            if should_reposition {
+                position_at_taskbar();
+            }
+            render_layered();
+            sync_tray_icon(hwnd);
+            request_poll(hwnd);
+        }
+        IDM_PROVIDER_ANTIGRAVITY_EXTERNAL_X => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    super::toggle_antigravity_external_x(s);
+                }
+            }
+            save_state_settings();
+            // The external-models widget can appear or go away.
+            position_at_taskbar();
+            render_layered();
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+        }
+        IDM_PROVIDER_ANTIGRAVITY_A => {
+            let mut should_reposition = false;
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    should_reposition = super::toggle_antigravity_a(s);
+                    // Pool A off leaves pool O alone in one row.
+                    super::invalidate_hover_tile_rects(s);
+                    invalidate_metrics(s);
+                }
+            }
+            save_state_settings();
+            if should_reposition {
+                position_at_taskbar();
+            }
+            render_layered();
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+            request_poll(hwnd);
+        }
+        IDM_PROVIDER_ANTIGRAVITY_X => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    super::toggle_antigravity_pool_o(s);
+                    // Pool O adds a marker column and a second row.
+                    super::invalidate_hover_tile_rects(s);
+                    invalidate_metrics(s);
+                }
+            }
+            save_state_settings();
+            position_at_taskbar();
+            render_layered();
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+            request_poll(hwnd);
+        }
+        IDM_PROVIDER_CLAUDE_MAIN
+        | IDM_PROVIDER_CLAUDE_X
+        | IDM_PROVIDER_CODEX_MAIN
+        | IDM_PROVIDER_CODEX_X => {
+            let (provider, main) = match id {
+                IDM_PROVIDER_CLAUDE_MAIN => (ProviderId::Claude, true),
+                IDM_PROVIDER_CLAUDE_X => (ProviderId::Claude, false),
+                IDM_PROVIDER_CODEX_MAIN => (ProviderId::Codex, true),
+                _ => (ProviderId::Codex, false),
+            };
+            let mut should_reposition = false;
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    should_reposition = super::toggle_account_pool(s, provider, main);
+                    s.stop_crossfade_timer_if_idle(hwnd);
+                }
+            }
+            save_state_settings();
+            if should_reposition {
+                position_at_taskbar();
+            }
+            render_layered();
+            super::mouse::revalidate_mouse_hover(hwnd);
+            sync_tray_icon(hwnd);
+            request_poll(hwnd);
+        }
+        id if ProviderId::from_native_menu_command_id(id).is_some() => {
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    let provider = ProviderId::from_native_menu_command_id(id)
+                        .expect("provider menu command was matched above");
+                    let changed = s.providers.toggle(provider);
+                    // Tile widths depend on the provider count.
+                    invalidate_metrics(s);
+                    for (provider, tile) in [
+                        (ProviderId::Claude, Tile::Claude),
+                        (ProviderId::Codex, Tile::Codex),
+                    ] {
+                        if !s.providers.contains(provider) {
+                            s.tiles.reset(tile);
+                        }
+                    }
+                    if provider == ProviderId::Antigravity && changed {
+                        let enabled = s.providers.contains(ProviderId::Antigravity);
+                        // The child External choice survives parent toggles.
+                        s.show_antigravity_gemini = enabled;
+                        if !enabled {
+                            s.tiles.reset(Tile::Antigravity);
+                        }
+                    }
+                    s.stop_crossfade_timer_if_idle(hwnd);
+                }
+            }
+            save_state_settings();
+            position_at_taskbar();
+            render_layered();
+            sync_tray_icon(hwnd);
+            request_poll(hwnd);
+        }
+        id if id == IDM_LANG_SYSTEM || language_from_menu_command_id(id).is_some() => {
+            let language_override = if id == IDM_LANG_SYSTEM {
+                None
+            } else {
+                language_from_menu_command_id(id)
+            };
+            {
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    apply_language_to_state(s, language_override);
+                }
+            }
+            save_state_settings();
+            render_layered();
+        }
+        _ => {}
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_tray_callback(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // Explorer can deliver this synchronously, including while a shell
+    // call has re-entered our window procedure. Return before taking
+    // STATE, opening windows, or calling back into Explorer.
+    if let Err(error) = PostMessageW(
+        Some(controller_for(hwnd)),
+        native_interop::WM_APP_TRAY_DISPATCH,
+        wparam,
+        lparam,
+    ) {
+        diagnose::log_error("unable to queue tray callback", error);
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_tray_dispatch(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let tray_message = lparam.0 as u32;
+    if let Some(surface_index) = tray_icon::themed_surface_index(wparam.0 as u32) {
+        let root_id = lock_state().as_ref().and_then(|state| {
+            state
+                .active_theme
+                .as_ref()
+                .and_then(|theme| theme.surfaces.get(surface_index))
+                .map(|surface| surface.id.clone())
+        });
+        if let Some(root_id) = root_id {
+            match tray_message {
+                WM_MOUSEMOVE => {
+                    update_tray_mouse_hover(hwnd, surface_index, root_id);
+                    return LRESULT(0);
+                }
+                WM_LBUTTONUP => {
+                    let suppressed = {
+                        let mut state = lock_state();
+                        state.as_mut().is_some_and(|state| {
+                            let suppressed = state.suppress_next_left_up;
+                            state.suppress_next_left_up = false;
+                            suppressed
+                        })
+                    };
+                    if suppressed {
+                        return LRESULT(0);
+                    }
+                    if mouse_handler_exists(surface_index, &root_id, MouseEventKind::Click) {
+                        schedule_or_dispatch_click(hwnd, surface_index, root_id);
+                    } else if !mouse_handler_exists(
+                        surface_index,
+                        &root_id,
+                        MouseEventKind::DoubleClick,
+                    ) {
+                        crate::dashboard::show(controller_for(hwnd));
+                    }
+                    return LRESULT(0);
+                }
+                WM_LBUTTONDBLCLK => {
+                    if mouse_handler_exists(surface_index, &root_id, MouseEventKind::DoubleClick) {
+                        dispatch_double_click(hwnd, surface_index, root_id);
+                    } else {
+                        crate::dashboard::show(controller_for(hwnd));
+                    }
+                    return LRESULT(0);
+                }
+                WM_RBUTTONUP | WM_CONTEXTMENU => {
+                    if !dispatch_mouse_event(surface_index, &root_id, MouseEventKind::RightClick) {
+                        show_context_menu_document(hwnd, None, None);
+                    }
+                    return LRESULT(0);
+                }
+                _ => {}
+            }
+        }
+    }
+    match tray_icon::handle_message(lparam) {
+        tray_icon::TrayAction::OpenDashboard => {
+            crate::dashboard::show(controller_for(hwnd));
+        }
+        tray_icon::TrayAction::ShowContextMenu => {
+            show_context_menu_document(hwnd, None, None);
+        }
+        tray_icon::TrayAction::None => {}
+    }
+    LRESULT(0)
 }
 
 #[cfg(test)]
