@@ -620,8 +620,11 @@ impl DataContext {
         // custom themes, while `codex.five_hour` always means the real window.
         let codex_session_fallback = codex_compatibility
             && usage.is_some_and(|usage| !usage.session.available && usage.weekly.available);
+        // One clock reading, so windows sharing a reset (session and its
+        // five-hour or weekly source) get identical countdowns.
+        let now = SystemTime::now();
         for (window, binding) in quota_windows(name, usage, codex_session_fallback) {
-            self.insert_window(name, window, binding, countdown);
+            self.insert_window(name, window, binding, countdown, now);
         }
         self.insert(&format!("{name}.available"), usage.is_some() as u8 as f64);
         // Carried over from an earlier poll: real figures, not current ones.
@@ -657,7 +660,14 @@ impl DataContext {
 
     /// `percentage` stays the share that has been spent so warning thresholds
     /// keep working, while `display` follows the countdown setting.
-    fn insert_window(&mut self, name: &str, window: &str, binding: WindowBinding, countdown: bool) {
+    fn insert_window(
+        &mut self,
+        name: &str,
+        window: &str,
+        binding: WindowBinding,
+        countdown: bool,
+        now: SystemTime,
+    ) {
         let percentage = binding.percentage;
         self.insert(
             &format!("{name}.{window}.available"),
@@ -688,7 +698,7 @@ impl DataContext {
             .unwrap_or(0.0);
         let seconds = binding
             .resets_at
-            .and_then(|value| value.duration_since(std::time::SystemTime::now()).ok())
+            .and_then(|value| value.duration_since(now).ok())
             .map(|value| value.as_secs_f64())
             .unwrap_or(0.0);
         self.insert(&format!("{name}.{window}.reset.unix"), unix);
