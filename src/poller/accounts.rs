@@ -116,6 +116,47 @@ fn poll_accounts_with_progress<F>(
 where
     F: Fn(ProviderId, Option<&std::path::Path>) -> Result<UsageData, PollError> + Sync,
 {
+    let targets = poll_targets(enabled, settings);
+    // Profiles sharing a source must not race token refresh or credit writes.
+    // Each distinct source has one job, while unrelated accounts run concurrently.
+    let groups = group_by_source(targets);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut results = std::thread::scope(|scope| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for _ in 0..groups.len().min(MAX_CONCURRENT_PROVIDER_POLLS) {
+            let sender = sender.clone();
+            let groups = &groups;
+            let next = &next;
+            let poll = &poll;
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(group) = groups.get(index) else {
+                    break;
+                };
+                let (signature, result) = poll_group(group, previous, force, poll);
+                for target in group {
+                    let _ = sender.send((index, target.clone(), signature.clone(), result.clone()));
+                }
+            });
+        }
+        drop(sender);
+        receiver
+            .into_iter()
+            .inspect(|(_, target, signature, result)| {
+                let mut update = AppUsageData::default();
+                append_account_result(&mut update, target, signature, result);
+                if !update.is_empty() || !update.accounts.is_empty() {
+                    on_progress(update);
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+    results.sort_by_key(|(index, _, _, _)| *index);
+    collect_account_results(results, settings)
+}
+
+/// One polling target per enabled account, in provider order.
+fn poll_targets(enabled: ProviderSet, settings: &AccountSettings) -> Vec<Target> {
     let mut targets = Vec::new();
     for provider in enabled.iter() {
         if let Some(accounts) = settings.get(provider) {
@@ -167,8 +208,11 @@ where
             }
         }
     }
-    // Profiles sharing a source must not race token refresh or credit writes.
-    // Each distinct source has one job, while unrelated accounts run concurrently.
+    targets
+}
+
+/// Groups targets that share a provider and credential source.
+fn group_by_source(targets: Vec<Target>) -> Vec<Vec<Target>> {
     let mut groups: Vec<Vec<Target>> = Vec::new();
     for target in targets {
         if let Some(group) = groups.iter_mut().find(|group| {
@@ -180,77 +224,64 @@ where
             groups.push(vec![target]);
         }
     }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut results = std::thread::scope(|scope| {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        for _ in 0..groups.len().min(MAX_CONCURRENT_PROVIDER_POLLS) {
-            let sender = sender.clone();
-            let groups = &groups;
-            let next = &next;
-            let poll = &poll;
-            scope.spawn(move || loop {
-                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(group) = groups.get(index) else {
-                    break;
-                };
-                let target = &group[0];
-                let mut signature = target.signature();
-                let paused_error = if force {
-                    None
-                } else {
-                    group.iter().find_map(|target| {
-                        previous?.auth_error_for_source(
-                            target.provider,
-                            target.profile.as_ref()?,
-                            &signature,
-                        )
-                    })
-                };
-                let mut result = Err(paused_error.unwrap_or(PollError::RequestFailed));
-                diagnose::log_lazy(|| {
-                    format!(
-                        "{} account {} polling source={:?} paused={paused_error:?}",
-                        target.provider.descriptor().display_name,
-                        target
-                            .profile
-                            .as_ref()
-                            .map(|profile| profile.name.as_str())
-                            .unwrap_or("default"),
-                        target.path
-                    )
-                });
-                for _ in 0..if paused_error.is_some() { 0 } else { 2 } {
-                    result = retry_after::with_manual_refresh(force, || match &target.path {
-                        Err(_) => Err(PollError::NoCredentials),
-                        Ok(path) => poll(target.provider, path.as_deref()),
-                    });
-                    let current_signature = target.signature();
-                    if signature == current_signature {
-                        break;
-                    }
-                    // Re-read once after login/token rotation; never associate
-                    // a response (or a stale reading) with replaced credentials.
-                    signature = current_signature;
-                    result = Err(PollError::RequestFailed);
-                }
-                for target in group {
-                    let _ = sender.send((index, target.clone(), signature.clone(), result.clone()));
-                }
-            });
-        }
-        drop(sender);
-        receiver
-            .into_iter()
-            .inspect(|(_, target, signature, result)| {
-                let mut update = AppUsageData::default();
-                append_account_result(&mut update, target, signature, result);
-                if !update.is_empty() || !update.accounts.is_empty() {
-                    on_progress(update);
-                }
-            })
-            .collect::<Vec<_>>()
+    groups
+}
+
+/// Polls one source group (skipped while its login error is paused) and
+/// returns the credential signature the result belongs to.
+fn poll_group<F>(
+    group: &[Target],
+    previous: Option<&AppUsageData>,
+    force: bool,
+    poll: &F,
+) -> (String, Result<UsageData, PollError>)
+where
+    F: Fn(ProviderId, Option<&std::path::Path>) -> Result<UsageData, PollError> + Sync,
+{
+    let target = &group[0];
+    let mut signature = target.signature();
+    let paused_error = if force {
+        None
+    } else {
+        group.iter().find_map(|target| {
+            previous?.auth_error_for_source(target.provider, target.profile.as_ref()?, &signature)
+        })
+    };
+    let mut result = Err(paused_error.unwrap_or(PollError::RequestFailed));
+    diagnose::log_lazy(|| {
+        format!(
+            "{} account {} polling source={:?} paused={paused_error:?}",
+            target.provider.descriptor().display_name,
+            target
+                .profile
+                .as_ref()
+                .map(|profile| profile.name.as_str())
+                .unwrap_or("default"),
+            target.path
+        )
     });
-    results.sort_by_key(|(index, _, _, _)| *index);
+    for _ in 0..if paused_error.is_some() { 0 } else { 2 } {
+        result = retry_after::with_manual_refresh(force, || match &target.path {
+            Err(_) => Err(PollError::NoCredentials),
+            Ok(path) => poll(target.provider, path.as_deref()),
+        });
+        let current_signature = target.signature();
+        if signature == current_signature {
+            break;
+        }
+        // Re-read once after login/token rotation; never associate
+        // a response (or a stale reading) with replaced credentials.
+        signature = current_signature;
+        result = Err(PollError::RequestFailed);
+    }
+    (signature, result)
+}
+
+/// Logs each account result and merges them; fails only when nothing was read.
+fn collect_account_results(
+    results: Vec<(usize, Target, String, Result<UsageData, PollError>)>,
+    settings: &AccountSettings,
+) -> Result<AppUsageData, PollFailure> {
     let mut data = AppUsageData::default();
     let mut first_error = None;
     for (_, target, signature, result) in results {
