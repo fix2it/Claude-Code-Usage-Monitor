@@ -409,6 +409,17 @@ pub fn classic_context_menu() -> ContextMenuDocument {
         item.render = Expression(render.into());
         item
     };
+    // Shown while both pools of `provider` are on and the theme can split them.
+    let pools_one_widget = |id, action, provider: &str, first: &str, second: &str| {
+        child(
+            id,
+            "Pools on one widget",
+            action,
+            &format!(
+                "display.pool_split_supported && providers.{provider}.enabled && {provider}.{first}.enabled && {provider}.{second}.enabled"
+            ),
+        )
+    };
     let providers = ContextMenuItem::submenu(
         "providers",
         "Providers",
@@ -431,11 +442,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::ToggleShowFableX,
                 "providers.claude.enabled && claude.x.enabled",
             ),
-            child(
+            pools_one_widget(
                 "claude-pools-one-widget",
-                "Pools on one widget",
                 Action::ToggleClaudePoolsOneWidget,
-                "display.pool_split_supported && providers.claude.enabled && claude.main.enabled && claude.x.enabled",
+                "claude",
+                "main",
+                "x",
             ),
             ContextMenuItem::action(
                 "provider-codex-main",
@@ -443,11 +455,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::ToggleCodexMain,
             ),
             ContextMenuItem::action("provider-codex-x", "Codex X", Action::ToggleCodexX),
-            child(
+            pools_one_widget(
                 "codex-pools-one-widget",
-                "Pools on one widget",
                 Action::ToggleCodexPoolsOneWidget,
-                "display.pool_split_supported && providers.codex.enabled && codex.main.enabled && codex.x.enabled",
+                "codex",
+                "main",
+                "x",
             ),
             ContextMenuItem::action(
                 "provider-antigravity-a",
@@ -471,11 +484,12 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 Action::ToggleAntigravityExternalX,
                 "providers.antigravity.enabled && antigravity.x.enabled",
             ),
-            child(
+            pools_one_widget(
                 "antigravity-pools-one-widget",
-                "Pools on one widget",
                 Action::ToggleAntigravityPoolsOneWidget,
-                "display.pool_split_supported && providers.antigravity.enabled && antigravity.a.enabled && antigravity.x.enabled",
+                "antigravity",
+                "a",
+                "x",
             ),
             ContextMenuItem::action(
                 "provider-opencode",

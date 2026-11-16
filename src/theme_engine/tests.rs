@@ -6320,9 +6320,7 @@ fn benchmark_combined_and_split_pool_frame() {
     .with_antigravity_external_x(true)
     .with_antigravity_x(true);
     for combined in [true, false] {
-        let runtime = base
-            .with_pool_layouts(combined, combined)
-            .with_codex_pool_layout(combined);
+        let runtime = base.with_pool_layouts(combined, combined, combined);
         let start = std::time::Instant::now();
         for _ in 0..3 {
             let _ = std::hint::black_box(render_theme_surface_with_runtime(
@@ -6440,7 +6438,7 @@ fn split_claude_pools_use_single_pool_rows_and_independent_mode() {
     let data = dual_fable_data(Some(20.0), Some(70.0));
     for combined in [true, false] {
         let runtime = dual_fable_runtime()
-            .with_pool_layouts(combined, true)
+            .with_pool_layouts(combined, true, true)
             .with_widget_mode_phase("claude_x", 2.0);
         let context =
             DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
@@ -6498,7 +6496,7 @@ fn split_claude_pools_use_single_pool_rows_and_independent_mode() {
     }
     for (main, x) in [(None, Some(70.0)), (Some(20.0), None)] {
         let data = dual_fable_data(main, x);
-        let runtime = dual_fable_runtime().with_pool_layouts(false, true);
+        let runtime = dual_fable_runtime().with_pool_layouts(false, true, true);
         let context =
             DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
         assert_eq!(
@@ -6545,7 +6543,7 @@ fn split_codex_pools_keep_their_data_and_independent_modes() {
     for combined in [true, false] {
         let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
             .with_codex_state(false, true, true, 0.0)
-            .with_codex_pool_layout(combined)
+            .with_pool_layouts(true, combined, true)
             .with_widget_mode_phase("codex_x", 2.0);
         let context =
             DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
@@ -6594,8 +6592,16 @@ fn split_codex_pools_keep_their_data_and_independent_modes() {
         let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
             .with_codex_state(false, main, x, 0.0);
         assert_eq!(
-            display_metrics(&theme, Some(&data), runtime.with_codex_pool_layout(true)),
-            display_metrics(&theme, Some(&data), runtime.with_codex_pool_layout(false))
+            display_metrics(
+                &theme,
+                Some(&data),
+                runtime.with_pool_layouts(true, true, true)
+            ),
+            display_metrics(
+                &theme,
+                Some(&data),
+                runtime.with_pool_layouts(true, false, true)
+            )
         );
     }
 }
@@ -6642,8 +6648,7 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
     .with_antigravity_pools(true, true, 1.0)
     .with_antigravity_external_x(true)
     .with_antigravity_x(true)
-    .with_pool_layouts(false, false)
-    .with_codex_pool_layout(false);
+    .with_pool_layouts(false, false, false);
     let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
     for (template, expected) in [
         ("{claude.session.display:usage_line}", "20%"),
@@ -6765,7 +6770,7 @@ fn split_agy_pools_embed_each_pools_external_row() {
         for (a, o) in [(false, false), (true, false), (false, true), (true, true)] {
             let runtime = agy_runtime(a, true)
                 .with_antigravity_external_x(o)
-                .with_pool_layouts(true, combined)
+                .with_pool_layouts(true, true, combined)
                 .with_widget_mode_phase("antigravity_o", 2.0)
                 .with_widget_mode_phase("agy_external_o", 1.0);
             let context =
@@ -6899,8 +6904,8 @@ fn split_settings_do_not_change_single_pool_geometry() {
             .with_show_fable(true),
         agy_runtime(true, false),
     ] {
-        let combined = runtime.with_pool_layouts(true, true);
-        let split = runtime.with_pool_layouts(false, false);
+        let combined = runtime.with_pool_layouts(true, true, true);
+        let split = runtime.with_pool_layouts(false, true, false);
         assert_eq!(widget_count(None, combined), widget_count(None, split));
         assert_eq!(
             display_metrics(&theme, None, combined),

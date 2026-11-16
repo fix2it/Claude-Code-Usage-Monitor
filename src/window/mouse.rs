@@ -543,13 +543,7 @@ fn revalidate_active_hover_once() {
         let Some(state) = state.as_ref() else {
             return;
         };
-        let provider_hovered = state.antigravity_hovered
-            || state.claude_hovered
-            || state.codex_hovered
-            || state.opencode_hovered
-            || state.qoder_hovered
-            || state.agy_external_hovered
-            || state.split_hovers.iter().any(|hover| hover.hovered);
+        let provider_hovered = state.tiles.any_hovered();
         let active =
             hover_needs_revalidation(provider_hovered, state.hovered_mouse_layer.is_some());
         let count = (state.mirror_hwnds.len() + 1).max(state.desktop_hwnds.len());
@@ -705,24 +699,11 @@ mod hover_revalidation_tests {
     }
 }
 
-/// Theme object whose hover reveals the Antigravity Claude/GPT pool.
-pub(super) const ANTIGRAVITY_HOVER_OBJECT: &str = "antigravity-provider";
-pub(super) const CLAUDE_HOVER_OBJECT: &str = "claude-provider";
-pub(super) const CODEX_HOVER_OBJECT: &str = "codex-provider";
-pub(super) const OPENCODE_HOVER_OBJECT: &str = "opencode-provider";
-pub(super) const QODER_HOVER_OBJECT: &str = "qoder-provider";
-pub(super) const AGY_EXTERNAL_HOVER_OBJECT: &str = theme_engine::ANTIGRAVITY_EXTERNAL_WIDGET;
-
-fn tile_hover_at(
-    state: &super::AppState,
-    hwnd: HWND,
-    lparam: LPARAM,
-    rect: Option<(f64, f64, f64, f64)>,
-) -> bool {
+fn tile_hover_at(state: &super::AppState, hwnd: HWND, lparam: LPARAM, tile: Tile) -> bool {
     if surface_index_for_window(state, hwnd) != Some(0) {
         return false;
     }
-    let Some(rect) = rect else {
+    let Some(rect) = state.tiles.rect(0, tile) else {
         return false;
     };
     let Some(theme) = state.active_theme.as_ref() else {
@@ -769,47 +750,19 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     track_mouse_hover_with(hwnd, widget_tooltip::visible_for(hwnd), |tracking| unsafe {
         TrackMouseEvent(tracking)
     });
-    let (
-        antigravity_hovered,
-        claude_hovered,
-        codex_hovered,
-        opencode_hovered,
-        qoder_hovered,
-        agy_external_hovered,
-    ) = {
-        let state = lock_state();
-        if let Some(state) = state.as_ref() {
-            (
-                tile_hover_at(state, hwnd, lparam, state.antigravity_tile_rect),
-                tile_hover_at(state, hwnd, lparam, state.claude_tile_rect),
-                tile_hover_at(state, hwnd, lparam, state.codex_tile_rect),
-                tile_hover_at(state, hwnd, lparam, state.opencode_tile_rect),
-                tile_hover_at(state, hwnd, lparam, state.qoder_tile_rect),
-                tile_hover_at(state, hwnd, lparam, state.agy_external_tile_rect),
-            )
-        } else {
-            (false, false, false, false, false, false)
-        }
-    };
-    set_antigravity_hover(hwnd, antigravity_hovered);
-    super::set_claude_hover(hwnd, claude_hovered);
-    super::set_codex_hover(hwnd, codex_hovered);
     // `mouse_target_at` only returns objects with non-empty `mouse_events`,
-    // and the provider wrappers have none, so the OpenCode tile is detected
-    // with the same cached `object_bounds` rect as the other three providers.
-    super::set_opencode_hover(hwnd, opencode_hovered);
-    super::set_qoder_hover(hwnd, qoder_hovered);
-    super::set_agy_external_hover(hwnd, agy_external_hovered);
-    let split_hovered = {
+    // and the provider wrappers have none, so tiles are detected with their
+    // cached `object_bounds` rects.
+    let hovered = {
         let state = lock_state();
-        std::array::from_fn::<_, 4, _>(|i| {
+        Tile::ALL.map(|tile| {
             state
                 .as_ref()
-                .is_some_and(|state| tile_hover_at(state, hwnd, lparam, state.split_hovers[i].rect))
+                .is_some_and(|state| tile_hover_at(state, hwnd, lparam, tile))
         })
     };
-    for (index, hovered) in split_hovered.into_iter().enumerate() {
-        super::set_split_hover(hwnd, index, hovered);
+    for (tile, hovered) in Tile::ALL.into_iter().zip(hovered) {
+        super::set_tile_hover(hwnd, tile, hovered);
     }
     // No tick here: the animation timer drives every frame. Ticking on mouse
     // move could produce a second full render, and its throttle could swallow
@@ -877,14 +830,8 @@ fn track_mouse_hover_with(
 pub(super) fn clear_mouse_hover(hwnd: HWND) {
     reset_mouse_move_throttle();
     widget_tooltip::hide_for(hwnd);
-    set_antigravity_hover(hwnd, false);
-    super::set_claude_hover(hwnd, false);
-    super::set_codex_hover(hwnd, false);
-    super::set_opencode_hover(hwnd, false);
-    super::set_qoder_hover(hwnd, false);
-    super::set_agy_external_hover(hwnd, false);
-    for index in 0..4 {
-        super::set_split_hover(hwnd, index, false);
+    for tile in Tile::ALL {
+        super::set_tile_hover(hwnd, tile, false);
     }
     let previous = {
         let mut state = lock_state();

@@ -1217,7 +1217,8 @@ pub struct ThemeRuntime {
     /// Hover progress (0 = normal, 1 = hovered) of the agy external-models
     /// widget, which has its own hover area.
     pub agy_external_crossfade_opacity: f64,
-    pub split_hover_phases: [f64; 4],
+    /// Indexed by [`SplitPool`].
+    pub split_hover_phases: [f64; SplitPool::ALL.len()],
     host_width: u32,
     host_height: u32,
 }
@@ -1260,7 +1261,7 @@ impl Default for ThemeRuntime {
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
             agy_external_crossfade_opacity: 0.0,
-            split_hover_phases: [0.0; 4],
+            split_hover_phases: [0.0; SplitPool::ALL.len()],
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1320,7 +1321,7 @@ impl ThemeRuntime {
             opencode_crossfade_opacity: 0.0,
             qoder_crossfade_opacity: 0.0,
             agy_external_crossfade_opacity: 0.0,
-            split_hover_phases: [0.0; 4],
+            split_hover_phases: [0.0; SplitPool::ALL.len()],
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1436,14 +1437,11 @@ impl ThemeRuntime {
         self
     }
 
-    pub fn with_pool_layouts(mut self, claude: bool, agy: bool) -> Self {
+    /// "Pools on one widget" for Claude, Codex and agy.
+    pub fn with_pool_layouts(mut self, claude: bool, codex: bool, agy: bool) -> Self {
         self.claude_pools_one_widget = claude;
+        self.codex_pools_one_widget = codex;
         self.antigravity_pools_one_widget = agy;
-        self
-    }
-
-    pub fn with_codex_pool_layout(mut self, combined: bool) -> Self {
-        self.codex_pools_one_widget = combined;
         self
     }
 
@@ -1500,7 +1498,8 @@ impl ThemeRuntime {
         self
     }
 
-    pub fn with_split_hover_phases(mut self, phases: [f64; 4]) -> Self {
+    /// Hover phases of the split second-pool tiles, indexed by [`SplitPool`].
+    pub fn with_split_hover_phases(mut self, phases: [f64; SplitPool::ALL.len()]) -> Self {
         self.split_hover_phases = phases;
         self
     }
@@ -1624,23 +1623,87 @@ pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -
     runtime.provider_count()
         + (fable_visible(data, runtime) && claude_dual(runtime)) as usize
         + antigravity_split(data, runtime) as usize
-        + claude_separate(runtime) as usize
-        + codex_separate(runtime) as usize
+        + pool_separate(runtime, ProviderId::Claude) as usize
+        + pool_separate(runtime, ProviderId::Codex) as usize
         + agy_separate(data, runtime) as usize
 }
 
-fn claude_separate(runtime: ThemeRuntime) -> bool {
-    runtime.provider_enabled(ProviderId::Claude)
-        && runtime.claude_main_enabled
-        && runtime.claude_x_enabled
-        && !runtime.claude_pools_one_widget
+/// A second pool that gets its own tile while its provider's pools are split
+/// ("Pools on one widget" off). The table drives the tile's theme object, its
+/// binding namespace, its hover phase and its hit-test rect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SplitPool {
+    ClaudeX,
+    AntigravityO,
+    AgyExternalO,
+    CodexX,
 }
 
-fn codex_separate(runtime: ThemeRuntime) -> bool {
-    runtime.provider_enabled(ProviderId::Codex)
-        && runtime.codex_main_enabled
-        && runtime.codex_x_enabled
-        && !runtime.codex_pools_one_widget
+impl SplitPool {
+    /// In `split_hover_phases` order.
+    pub(crate) const ALL: [SplitPool; 4] = [
+        SplitPool::ClaudeX,
+        SplitPool::AntigravityO,
+        SplitPool::AgyExternalO,
+        SplitPool::CodexX,
+    ];
+
+    pub(crate) const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Namespace of the first pool, which the second pool's namespace copies
+    /// while the pools share one widget.
+    const fn base_key(self) -> &'static str {
+        match self {
+            SplitPool::ClaudeX => "claude",
+            SplitPool::AntigravityO => "antigravity",
+            SplitPool::AgyExternalO => "agy_external",
+            SplitPool::CodexX => "codex",
+        }
+    }
+
+    /// Binding namespace of the tile (`claude_x.session.display`, ...).
+    pub(crate) const fn key(self) -> &'static str {
+        match self {
+            SplitPool::ClaudeX => "claude_x",
+            SplitPool::AntigravityO => "antigravity_o",
+            SplitPool::AgyExternalO => "agy_external_o",
+            SplitPool::CodexX => "codex_x",
+        }
+    }
+
+    /// Theme object of the tile: its hover and hit-test area.
+    pub(crate) const fn object_id(self) -> &'static str {
+        match self {
+            SplitPool::ClaudeX => "claude_x-provider",
+            SplitPool::AntigravityO => "antigravity_o-provider",
+            SplitPool::AgyExternalO => "agy_external_o-provider",
+            SplitPool::CodexX => "codex_x-provider",
+        }
+    }
+
+    fn hover_phase(self, runtime: ThemeRuntime) -> f64 {
+        runtime.split_hover_phases[self.index()].clamp(0.0, 1.0)
+    }
+}
+
+/// Both Claude (or both Codex) pools are on and shown as separate widgets.
+fn pool_separate(runtime: ThemeRuntime, provider: ProviderId) -> bool {
+    let (main, x, one_widget) = match provider {
+        ProviderId::Claude => (
+            runtime.claude_main_enabled,
+            runtime.claude_x_enabled,
+            runtime.claude_pools_one_widget,
+        ),
+        ProviderId::Codex => (
+            runtime.codex_main_enabled,
+            runtime.codex_x_enabled,
+            runtime.codex_pools_one_widget,
+        ),
+        _ => return false,
+    };
+    runtime.provider_enabled(provider) && main && x && !one_widget
 }
 
 fn agy_separate(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> bool {
@@ -1825,8 +1888,8 @@ impl DisplayMetrics {
             codex_x: ProviderMetrics::default(),
             antigravity_o: ProviderMetrics::default(),
             agy_external_o: ProviderMetrics::default(),
-            claude_separate: claude_separate(runtime),
-            codex_separate: codex_separate(runtime),
+            claude_separate: pool_separate(runtime, ProviderId::Claude),
+            codex_separate: pool_separate(runtime, ProviderId::Codex),
             agy_separate: agy_separate(None, runtime),
         };
         let dual = claude_dual(runtime);
@@ -2155,7 +2218,7 @@ fn measurement_contexts(data: Option<&AppUsageData>, runtime: ThemeRuntime) -> V
                 variant.opencode_crossfade_opacity = opencode;
                 variant.qoder_crossfade_opacity = qoder;
                 variant.agy_external_crossfade_opacity = claude;
-                variant.split_hover_phases = [claude; 4];
+                variant.split_hover_phases = [claude; SplitPool::ALL.len()];
                 let mut context =
                     DataContext::from_usage_with_runtime(data, &Canvas::default(), variant);
                 context.insert("system.dark", f64::from(dark));
@@ -2722,8 +2785,8 @@ impl DataContext {
         context.insert(
             "providers.count",
             (runtime.provider_count()
-                + claude_separate(runtime) as usize
-                + codex_separate(runtime) as usize
+                + pool_separate(runtime, ProviderId::Claude) as usize
+                + pool_separate(runtime, ProviderId::Codex) as usize
                 + agy_separate(data, runtime) as usize) as f64,
         );
         let now = std::time::SystemTime::now()
@@ -2774,7 +2837,7 @@ impl DataContext {
         );
         context.insert(
             "display.fable_row",
-            (if claude_separate(runtime) {
+            (if pool_separate(runtime, ProviderId::Claude) {
                 runtime.show_fable
             } else {
                 fable_visible(data, runtime) && !claude_dual(runtime)
@@ -2782,13 +2845,16 @@ impl DataContext {
         );
         context.insert(
             "display.fable_x_row",
-            (claude_separate(runtime) && runtime.show_fable_x) as u8 as f64,
+            (pool_separate(runtime, ProviderId::Claude) && runtime.show_fable_x) as u8 as f64,
         );
         context.insert(
             "display.claude_split",
-            claude_separate(runtime) as u8 as f64,
+            pool_separate(runtime, ProviderId::Claude) as u8 as f64,
         );
-        context.insert("display.codex_split", codex_separate(runtime) as u8 as f64);
+        context.insert(
+            "display.codex_split",
+            pool_separate(runtime, ProviderId::Codex) as u8 as f64,
+        );
         context.insert(
             "display.agy_pool_split",
             agy_separate(data, runtime) as u8 as f64,
@@ -2901,62 +2967,7 @@ impl DataContext {
                     runtime.countdown,
                 );
             }
-            if !data
-                .accounts
-                .iter()
-                .any(|a| a.provider == ProviderId::Claude && a.profile.id == "default")
-            {
-                // Without any Claude account the legacy entry is the default
-                // profile. Otherwise it may belong to another profile, so the
-                // fallback keeps its windows but never borrows its limits.
-                let has_claude_account = data
-                    .accounts
-                    .iter()
-                    .any(|a| a.provider == ProviderId::Claude);
-                let claude_usage = data.get(ProviderId::Claude).map(|usage| {
-                    let mut usage = usage.clone();
-                    if has_claude_account {
-                        usage.limits.clear();
-                    }
-                    usage
-                });
-                context.insert_provider(
-                    "accounts.claude.default",
-                    claude_usage.as_ref(),
-                    false,
-                    runtime.countdown,
-                );
-            }
-            if !data
-                .accounts
-                .iter()
-                .any(|a| a.provider == ProviderId::Claude && a.profile.id == "claude_x")
-            {
-                // A second pool that has not been polled yet shows "--": the
-                // provider reading belongs to the first pool.
-                context.insert_provider("accounts.claude.claude_x", None, false, runtime.countdown);
-            }
-            if !data
-                .accounts
-                .iter()
-                .any(|a| a.provider == ProviderId::Codex && a.profile.id == "default")
-            {
-                let codex_usage = data.get(ProviderId::Codex);
-                context.insert_provider(
-                    "accounts.codex.default",
-                    codex_usage,
-                    true,
-                    runtime.countdown,
-                );
-            }
-            if !data
-                .accounts
-                .iter()
-                .any(|a| a.provider == ProviderId::Codex && a.profile.id == "codex_x")
-            {
-                // Same as Claude X: never the first pool's reading.
-                context.insert_provider("accounts.codex.codex_x", None, true, runtime.countdown);
-            }
+            context.insert_missing_pool_accounts(data, runtime.countdown);
             for descriptor in PROVIDER_DESCRIPTORS {
                 if let Some(account) = data
                     .accounts
@@ -3031,126 +3042,162 @@ impl DataContext {
         }
         // Theme validation evaluates every expression even when its parent is
         // hidden, so the split namespaces must exist in single-pool contexts.
-        context.copy_prefix("claude.", "claude_x.");
-        context.copy_prefix("codex.", "codex_x.");
-        context.copy_prefix("antigravity.", "antigravity_o.");
-        context.copy_prefix("agy_external.", "agy_external_o.");
-        if claude_separate(runtime) {
-            for owner in ["claude", "claude_x"] {
-                for field in [
-                    "session.",
-                    "five_hour.",
-                    "weekly.",
-                    "model.",
-                    "limits.",
-                    "scoped.",
-                ] {
-                    let prefix = format!("{owner}.{field}");
-                    Arc::make_mut(&mut context.values).retain(|key, _| !key.starts_with(&prefix));
-                    Arc::make_mut(&mut context.strings).retain(|key, _| !key.starts_with(&prefix));
-                }
-            }
-            context.copy_prefix("accounts.claude.default.", "claude.");
-            context.copy_prefix("accounts.claude.claude_x.", "claude_x.");
-            let phase = runtime.split_hover_phases[0].clamp(0.0, 1.0);
-            context.insert("claude_x.hover_phase", phase);
-            context.insert("claude_x.hovered", (phase > 0.0) as u8 as f64);
-            context.insert_hover_crossfade("claude_x", phase);
+        for pool in SplitPool::ALL {
+            context.copy_prefix(
+                &format!("{}.", pool.base_key()),
+                &format!("{}.", pool.key()),
+            );
         }
-        if codex_separate(runtime) {
-            if data.is_some() {
-                for owner in ["codex", "codex_x"] {
-                    for field in [
-                        "session.",
-                        "five_hour.",
-                        "weekly.",
-                        "model.",
-                        "limits.",
-                        "scoped.",
-                        "credits.",
-                    ] {
-                        let prefix = format!("{owner}.{field}");
-                        Arc::make_mut(&mut context.values)
-                            .retain(|key, _| !key.starts_with(&prefix));
-                        Arc::make_mut(&mut context.strings)
-                            .retain(|key, _| !key.starts_with(&prefix));
-                    }
-                }
-                context.copy_prefix("accounts.codex.default.", "codex.");
-                context.copy_prefix("accounts.codex.codex_x.", "codex_x.");
-            }
-            let phase = runtime.split_hover_phases[3].clamp(0.0, 1.0);
-            context.insert("codex_x.hover_phase", phase);
-            context.insert("codex_x.hovered", (phase > 0.0) as u8 as f64);
-            context.insert_hover_crossfade("codex_x", phase);
+        if pool_separate(runtime, ProviderId::Claude) {
+            // Claude rebinds even before the first poll (the tiles then read
+            // nothing); Codex keeps its empty provider bindings until data.
+            context.bind_account_pools(SplitPool::ClaudeX, &[], true, runtime);
+        }
+        if pool_separate(runtime, ProviderId::Codex) {
+            context.bind_account_pools(SplitPool::CodexX, &["credits."], data.is_some(), runtime);
         }
         if agy_separate(data, runtime) {
-            // Build pool O through the same provider insertion path as A,
-            // without rebuilding every unrelated provider and animation binding.
-            let account = data.and_then(AppUsageData::antigravity_x);
-            let pool = account.and_then(|account| account.usage.as_ref());
-            let external = pool.and_then(|usage| usage.external_pool.as_deref());
-            for (key, usage) in [
-                ("antigravity_o", pool),
-                ("antigravity_o.gemini", pool),
-                ("antigravity_o.external", external),
-                ("antigravity_o.row1h", pool),
-                ("antigravity_o.row2", external),
-                ("antigravity_o.row2h", external),
-            ] {
-                context.insert_provider(key, usage, false, runtime.countdown);
-            }
-            context.insert("antigravity_o.reported", pool.is_some() as u8 as f64);
-            Arc::make_mut(&mut context.values).remove("antigravity_o.has_error");
-            if let Some(account) = account {
-                context.insert(
-                    "antigravity_o.has_error",
-                    account.error.is_some() as u8 as f64,
-                );
-            }
-            let phase = runtime.split_hover_phases[1].clamp(0.0, 1.0);
-            context.insert("antigravity_o.hover_phase", phase);
-            let (normal, hover) = context.insert_hover_crossfade("antigravity_o", phase);
-            context.insert(
-                "antigravity_o.external.enabled",
-                runtime.antigravity_external_x_enabled as u8 as f64,
-            );
-            context.insert(
-                "antigravity_o.gemini.opacity",
-                if runtime.antigravity_external_x_enabled {
-                    normal
-                } else {
-                    1.0
-                },
-            );
-            context.insert(
-                "antigravity_o.external.opacity",
-                if runtime.antigravity_external_x_enabled {
-                    hover
-                } else {
-                    0.0
-                },
-            );
-            context.insert(
-                "antigravity_o.dual_mode",
-                runtime.antigravity_external_x_enabled as u8 as f64,
-            );
-            context.insert(
-                "antigravity.external_a.shown",
-                runtime.antigravity_external_enabled as u8 as f64,
-            );
-            context.insert("antigravity.external_o.shown", 0.0);
-            context.insert(
-                "antigravity_o.external_a.shown",
-                runtime.antigravity_external_x_enabled as u8 as f64,
-            );
-            context.insert("antigravity_o.external_o.shown", 0.0);
-            context.copy_prefix("agy_external.", "agy_external_o.");
-            let phase = runtime.split_hover_phases[2].clamp(0.0, 1.0);
-            context.insert("agy_external_o.hover_phase", phase);
-            context.insert_hover_crossfade("agy_external_o", phase);
+            context.insert_antigravity_pool_o(data, runtime);
         }
         context
+    }
+
+    /// Account bindings for pools that have no account entry yet: the
+    /// default pools fall back to the provider reading, a second pool that
+    /// has not been polled shows "--" (the provider reading is the first
+    /// pool's).
+    fn insert_missing_pool_accounts(&mut self, data: &AppUsageData, countdown: bool) {
+        let has_account = |provider: ProviderId, id: &str| {
+            data.accounts
+                .iter()
+                .any(|a| a.provider == provider && a.profile.id == id)
+        };
+        if !has_account(ProviderId::Claude, "default") {
+            // Without any Claude account the legacy entry is the default
+            // profile. Otherwise it may belong to another profile, so the
+            // fallback keeps its windows but never borrows its limits.
+            let has_claude_account = data
+                .accounts
+                .iter()
+                .any(|a| a.provider == ProviderId::Claude);
+            let claude_usage = data.get(ProviderId::Claude).map(|usage| {
+                let mut usage = usage.clone();
+                if has_claude_account {
+                    usage.limits.clear();
+                }
+                usage
+            });
+            self.insert_provider(
+                "accounts.claude.default",
+                claude_usage.as_ref(),
+                false,
+                countdown,
+            );
+        }
+        if !has_account(ProviderId::Claude, "claude_x") {
+            self.insert_provider("accounts.claude.claude_x", None, false, countdown);
+        }
+        if !has_account(ProviderId::Codex, "default") {
+            let codex_usage = data.get(ProviderId::Codex);
+            self.insert_provider("accounts.codex.default", codex_usage, true, countdown);
+        }
+        if !has_account(ProviderId::Codex, "codex_x") {
+            self.insert_provider("accounts.codex.codex_x", None, true, countdown);
+        }
+    }
+
+    /// Split Claude or Codex: the main tile reads the default account and the
+    /// X tile its own account, replacing the provider-level quota bindings.
+    fn bind_account_pools(
+        &mut self,
+        pool: SplitPool,
+        extra_fields: &[&str],
+        rebind: bool,
+        runtime: ThemeRuntime,
+    ) {
+        const QUOTA_FIELDS: [&str; 6] = [
+            "session.",
+            "five_hour.",
+            "weekly.",
+            "model.",
+            "limits.",
+            "scoped.",
+        ];
+        let (main, x) = (pool.base_key(), pool.key());
+        if rebind {
+            let prefixes: Vec<String> = [main, x]
+                .iter()
+                .flat_map(|owner| {
+                    QUOTA_FIELDS
+                        .iter()
+                        .chain(extra_fields)
+                        .map(move |field| format!("{owner}.{field}"))
+                })
+                .collect();
+            let replaced = |key: &String| prefixes.iter().any(|prefix| key.starts_with(prefix));
+            Arc::make_mut(&mut self.values).retain(|key, _| !replaced(key));
+            Arc::make_mut(&mut self.strings).retain(|key, _| !replaced(key));
+            self.copy_prefix(&format!("accounts.{main}.default."), &format!("{main}."));
+            self.copy_prefix(&format!("accounts.{main}.{x}."), &format!("{x}."));
+        }
+        let phase = self.insert_split_hover(pool, runtime).0;
+        self.insert(&format!("{x}.hovered"), (phase > 0.0) as u8 as f64);
+    }
+
+    /// `hover_phase` and the crossfade pair of a split tile. Returns the
+    /// phase and the (normal, hover) opacities.
+    fn insert_split_hover(&mut self, pool: SplitPool, runtime: ThemeRuntime) -> (f64, (f64, f64)) {
+        let phase = pool.hover_phase(runtime);
+        self.insert(&format!("{}.hover_phase", pool.key()), phase);
+        (phase, self.insert_hover_crossfade(pool.key(), phase))
+    }
+
+    /// agy pool O in its own tile, built through the same provider insertion
+    /// path as pool A, without rebuilding unrelated provider and animation
+    /// bindings. The external models of pool O get their own tile too.
+    fn insert_antigravity_pool_o(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
+        let account = data.and_then(AppUsageData::antigravity_x);
+        let pool = account.and_then(|account| account.usage.as_ref());
+        let external = pool.and_then(|usage| usage.external_pool.as_deref());
+        for (key, usage) in [
+            ("antigravity_o", pool),
+            ("antigravity_o.gemini", pool),
+            ("antigravity_o.external", external),
+            ("antigravity_o.row1h", pool),
+            ("antigravity_o.row2", external),
+            ("antigravity_o.row2h", external),
+        ] {
+            self.insert_provider(key, usage, false, runtime.countdown);
+        }
+        self.insert("antigravity_o.reported", pool.is_some() as u8 as f64);
+        Arc::make_mut(&mut self.values).remove("antigravity_o.has_error");
+        if let Some(account) = account {
+            self.insert(
+                "antigravity_o.has_error",
+                account.error.is_some() as u8 as f64,
+            );
+        }
+        let (_, (normal, hover)) = self.insert_split_hover(SplitPool::AntigravityO, runtime);
+        let external_x = runtime.antigravity_external_x_enabled;
+        self.insert("antigravity_o.external.enabled", external_x as u8 as f64);
+        self.insert(
+            "antigravity_o.gemini.opacity",
+            if external_x { normal } else { 1.0 },
+        );
+        self.insert(
+            "antigravity_o.external.opacity",
+            if external_x { hover } else { 0.0 },
+        );
+        self.insert("antigravity_o.dual_mode", external_x as u8 as f64);
+        self.insert(
+            "antigravity.external_a.shown",
+            runtime.antigravity_external_enabled as u8 as f64,
+        );
+        self.insert("antigravity.external_o.shown", 0.0);
+        self.insert("antigravity_o.external_a.shown", external_x as u8 as f64);
+        self.insert("antigravity_o.external_o.shown", 0.0);
+        self.copy_prefix("agy_external.", "agy_external_o.");
+        self.insert_split_hover(SplitPool::AgyExternalO, runtime);
     }
 
     fn copy_prefix(&mut self, source: &str, target: &str) {
@@ -4108,16 +4155,10 @@ impl ThemeDocument {
     /// exist on the primary surface before any saved split choice takes effect.
     pub fn supports_pool_splitting(&self) -> bool {
         self.surfaces.first().is_some_and(|surface| {
-            [
-                "claude_x-provider",
-                "codex_x-provider",
-                "antigravity_o-provider",
-                "agy_external_o-provider",
-            ]
-            .iter()
-            .all(|id| {
+            SplitPool::ALL.iter().all(|pool| {
                 surface.children.iter().any(|object| {
-                    object.id == *id && object.parent.as_deref() == Some("provider-row")
+                    object.id == pool.object_id()
+                        && object.parent.as_deref() == Some("provider-row")
                 })
             })
         })

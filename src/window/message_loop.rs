@@ -191,12 +191,6 @@ pub(super) unsafe extern "system" fn wnd_proc(
         WM_APP_USAGE_UPDATED => {
             if let Some(state) = lock_state().as_mut() {
                 invalidate_metrics(state);
-                state.antigravity_tile_rect = None;
-                state.claude_tile_rect = None;
-                state.codex_tile_rect = None;
-                state.opencode_tile_rect = None;
-                state.qoder_tile_rect = None;
-                state.agy_external_tile_rect = None;
             }
             check_theme_change();
             check_language_change();
@@ -888,18 +882,18 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 IDM_CLAUDE_POOLS_ONE_WIDGET
                 | IDM_ANTIGRAVITY_POOLS_ONE_WIDGET
                 | IDM_CODEX_POOLS_ONE_WIDGET => {
+                    let provider = match id {
+                        IDM_CLAUDE_POOLS_ONE_WIDGET => ProviderId::Claude,
+                        IDM_CODEX_POOLS_ONE_WIDGET => ProviderId::Codex,
+                        _ => ProviderId::Antigravity,
+                    };
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            if id == IDM_CLAUDE_POOLS_ONE_WIDGET {
-                                s.claude_pools_one_widget = !s.claude_pools_one_widget;
-                            } else if id == IDM_CODEX_POOLS_ONE_WIDGET {
-                                s.codex_pools_one_widget = !s.codex_pools_one_widget;
-                            } else {
-                                s.antigravity_pools_one_widget = !s.antigravity_pools_one_widget;
+                            if let Some(one_widget) = s.pools_one_widget_mut(provider) {
+                                *one_widget = !*one_widget;
                             }
                             super::invalidate_metrics(s);
-                            super::invalidate_hover_tile_rects(s);
                         }
                     }
                     save_state_settings();
@@ -997,104 +991,22 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }
-                IDM_PROVIDER_CLAUDE_MAIN | IDM_PROVIDER_CLAUDE_X => {
+                IDM_PROVIDER_CLAUDE_MAIN
+                | IDM_PROVIDER_CLAUDE_X
+                | IDM_PROVIDER_CODEX_MAIN
+                | IDM_PROVIDER_CODEX_X => {
+                    let (provider, main) = match id {
+                        IDM_PROVIDER_CLAUDE_MAIN => (ProviderId::Claude, true),
+                        IDM_PROVIDER_CLAUDE_X => (ProviderId::Claude, false),
+                        IDM_PROVIDER_CODEX_MAIN => (ProviderId::Codex, true),
+                        _ => (ProviderId::Codex, false),
+                    };
                     let mut should_reposition = false;
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            let is_main = id == IDM_PROVIDER_CLAUDE_MAIN;
-                            let target_id = if is_main { "default" } else { "claude_x" };
-                            if is_main
-                                && !s.accounts.claude.profiles.iter().any(|p| p.id == "default")
-                            {
-                                s.accounts
-                                    .claude
-                                    .profiles
-                                    .push(crate::accounts::AccountProfile {
-                                        id: "default".into(),
-                                        name: "Default".into(),
-                                        config_dir: String::new(),
-                                        credentials_path: String::new(),
-                                        enabled: true,
-                                    });
-                                s.accounts.claude.used_ids.insert("default".into());
-                            } else if !is_main
-                                && !s
-                                    .accounts
-                                    .claude
-                                    .profiles
-                                    .iter()
-                                    .any(|p| p.id == "claude_x")
-                            {
-                                s.accounts
-                                    .claude
-                                    .profiles
-                                    .push(crate::accounts::AccountProfile {
-                                        id: "claude_x".into(),
-                                        name: "Claude Code X".into(),
-                                        config_dir: "~/.claude_x".into(),
-                                        credentials_path: String::new(),
-                                        enabled: false,
-                                    });
-                                s.accounts.claude.used_ids.insert("claude_x".into());
-                            }
-                            let mut main_enabled = s.providers.contains(ProviderId::Claude)
-                                && s.accounts
-                                    .claude
-                                    .profiles
-                                    .iter()
-                                    .find(|p| p.id == "default")
-                                    .map(|p| p.enabled)
-                                    .unwrap_or(true);
-                            let mut x_enabled = s.providers.contains(ProviderId::Claude)
-                                && s.accounts
-                                    .claude
-                                    .profiles
-                                    .iter()
-                                    .find(|p| p.id == "claude_x")
-                                    .map(|p| p.enabled)
-                                    .unwrap_or(false);
-                            let current = if is_main { main_enabled } else { x_enabled };
-                            let other = if is_main { x_enabled } else { main_enabled };
-                            let target = !current;
-                            if !target
-                                && !other
-                                && s.providers.len() <= 1
-                                && s.providers.contains(ProviderId::Claude)
-                            {
-                                // Keep at least one provider active
-                            } else {
-                                if let Some(p) = s
-                                    .accounts
-                                    .claude
-                                    .profiles
-                                    .iter_mut()
-                                    .find(|p| p.id == target_id)
-                                {
-                                    p.enabled = target;
-                                }
-                                if is_main {
-                                    main_enabled = target;
-                                } else {
-                                    x_enabled = target;
-                                }
-                                let any_claude = main_enabled || x_enabled;
-                                if !any_claude {
-                                    s.providers.set(ProviderId::Claude, false);
-                                    s.claude_hovered = false;
-                                    s.claude_crossfade_opacity = 0.0;
-                                    s.claude_crossfade_animation = None;
-                                    s.stop_crossfade_timer_if_idle(hwnd);
-                                    should_reposition = true;
-                                } else if !s.providers.contains(ProviderId::Claude) {
-                                    s.providers.set(ProviderId::Claude, true);
-                                    should_reposition = true;
-                                }
-                                // A pool switch can add or drop the Fable column,
-                                // which moves every widget's hover area.
-                                super::invalidate_hover_tile_rects(s);
-                                invalidate_metrics(s);
-                            }
+                            should_reposition = super::toggle_account_pool(s, provider, main);
+                            s.stop_crossfade_timer_if_idle(hwnd);
                         }
                     }
                     save_state_settings();
@@ -1106,110 +1018,6 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     sync_tray_icon(hwnd);
                     request_poll(hwnd);
                 }
-                IDM_PROVIDER_CODEX_MAIN | IDM_PROVIDER_CODEX_X => {
-                    let mut should_reposition = false;
-                    {
-                        let mut state = lock_state();
-                        if let Some(s) = state.as_mut() {
-                            let is_main = id == IDM_PROVIDER_CODEX_MAIN;
-                            let target_id = if is_main { "default" } else { "codex_x" };
-                            if is_main
-                                && !s.accounts.codex.profiles.iter().any(|p| p.id == "default")
-                            {
-                                s.accounts
-                                    .codex
-                                    .profiles
-                                    .push(crate::accounts::AccountProfile {
-                                        id: "default".into(),
-                                        name: "Default".into(),
-                                        config_dir: String::new(),
-                                        credentials_path: String::new(),
-                                        enabled: true,
-                                    });
-                                s.accounts.codex.used_ids.insert("default".into());
-                            } else if !is_main
-                                && !s.accounts.codex.profiles.iter().any(|p| p.id == "codex_x")
-                            {
-                                s.accounts
-                                    .codex
-                                    .profiles
-                                    .push(crate::accounts::AccountProfile {
-                                        id: "codex_x".into(),
-                                        name: "Codex X".into(),
-                                        config_dir: "~/.codex_x".into(),
-                                        credentials_path: String::new(),
-                                        enabled: false,
-                                    });
-                                s.accounts.codex.used_ids.insert("codex_x".into());
-                            }
-                            let mut main_enabled = s.providers.contains(ProviderId::Codex)
-                                && s.accounts
-                                    .codex
-                                    .profiles
-                                    .iter()
-                                    .find(|p| p.id == "default")
-                                    .map(|p| p.enabled)
-                                    .unwrap_or(true);
-                            let mut x_enabled = s.providers.contains(ProviderId::Codex)
-                                && s.accounts
-                                    .codex
-                                    .profiles
-                                    .iter()
-                                    .find(|p| p.id == "codex_x")
-                                    .map(|p| p.enabled)
-                                    .unwrap_or(false);
-                            let current = if is_main { main_enabled } else { x_enabled };
-                            let other = if is_main { x_enabled } else { main_enabled };
-                            let target = !current;
-                            if !target
-                                && !other
-                                && s.providers.len() <= 1
-                                && s.providers.contains(ProviderId::Codex)
-                            {
-                                // Keep at least one provider active
-                            } else {
-                                if let Some(p) = s
-                                    .accounts
-                                    .codex
-                                    .profiles
-                                    .iter_mut()
-                                    .find(|p| p.id == target_id)
-                                {
-                                    p.enabled = target;
-                                }
-                                if is_main {
-                                    main_enabled = target;
-                                } else {
-                                    x_enabled = target;
-                                }
-                                let any_codex = main_enabled || x_enabled;
-                                if !any_codex {
-                                    s.providers.set(ProviderId::Codex, false);
-                                    s.codex_hovered = false;
-                                    s.codex_crossfade_opacity = 0.0;
-                                    s.codex_crossfade_animation = None;
-                                    s.stop_crossfade_timer_if_idle(hwnd);
-                                    should_reposition = true;
-                                } else if !s.providers.contains(ProviderId::Codex) {
-                                    s.providers.set(ProviderId::Codex, true);
-                                    should_reposition = true;
-                                }
-                                invalidate_metrics(s);
-                                s.codex_tile_rect = None;
-                                s.opencode_tile_rect = None;
-                                s.qoder_tile_rect = None;
-                                s.agy_external_tile_rect = None;
-                            }
-                        }
-                    }
-                    save_state_settings();
-                    if should_reposition {
-                        position_at_taskbar();
-                    }
-                    render_layered();
-                    sync_tray_icon(hwnd);
-                    request_poll(hwnd);
-                }
                 id if ProviderId::from_native_menu_command_id(id).is_some() => {
                     {
                         let mut state = lock_state();
@@ -1217,38 +1025,25 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             let provider = ProviderId::from_native_menu_command_id(id)
                                 .expect("provider menu command was matched above");
                             let changed = s.providers.toggle(provider);
-                            invalidate_metrics(s);
                             // Tile widths depend on the provider count.
-                            s.antigravity_tile_rect = None;
-                            s.claude_tile_rect = None;
-                            s.codex_tile_rect = None;
-                            s.opencode_tile_rect = None;
-                            s.qoder_tile_rect = None;
-                            s.agy_external_tile_rect = None;
-                            if !s.providers.contains(ProviderId::Claude) {
-                                s.claude_hovered = false;
-                                s.claude_crossfade_opacity = 0.0;
-                                s.claude_crossfade_animation = None;
-                                s.stop_crossfade_timer_if_idle(hwnd);
-                            }
-                            if !s.providers.contains(ProviderId::Codex) {
-                                s.codex_hovered = false;
-                                s.codex_crossfade_opacity = 0.0;
-                                s.codex_crossfade_animation = None;
-                                s.stop_crossfade_timer_if_idle(hwnd);
+                            invalidate_metrics(s);
+                            for (provider, tile) in [
+                                (ProviderId::Claude, Tile::Claude),
+                                (ProviderId::Codex, Tile::Codex),
+                            ] {
+                                if !s.providers.contains(provider) {
+                                    s.tiles.reset(tile);
+                                }
                             }
                             if provider == ProviderId::Antigravity && changed {
                                 let enabled = s.providers.contains(ProviderId::Antigravity);
                                 // The child External choice survives parent toggles.
                                 s.show_antigravity_gemini = enabled;
                                 if !enabled {
-                                    s.antigravity_hovered = false;
-                                    s.crossfade_opacity = 1.0;
-                                    s.crossfade_animation = None;
-                                    s.antigravity_tile_rect = None;
-                                    s.stop_crossfade_timer_if_idle(hwnd);
+                                    s.tiles.reset(Tile::Antigravity);
                                 }
                             }
+                            s.stop_crossfade_timer_if_idle(hwnd);
                         }
                     }
                     save_state_settings();
