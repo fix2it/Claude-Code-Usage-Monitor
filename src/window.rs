@@ -2295,74 +2295,13 @@ fn reload_external_settings(hwnd: HWND) {
     let settings = load_settings();
     let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
     let theme_path = settings.active_theme_path.as_ref().map(PathBuf::from);
-    let providers_changed;
-    let lock_enabled;
-    {
+    let (providers_changed, lock_enabled) = {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {
             return;
         };
-        providers_changed =
-            state.providers != settings.enabled_providers() || state.accounts != settings.accounts;
-        let gemini_enabled = settings.antigravity_gemini_enabled();
-        let external_enabled = settings.antigravity_external_enabled();
-        state.show_antigravity_gemini = gemini_enabled;
-        state.show_antigravity_external = external_enabled;
-        state.show_antigravity_external_x = settings.antigravity_external_x_enabled();
-        state.accounts = settings.accounts.clone();
-        if let Some(data) = state.data.as_mut() {
-            data.select_accounts(&settings.accounts);
-        }
-        state.poll_interval_ms = settings.poll_interval_ms;
-        state.providers = settings.enabled_providers();
-        state.usage_countdown = settings.usage_countdown;
-        state.use_windows_default_font = settings.use_windows_default_font;
-        state.show_pace = settings.show_pace;
-        state.show_fable = settings.show_fable;
-        state.show_fable_x = settings.show_fable_x.unwrap_or(settings.show_fable);
-        state.claude_pools_one_widget = settings.claude_pools_one_widget;
-        state.codex_pools_one_widget = settings.codex_pools_one_widget;
-        state.antigravity_pools_one_widget = settings.antigravity_pools_one_widget;
-        // An external settings reload replaces the transient view state too.
-        state.view_mode = settings.view_mode;
-        state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
-        state.widget_animations = [None; crate::theme_engine::WIDGET_SLOTS];
-        state.widget_directions = [1; crate::theme_engine::WIDGET_SLOTS];
-        state.widget_modes = widget_modes_from_settings(&settings);
-        let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
-            && state.providers.contains(ProviderId::Antigravity);
-        for (tile, shown) in [
-            (Tile::Antigravity, any_pool),
-            (Tile::Codex, state.providers.contains(ProviderId::Codex)),
-            (Tile::Claude, state.providers.contains(ProviderId::Claude)),
-            (
-                Tile::OpenCode,
-                state.providers.contains(ProviderId::OpenCode),
-            ),
-            (Tile::Qoder, state.providers.contains(ProviderId::Qoder)),
-            (
-                Tile::AgyExternal,
-                state.providers.contains(ProviderId::Antigravity),
-            ),
-        ] {
-            if !shown {
-                state.tiles.reset(tile);
-            }
-        }
-        state.stop_crossfade_timer_if_idle(hwnd);
-        invalidate_metrics(state);
-        invalidate_hover_tile_rects(state);
-        update_configured_placement(
-            state,
-            settings.placement_override,
-            settings.taskbar_index,
-            settings.tray_offset,
-        );
-        state.floating_card_opacity = settings.floating_card_opacity;
-        state.lock_taskbar = settings.lock_taskbar;
-        lock_enabled = state.lock_taskbar;
-        apply_language_to_state(state, language_override);
-    }
+        apply_external_settings(state, &settings, language_override, hwnd)
+    };
     unsafe {
         set_controller_timer(Some(hwnd), TIMER_POLL, settings.poll_interval_ms, None);
     }
@@ -2378,6 +2317,81 @@ fn reload_external_settings(hwnd: HWND) {
     sync_tray_icon(hwnd);
     position_at_taskbar();
     render_layered();
+}
+
+/// Copy reloaded settings into the state. Returns whether the provider or
+/// account selection changed and whether the taskbar lock is on.
+fn apply_external_settings(
+    state: &mut AppState,
+    settings: &SettingsFile,
+    language_override: Option<LanguageId>,
+    hwnd: HWND,
+) -> (bool, bool) {
+    let providers_changed =
+        state.providers != settings.enabled_providers() || state.accounts != settings.accounts;
+    let gemini_enabled = settings.antigravity_gemini_enabled();
+    let external_enabled = settings.antigravity_external_enabled();
+    state.show_antigravity_gemini = gemini_enabled;
+    state.show_antigravity_external = external_enabled;
+    state.show_antigravity_external_x = settings.antigravity_external_x_enabled();
+    state.accounts = settings.accounts.clone();
+    if let Some(data) = state.data.as_mut() {
+        data.select_accounts(&settings.accounts);
+    }
+    state.poll_interval_ms = settings.poll_interval_ms;
+    state.providers = settings.enabled_providers();
+    state.usage_countdown = settings.usage_countdown;
+    state.use_windows_default_font = settings.use_windows_default_font;
+    state.show_pace = settings.show_pace;
+    state.show_fable = settings.show_fable;
+    state.show_fable_x = settings.show_fable_x.unwrap_or(settings.show_fable);
+    state.claude_pools_one_widget = settings.claude_pools_one_widget;
+    state.codex_pools_one_widget = settings.codex_pools_one_widget;
+    state.antigravity_pools_one_widget = settings.antigravity_pools_one_widget;
+    // An external settings reload replaces the transient view state too.
+    state.view_mode = settings.view_mode;
+    state.mode_phase = (f64::from(settings.view_mode) - 1.0).clamp(0.0, 2.0);
+    state.widget_animations = [None; crate::theme_engine::WIDGET_SLOTS];
+    state.widget_directions = [1; crate::theme_engine::WIDGET_SLOTS];
+    state.widget_modes = widget_modes_from_settings(settings);
+    reset_hidden_tiles(state);
+    state.stop_crossfade_timer_if_idle(hwnd);
+    invalidate_metrics(state);
+    invalidate_hover_tile_rects(state);
+    update_configured_placement(
+        state,
+        settings.placement_override.clone(),
+        settings.taskbar_index,
+        settings.tray_offset,
+    );
+    state.floating_card_opacity = settings.floating_card_opacity;
+    state.lock_taskbar = settings.lock_taskbar;
+    apply_language_to_state(state, language_override);
+    (providers_changed, state.lock_taskbar)
+}
+
+/// Stop the hover of tiles whose provider (or pool) is no longer shown.
+fn reset_hidden_tiles(state: &mut AppState) {
+    let any_pool = (state.show_antigravity_gemini || state.show_antigravity_external)
+        && state.providers.contains(ProviderId::Antigravity);
+    for (tile, shown) in [
+        (Tile::Antigravity, any_pool),
+        (Tile::Codex, state.providers.contains(ProviderId::Codex)),
+        (Tile::Claude, state.providers.contains(ProviderId::Claude)),
+        (
+            Tile::OpenCode,
+            state.providers.contains(ProviderId::OpenCode),
+        ),
+        (Tile::Qoder, state.providers.contains(ProviderId::Qoder)),
+        (
+            Tile::AgyExternal,
+            state.providers.contains(ProviderId::Antigravity),
+        ),
+    ] {
+        if !shown {
+            state.tiles.reset(tile);
+        }
+    }
 }
 
 /// Use the configured host, not the transient popup created by a drag or
