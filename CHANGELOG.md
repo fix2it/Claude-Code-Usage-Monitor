@@ -6,6 +6,27 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.602] - 2026-11-17
+
+### Changed
+
+- The tray tooltip is now a short status line: "updated HH:MM" when all polls succeed, or one short line per failing pool ("rate limited", "no connection", "sign in again", "poll failed"). The widget tooltip keeps the full error messages.
+- Render frames 30-36 % faster: cache the dark-mode flag and the effective theme on animation frames, build one data context per surface frame, and reuse pixel buffers, text mask DCs, DIB sections and fonts across frames.
+- Remove UI-thread stalls: settings are saved outside the global state lock, WorkerW spawn requests no longer wait on a hung desktop, the desktop swap chain presents without waiting, and the resolved context menu is cached.
+- Internal refactoring: long functions in the window, theme engine, pollers, context menu and Studio pages are split into named steps and submodules, with dead code removed. No behavior change intended.
+
+### Fixed
+
+- Show an unavailable session or weekly window as `--` in the compact tray summary instead of a fake 0 % (F1).
+- Never delete the only copy of the installed exe when an update fails to replace it and the backup cannot be restored (F46).
+- Keep a healthy widget's usage in its tooltip next to another provider's error instead of showing only the error (F47).
+- Recreate a failed desktop presenter on the next frame, so a desktop-nested widget no longer stays blank or stale until restart (F52).
+- Hit-test tiles on every surface, so tiles on mirror surfaces of custom themes get hover readings (F56).
+- List the second pools (Claude X, Codex X, Antigravity O) in the widget tooltip (F58).
+- Show `--` on a just-enabled Claude X or Codex X tile before its first poll instead of borrowing the first pool's reading (F62).
+- Keep a failed provider's error next to its carried-over reading and list it in the tray, instead of silently reporting "updated" (F69).
+- Dropping a widget locked in the taskbar onto the desktop now releases the lock and leaves the widget floating; before, it fell to the bottom of the z-order and vanished (F71).
+
 ## [2.23.601] - 2026-11-15
 
 First release of the fix2it fork, based on upstream 2.23.6. Fork versions keep the upstream base in the patch number: 2.23.601 is fork build 01 on top of 2.23.6.
