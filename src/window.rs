@@ -956,6 +956,67 @@ fn effective_theme_from_state(state: &AppState) -> Option<ThemeDocument> {
     theme_with_placement(state, state.auto_ejected)
 }
 
+/// Bumped whenever `AppState::active_theme` is replaced; part of the
+/// effective-theme cache key.
+static ACTIVE_THEME_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[derive(PartialEq)]
+struct EffectiveThemeKey {
+    generation: u64,
+    overrides: HashMap<theme_engine::MouseActionOverrideKey, theme_engine::Expression>,
+    auto_ejected: bool,
+    placement_override: Option<PlacementOverride>,
+}
+
+type EffectiveThemeCache = Option<(EffectiveThemeKey, std::sync::Arc<ThemeDocument>)>;
+static EFFECTIVE_THEME_CACHE: Mutex<EffectiveThemeCache> = Mutex::new(None);
+
+/// Per-frame effective theme (F2). Animation frames reuse the theme built by
+/// the last render while the inputs it depends on are unchanged; a full render
+/// always rebuilds it, which covers display, DPI and taskbar changes (they all
+/// end in a full pass). Floating placement depends on per-frame data and
+/// metrics, so it is never cached.
+fn effective_theme_for_frame(
+    state: &AppState,
+    trigger: RenderTrigger,
+) -> std::sync::Arc<ThemeDocument> {
+    let floating = if state.auto_ejected {
+        state.auto_ejected_origin.is_some()
+    } else {
+        state
+            .placement_override
+            .as_ref()
+            .is_some_and(|p| p.nest == "floating")
+    };
+    let build = || {
+        std::sync::Arc::new(
+            effective_theme_from_state(state).unwrap_or_else(ThemeDocument::starter),
+        )
+    };
+    if floating {
+        return build();
+    }
+    let key = EffectiveThemeKey {
+        generation: ACTIVE_THEME_GENERATION.load(Ordering::Relaxed),
+        overrides: state.mouse_action_overrides.clone(),
+        auto_ejected: state.auto_ejected,
+        placement_override: state.placement_override.clone(),
+    };
+    let mut cache = EFFECTIVE_THEME_CACHE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if trigger == RenderTrigger::Animation {
+        if let Some((cached_key, theme)) = cache.as_ref() {
+            if *cached_key == key {
+                return theme.clone();
+            }
+        }
+    }
+    let theme = build();
+    *cache = Some((key, theme.clone()));
+    theme
+}
+
 fn theme_with_placement(state: &AppState, auto_ejected: bool) -> Option<ThemeDocument> {
     let mut theme = state.active_theme.as_ref().map(|theme| {
         theme_engine::apply_mouse_action_overrides(theme, &state.mouse_action_overrides)
@@ -2087,6 +2148,7 @@ fn replace_active_theme(state: &mut AppState, loaded: ThemeDocument, path: Optio
         clear_auto_ejection(state);
     }
     state.active_theme = Some(loaded);
+    ACTIVE_THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
     invalidate_metrics(state);
     invalidate_hover_tile_rects(state);
     if path.is_some() {
@@ -2967,7 +3029,7 @@ fn render_layered_impl(trigger: RenderTrigger) {
         let Some(state) = state.as_mut() else {
             return;
         };
-        let theme = effective_theme_from_state(state).unwrap_or_else(ThemeDocument::starter);
+        let theme = effective_theme_for_frame(state, trigger);
         let runtime = theme_runtime_from_state(state);
         let metrics =
             prepared_metrics(state, &theme, theme_runtime_for_surface(&theme, 0, runtime));
@@ -3134,6 +3196,7 @@ fn render_layered_impl(trigger: RenderTrigger) {
             }
         }
         render_custom_window(target_hwnd, &rendered, desktop_nested);
+        theme_engine::recycle_pixel_buffer(rendered.pixels);
         unsafe {
             let show = nest != SurfaceNest::Floating
                 || !foreground_is_fullscreen_on_display(positioned.placement.reference.display);
@@ -3654,6 +3717,7 @@ fn time_until_next_clock_refresh(interval: Duration) -> Duration {
 }
 
 fn check_theme_change() {
+    theme::invalidate_dark_mode_cache();
     let new_dark = theme::is_dark_mode();
     let changed = {
         let mut state = lock_state();

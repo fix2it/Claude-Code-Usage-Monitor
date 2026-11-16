@@ -2698,7 +2698,10 @@ impl DataContext {
         context.insert("app.version.major", version_parts.next().unwrap_or(0.0));
         context.insert("app.version.minor", version_parts.next().unwrap_or(0.0));
         context.insert("app.version.patch", version_parts.next().unwrap_or(0.0));
-        context.insert("system.dark", crate::theme::is_dark_mode() as u8 as f64);
+        context.insert(
+            "system.dark",
+            crate::theme::is_dark_mode_cached() as u8 as f64,
+        );
         context.insert("data.poll_ok", runtime.poll_ok as u8 as f64);
         context.insert("data.has_error", runtime.has_error as u8 as f64);
         context.insert(

@@ -44,9 +44,9 @@ Surface 5 — module slice:
 
 ### Level 5 — Minor (refactoring focus)
 Hot paths:
-- F2 | S1 | src/window.rs:3032-3045 | `render_layered_impl` rebuilds `effective_theme_from_state` and clones `state.data` on every animation frame under the state lock | proposal: cache effective theme keyed by settings/theme revision; hold usage data in `Arc` | open
-- F3 | S1 | src/theme_engine/theme_rendering.rs:134 | `vec![0u32; w*h]` pixel buffer allocated and zeroed every render | proposal: reuse a size-matched buffer per surface | open
-- F4 | S1 | src/theme_engine/theme_rendering.rs:141 | `crate::theme::is_dark_mode()` (registry read) on every floating-card frame | proposal: cache dark-mode flag, invalidate on WM_SETTINGCHANGE | open
+- F2 | S1 | src/window.rs:3032-3045 | `render_layered_impl` rebuilds `effective_theme_from_state` and clones `state.data` on every animation frame under the state lock | proposal: cache effective theme keyed by settings/theme revision; hold usage data in `Arc` | partly fixed (refactor/3-render-hot-path): effective theme cached for animation frames (floating placement still rebuilt per frame); `state.data` clone per frame left as is
+- F3 | S1 | src/theme_engine/theme_rendering.rs:134 | `vec![0u32; w*h]` pixel buffer allocated and zeroed every render | proposal: reuse a size-matched buffer per surface | fixed (refactor/3-render-hot-path)
+- F4 | S1 | src/theme_engine/theme_rendering.rs:141 | `crate::theme::is_dark_mode()` (registry read) on every floating-card frame | proposal: cache dark-mode flag, invalidate on WM_SETTINGCHANGE | fixed (refactor/3-render-hot-path)
 Long functions (> ~100 lines):
 - F5 | S1 | src/window.rs:1266-1404 | `usage_summary_lines` (~140 lines), compact/detailed formatting duplicated (root of F1) | proposal: extract provider-label and quota-window formatter helpers | fixed (refactor/1-level4-fixes)
 - F6 | S1 | src/window.rs:2240-2418 | `sync_surface_windows_with` (~180) | proposal: split primary recovery / mirror reconcile / desktop-surface reconcile | open
@@ -61,8 +61,8 @@ Long functions (> ~100 lines):
 - F15 | S1 | src/theme_engine/theme_rendering.rs:98-265 | `render_theme_surface_with_metrics_at_scale` (~170) | proposal: setup / background / opacity pass | open
 - F16 | S1 | src/theme_engine/theme_rendering.rs:893-1143 | `resolve_geometry` (~250) | proposal: parent resolve / expression eval / transform | open
 - F19 | S1 | src/window/window_context_menu.rs:237 | every right-click enumerates, reads, parses and validates the menu directory on the UI thread (reviewer said L4; orchestrator: local small files, click-only → L5) | proposal: cache parsed menus, invalidate on file change | fixed (refactor/2: right-click uses resolve_context_menu_cached, keyed by reference + directory size/mtime fingerprint; errors not cached; known limit: an edit that keeps size and mtime is not seen)
-- F20 | S1 | src/theme_engine/theme_rendering.rs:296 | per-object pixel buffer allocated and cleared each frame | proposal: reuse scratch buffers / composite directly | open
-- F21 | S1 | src/theme_engine/theme_rendering.rs:1435-1538 | `render_text_mask` (~100) creates/destroys DC, bitmap, font per text object per frame | proposal: cache fonts and mask resources by params; split setup vs compositing | open
+- F20 | S1 | src/theme_engine/theme_rendering.rs:296 | per-object pixel buffer allocated and cleared each frame | proposal: reuse scratch buffers / composite directly | fixed (refactor/3-render-hot-path)
+- F21 | S1 | src/theme_engine/theme_rendering.rs:1435-1538 | `render_text_mask` (~100) creates/destroys DC, bitmap, font per text object per frame | proposal: cache fonts and mask resources by params; split setup vs compositing | fixed (refactor/3-render-hot-path)
 Duplication:
 - F22 | S1 | src/theme_engine.rs:3051 | split-pool binding prep duplicated for Claude and Codex (clear fields, copy namespaces, hover bindings; double map scan) | proposal: one shared pool-binding helper, single pass | open
 More long functions:
@@ -85,13 +85,13 @@ More long functions (round 3):
 - F38 | M2 | src/poller/qoder.rs:318-429 | `usage_data` | proposal: credit pools vs window select | open
 - F39 | M2 | src/poller/qoder.rs:539-660 | `run_usage` | proposal: pseudo-console setup / launch / collect | open
 - F40 | S1 | src/poller/claude/limits.rs:19-137 | `parse` | proposal: array parse / legacy buckets / collisions | open
-- F41 | M3 | src/theme_engine/theme_expression.rs:490-618 | `format_usage_line` (runs during render, allocates lookup keys) | proposal: provider normalize + availability helpers; reuse keys | open
+- F41 | M3 | src/theme_engine/theme_expression.rs:490-618 | `format_usage_line` (runs during render, allocates lookup keys) | proposal: provider normalize + availability helpers; reuse keys | fixed (refactor/3-render-hot-path)
 - F42 | M4 | src/studio_app/studio_core.rs:342-442 | `shell` | proposal: nav vs page content | open
 - F43 | M4 | src/studio_app/studio_diagnostics.rs:113-218 | `diagnostics_page` | proposal: recording controls vs log view | open
 - F44 | M4 | src/studio_app/studio_settings.rs:5-203 | `settings_page` | proposal: per-group render helpers | open
 - F45 | M4 | src/studio_app/studio_settings.rs:206-311 | `account_settings` | proposal: selection vs editing | open
 Round 4:
-- F48 | S1 | src/theme_engine/theme_rendering.rs:117 | each surface render builds the full usage `DataContext` twice (incl. formatted dynamic limit keys) | proposal: build once per frame, patch canvas-size values | open
+- F48 | S1 | src/theme_engine/theme_rendering.rs:117 | each surface render builds the full usage `DataContext` twice (incl. formatted dynamic limit keys) | proposal: build once per frame, patch canvas-size values | fixed (refactor/3-render-hot-path)
 - F49 | M2 | src/poller/copilot.rs:331 (+ cursor, grok, opencode) | env-value normalization duplicated in 4 pollers; secret-signature logic duplicated in copilot and cursor | proposal: shared helpers in poller.rs | open
 - F50 | M5 | src/updater.rs:48 | `InstallChannel::Winget` dead in production (`allow(dead_code)`), plus its update path | proposal: remove or gate under cfg(test) | fixed (refactor/4-dead-code)
 - F51 | M4 | src/studio_app/warp.rs:425-564 | test `warp_renders_partial_textures_at_zoom_and_frees_after_paint` 140 lines (L6: test shape) | proposal: split | open

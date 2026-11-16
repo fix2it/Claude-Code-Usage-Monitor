@@ -114,9 +114,11 @@ pub fn render_theme_surface_with_metrics_at_scale(
     };
     let scale = normalized_render_scale(scale);
     let mut warnings = Vec::new();
-    let size_context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
+    // One usage context per frame (F48): size resolution runs against the
+    // default canvas, then only the canvas-dependent values are patched.
+    let mut context = context_with_metrics(data, &Canvas::default(), runtime, metrics);
     let (logical_width, logical_height) =
-        resolve_object_size_with_context(surface, &size_context, &mut warnings);
+        resolve_object_size_with_context(surface, &context, &mut warnings);
     let padding = surface_horizontal_padding(theme, surface_index, runtime);
     // Snap the translation once, including parent clips, so fractional DPI
     // cannot trim a content pixel at the far edge of the inset.
@@ -130,15 +132,18 @@ pub fn render_theme_surface_with_metrics_at_scale(
         height_expression: Some(surface.height.clone()),
         background: surface.background.canvas_paint(),
     };
-    let context = context_with_metrics(data, &resolved_canvas, runtime, metrics);
-    let mut pixels = vec![0u32; width as usize * height as usize];
+    context.insert("canvas.width", logical_width as f64);
+    context.insert("canvas.height", logical_height as f64);
+    context.insert("parent.width", logical_width as f64);
+    context.insert("parent.height", logical_height as f64);
+    let mut pixels = take_pixel_buffer(width as usize * height as usize);
     if runtime.surface_nest == SurfaceNest::Floating
         && matches!(surface.background, LayerBackground::None)
     {
         let alpha = ((runtime.floating_card_opacity.min(100) as u32 * 255) / 100) as u8;
         // Match the card to the system theme: a fixed dark card under
         // light-mode content destroys contrast when the widget floats.
-        let dark = crate::theme::is_dark_mode();
+        let dark = crate::theme::is_dark_mode_cached();
         let card_color = if dark {
             Rgba {
                 r: 24,
@@ -204,14 +209,8 @@ pub fn render_theme_surface_with_metrics_at_scale(
         &mut warnings,
     );
 
-    let (resolved, layer_warnings) = resolve_objects_for_with_metrics(
-        surface,
-        &resolved_canvas,
-        &surface.children,
-        data,
-        runtime,
-        metrics,
-    );
+    let (resolved, layer_warnings) =
+        resolve_objects_with_context(surface, &resolved_canvas, &surface.children, &context);
     warnings.extend(layer_warnings);
     for mut object in resolved {
         for clip in &mut object.clip {
@@ -293,7 +292,7 @@ pub(super) fn render_resolved_object(
         warnings.push(format!("{} is too large to render", object.source.name));
         return;
     }
-    let mut local = vec![0u32; object_width as usize * object_height as usize];
+    let mut local = take_pixel_buffer(object_width as usize * object_height as usize);
     let object_context = context.clone().with_object(object);
     render_object_background(
         object,
@@ -335,6 +334,63 @@ pub(super) fn render_resolved_object(
         scale,
         &object.clip,
     );
+    recycle_pixel_buffer(local);
+}
+
+thread_local! {
+    /// Zeroed-on-take scratch buffers reused across frames (F3, F20).
+    static PIXEL_POOL: std::cell::RefCell<Vec<Vec<u32>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+const PIXEL_POOL_LIMIT: usize = 16;
+/// Total bytes the pool may hold between frames.
+const PIXEL_POOL_BYTES: usize = 4 * 1024 * 1024;
+/// Largest single buffer the pool keeps.
+const PIXEL_POOL_MAX_BUFFER_BYTES: usize = 256 * 1024;
+
+/// Return a zero-filled buffer of `len` pixels, reusing pooled capacity.
+pub(super) fn take_pixel_buffer(len: usize) -> Vec<u32> {
+    let pooled = PIXEL_POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        let index = pool
+            .iter()
+            .enumerate()
+            .filter(|(_, buffer)| buffer.capacity() >= len)
+            .min_by_key(|(_, buffer)| buffer.capacity())
+            .map(|(index, _)| index)?;
+        Some(pool.remove(index))
+    });
+    match pooled {
+        Some(mut buffer) => {
+            buffer.clear();
+            buffer.resize(len, 0);
+            buffer
+        }
+        None => vec![0u32; len],
+    }
+}
+
+/// Hand a finished buffer back to the pool for the next frame.
+pub fn recycle_pixel_buffer(buffer: Vec<u32>) {
+    let bytes = buffer.capacity() * 4;
+    // Only small buffers are pooled. A large allocation comes from the OS
+    // already zeroed, which is cheaper than re-zeroing a pooled buffer whose
+    // pixels are mostly never touched (measured: pooling large object buffers
+    // doubled the floating-card frame time).
+    if bytes == 0 || bytes > PIXEL_POOL_MAX_BUFFER_BYTES {
+        return;
+    }
+    PIXEL_POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        // Oldest first: buffers the current frames no longer use age out.
+        while !pool.is_empty()
+            && (pool.len() >= PIXEL_POOL_LIMIT
+                || pool.iter().map(|b| b.capacity() * 4).sum::<usize>() + bytes > PIXEL_POOL_BYTES)
+        {
+            pool.remove(0);
+        }
+        pool.push(buffer);
+    });
 }
 
 #[cfg(test)]
@@ -364,6 +420,15 @@ pub(super) fn resolve_objects_for_with_metrics<'a>(
     metrics: &DisplayMetrics,
 ) -> (Vec<ResolvedObject<'a>>, Vec<String>) {
     let context = context_with_metrics(data, canvas, runtime, metrics);
+    resolve_objects_with_context(root, canvas, layers, &context)
+}
+
+fn resolve_objects_with_context<'a>(
+    root: &SceneObject,
+    canvas: &Canvas,
+    layers: &'a [SceneObject],
+    context: &DataContext,
+) -> (Vec<ResolvedObject<'a>>, Vec<String>) {
     let mut resolved = Vec::new();
     let mut warnings = Vec::new();
     let mut cache = vec![None; layers.len()];
@@ -373,7 +438,7 @@ pub(super) fn resolve_objects_for_with_metrics<'a>(
             root,
             canvas,
             layers,
-            &context,
+            context,
             &mut cache,
             &mut Vec::new(),
             &mut warnings,
@@ -1451,89 +1516,247 @@ pub(super) fn render_text_mask(
     if text.is_empty() || width == 0 || height == 0 || target.is_empty() {
         return;
     }
-    unsafe {
-        let memory_dc = CreateCompatibleDC(None);
-        if memory_dc.is_invalid() {
+    let quality = rendering.gdi_quality() as u8;
+    TEXT_GDI.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some((memory_dc, bits)) =
+            cache.prepare(width, height, font_family, font_size, font_weight, quality)
+        else {
             return;
-        }
-        let bitmap_info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width as i32,
-                biHeight: -(height as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
         };
-        let mut bits = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(
-            Some(memory_dc),
-            &bitmap_info,
-            DIB_RGB_COLORS,
-            &mut bits,
-            None,
-            0,
-        )
-        .unwrap_or_default();
-        if bitmap.is_invalid() || bits.is_null() {
-            let _ = DeleteDC(memory_dc);
-            return;
-        }
-        let old_bitmap = SelectObject(memory_dc, bitmap.into());
-        std::ptr::write_bytes(bits, 0, width as usize * height as usize * 4);
-        let font_name: Vec<u16> = font_family.encode_utf16().chain(Some(0)).collect();
-        let font = CreateFontW(
-            -(font_size.round() as i32),
-            0,
-            0,
-            0,
-            font_weight,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_TT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            windows::Win32::Graphics::Gdi::FONT_QUALITY(rendering.gdi_quality() as u8),
-            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
-            PCWSTR::from_raw(font_name.as_ptr()),
-        );
-        let old_font = SelectObject(memory_dc, font.into());
-        let _ = SetBkMode(memory_dc, TRANSPARENT);
-        let _ = SetTextColor(memory_dc, COLORREF(0x00FF_FFFF));
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: width as i32,
-            bottom: height as i32,
-        };
-        let mut wide: Vec<u16> = text.encode_utf16().collect();
-        let alignment = match align {
-            TextAlign::Left => DT_LEFT,
-            TextAlign::Center => DT_CENTER,
-            TextAlign::Right => DT_RIGHT,
-        };
-        let _ = DrawTextW(
-            memory_dc,
-            &mut wide,
-            &mut rect,
-            alignment | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-        );
-        let mask = std::slice::from_raw_parts(bits as *const u32, width as usize * height as usize);
-        for (destination, source) in target.iter_mut().zip(mask) {
-            let coverage = text_mask_coverage(*source, rendering, contrast);
-            if coverage > 0.0 {
-                blend(destination, premultiply(color), coverage);
+        unsafe {
+            std::ptr::write_bytes(bits, 0, width as usize * height as usize);
+            let _ = SetBkMode(memory_dc, TRANSPARENT);
+            let _ = SetTextColor(memory_dc, COLORREF(0x00FF_FFFF));
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: width as i32,
+                bottom: height as i32,
+            };
+            let mut wide: Vec<u16> = text.encode_utf16().collect();
+            let alignment = match align {
+                TextAlign::Left => DT_LEFT,
+                TextAlign::Center => DT_CENTER,
+                TextAlign::Right => DT_RIGHT,
+            };
+            let _ = DrawTextW(
+                memory_dc,
+                &mut wide,
+                &mut rect,
+                alignment | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+            );
+            let _ = GdiFlush();
+            let mask =
+                std::slice::from_raw_parts(bits as *const u32, width as usize * height as usize);
+            let source_color = premultiply(color);
+            for (destination, source) in target.iter_mut().zip(mask) {
+                let coverage = text_mask_coverage(*source, rendering, contrast);
+                if coverage > 0.0 {
+                    blend(destination, source_color, coverage);
+                }
             }
         }
-        SelectObject(memory_dc, old_font);
-        let _ = DeleteObject(font.into());
-        SelectObject(memory_dc, old_bitmap);
-        let _ = DeleteObject(bitmap.into());
-        let _ = DeleteDC(memory_dc);
+        cache.release_transient();
+    });
+}
+
+thread_local! {
+    static TEXT_GDI: std::cell::RefCell<TextGdiCache> =
+        std::cell::RefCell::new(TextGdiCache::default());
+}
+
+const TEXT_BITMAP_LIMIT: usize = 24;
+/// Byte budget for cached mask DIBs; a larger mask is drawn once and freed.
+const TEXT_BITMAP_BYTES: usize = 8 * 1024 * 1024;
+const TEXT_FONT_LIMIT: usize = 32;
+
+type FontKey = (String, i32, i32, u8);
+
+/// Memory DC, mask DIB sections and fonts reused across text draws (F21).
+/// Text objects keep their size and font between frames, so after the first
+/// frame no GDI object is created or destroyed.
+#[derive(Default)]
+struct TextGdiCache {
+    dc: Option<HDC>,
+    original_bitmap: Option<HGDIOBJ>,
+    original_font: Option<HGDIOBJ>,
+    bitmaps: Vec<((u32, u32), HBITMAP, *mut u32)>,
+    bitmap_bytes: usize,
+    /// Oversized mask freed by `release_transient` right after the draw.
+    transient: Option<HBITMAP>,
+    fonts: Vec<(FontKey, HFONT)>,
+}
+
+impl TextGdiCache {
+    fn prepare(
+        &mut self,
+        width: u32,
+        height: u32,
+        font_family: &str,
+        font_size: f64,
+        font_weight: i32,
+        quality: u8,
+    ) -> Option<(HDC, *mut u32)> {
+        unsafe {
+            let dc = match self.dc {
+                Some(dc) => dc,
+                None => {
+                    let dc = CreateCompatibleDC(None);
+                    if dc.is_invalid() {
+                        return None;
+                    }
+                    self.dc = Some(dc);
+                    dc
+                }
+            };
+            let bits = if let Some(index) = self
+                .bitmaps
+                .iter()
+                .position(|(size, ..)| *size == (width, height))
+            {
+                let entry = self.bitmaps.remove(index);
+                self.bitmaps.push(entry);
+                let (_, bitmap, bits) = entry;
+                let previous = SelectObject(dc, bitmap.into());
+                self.original_bitmap.get_or_insert(previous);
+                bits
+            } else {
+                let bitmap_info = BITMAPINFO {
+                    bmiHeader: BITMAPINFOHEADER {
+                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width as i32,
+                        biHeight: -(height as i32),
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut bits = std::ptr::null_mut();
+                let bitmap =
+                    CreateDIBSection(Some(dc), &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0)
+                        .unwrap_or_default();
+                if bitmap.is_invalid() || bits.is_null() {
+                    return None;
+                }
+                // Select the new bitmap before an eviction so DeleteObject
+                // never targets the bitmap currently selected into the DC.
+                let previous = SelectObject(dc, bitmap.into());
+                self.original_bitmap.get_or_insert(previous);
+                let bytes = width as usize * height as usize * 4;
+                if bytes > TEXT_BITMAP_BYTES / 2 {
+                    self.transient = Some(bitmap);
+                } else {
+                    while !self.bitmaps.is_empty()
+                        && (self.bitmaps.len() >= TEXT_BITMAP_LIMIT
+                            || self.bitmap_bytes + bytes > TEXT_BITMAP_BYTES)
+                    {
+                        let ((w, h), evicted, _) = self.bitmaps.remove(0);
+                        self.bitmap_bytes -= w as usize * h as usize * 4;
+                        let _ = DeleteObject(evicted.into());
+                    }
+                    self.bitmap_bytes += bytes;
+                    self.bitmaps
+                        .push(((width, height), bitmap, bits as *mut u32));
+                }
+                bits as *mut u32
+            };
+            let height_units = -(font_size.round() as i32);
+            let found = self
+                .fonts
+                .iter()
+                .position(|((family, size, weight, q), _)| {
+                    *size == height_units
+                        && *weight == font_weight
+                        && *q == quality
+                        && family == font_family
+                });
+            let font = if let Some(index) = found {
+                self.fonts[index].1
+            } else {
+                let font_name: Vec<u16> = font_family.encode_utf16().chain(Some(0)).collect();
+                let font = CreateFontW(
+                    height_units,
+                    0,
+                    0,
+                    0,
+                    font_weight,
+                    0,
+                    0,
+                    0,
+                    DEFAULT_CHARSET,
+                    OUT_TT_PRECIS,
+                    CLIP_DEFAULT_PRECIS,
+                    windows::Win32::Graphics::Gdi::FONT_QUALITY(quality),
+                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+                    PCWSTR::from_raw(font_name.as_ptr()),
+                );
+                if font.is_invalid() {
+                    // Match the uncached path: a failed font left the DC's
+                    // default font selected. Nothing is cached, so the next
+                    // frame retries the creation.
+                    let previous = SelectObject(dc, GetStockObject(SYSTEM_FONT));
+                    self.original_font.get_or_insert(previous);
+                    return Some((dc, bits));
+                }
+                // Same rule as bitmaps: select the new font before deleting an
+                // evicted one that may still be selected.
+                let previous = SelectObject(dc, font.into());
+                self.original_font.get_or_insert(previous);
+                if self.fonts.len() >= TEXT_FONT_LIMIT {
+                    let (_, evicted) = self.fonts.remove(0);
+                    let _ = DeleteObject(evicted.into());
+                }
+                self.fonts.push((
+                    (font_family.to_string(), height_units, font_weight, quality),
+                    font,
+                ));
+                font
+            };
+            let previous = SelectObject(dc, font.into());
+            self.original_font.get_or_insert(previous);
+            Some((dc, bits))
+        }
+    }
+}
+
+impl TextGdiCache {
+    /// Free an oversized mask that was not cached.
+    fn release_transient(&mut self) {
+        let (Some(bitmap), Some(dc), Some(original)) =
+            (self.transient.take(), self.dc, self.original_bitmap)
+        else {
+            return;
+        };
+        unsafe {
+            SelectObject(dc, original);
+            let _ = DeleteObject(bitmap.into());
+        }
+    }
+}
+
+impl Drop for TextGdiCache {
+    fn drop(&mut self) {
+        self.release_transient();
+        unsafe {
+            if let Some(dc) = self.dc {
+                if let Some(original) = self.original_bitmap {
+                    SelectObject(dc, original);
+                }
+                if let Some(original) = self.original_font {
+                    SelectObject(dc, original);
+                }
+                let _ = DeleteDC(dc);
+            }
+            for (_, bitmap, _) in self.bitmaps.drain(..) {
+                let _ = DeleteObject(bitmap.into());
+            }
+            for (_, font) in self.fonts.drain(..) {
+                let _ = DeleteObject(font.into());
+            }
+        }
     }
 }
 
