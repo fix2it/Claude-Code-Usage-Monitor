@@ -1,5 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use super::{non_empty_environment, secret_signature};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -438,19 +437,6 @@ where
             _ => None,
         })
         .filter(|number| number.is_finite()))
-}
-
-fn non_empty_environment(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn secret_signature(source: &str, value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{source}|present|{}|{:x}", value.len(), hasher.finish())
 }
 
 fn path_signature(kind: &str, path: &Path) -> String {

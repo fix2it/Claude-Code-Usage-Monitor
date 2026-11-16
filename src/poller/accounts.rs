@@ -314,8 +314,15 @@ fn append_account_result(
             error: result.as_ref().err().copied(),
             selected: false,
         });
-    } else if let Ok(usage) = result {
-        data.insert(target.provider, usage.clone());
+    } else {
+        match result {
+            Ok(usage) => {
+                data.insert(target.provider, usage.clone());
+            }
+            // A provider without profiles keeps its failure next to the
+            // reading that may be carried in for it.
+            Err(error) => data.set_provider_error(target.provider, *error),
+        }
     }
 }
 

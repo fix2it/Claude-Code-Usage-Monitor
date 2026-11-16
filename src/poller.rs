@@ -82,6 +82,22 @@ pub struct PollFailure {
     pub error: PollError,
 }
 
+/// An environment variable's trimmed value, if it has one.
+fn non_empty_environment(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Change marker for a secret (token, cookie) that never contains the secret.
+fn secret_signature(source: &str, value: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{source}|present|{}|{:x}", value.len(), hasher.finish())
+}
+
 /// Polling and cache readers must agree on all files an account can read.
 pub fn account_source_signature(provider: ProviderId, path: &std::path::Path) -> String {
     match provider {
@@ -133,6 +149,10 @@ pub fn merge_poll_progress(
     let mut merged = previous.clone();
     for (provider, usage) in update.iter() {
         merged.insert(provider, usage.clone());
+        merged.clear_provider_error(provider);
+    }
+    for (provider, error) in update.provider_errors() {
+        merged.set_provider_error(provider, error);
     }
     for account in update.accounts {
         merged
@@ -183,6 +203,19 @@ pub fn carry_forward_failures(
         }
     }
     merged
+}
+
+/// Poll of providers without account profiles with an injected fetcher, for
+/// end-to-end tests elsewhere in the crate.
+#[cfg(test)]
+pub(crate) fn poll_providers_for_test<F>(
+    enabled: ProviderSet,
+    poll: F,
+) -> Result<AppUsageData, PollFailure>
+where
+    F: Fn(ProviderId) -> Result<UsageData, PollError> + Sync,
+{
+    poll_concurrently_with_progress(enabled, poll, |_| {})
 }
 
 /// Account poll with an injected fetcher, for end-to-end tests elsewhere in
@@ -287,6 +320,9 @@ fn merge_poll_results(
                     ));
                 }
                 first_error.get_or_insert(PollFailure { provider, error });
+                // Kept with the data: the provider's carried reading must
+                // not pass for a successful update.
+                data.set_provider_error(provider, error);
             }
         }
     }

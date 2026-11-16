@@ -1666,14 +1666,28 @@ fn tray_failures(
         .into_iter()
         .filter_map(|account| Some((account.provider, Some(&account.profile), account.error?)))
         .collect();
-    if let Some(failure) = failure.filter(|failure| providers.contains(failure.provider)) {
-        if !data.is_some_and(|data| {
+    let explained_by_account = |provider: ProviderId| {
+        data.is_some_and(|data| {
             data.accounts.iter().any(|account| {
-                account.provider == failure.provider
+                account.provider == provider
                     && account.stands_for_provider()
                     && account.error.is_some()
             })
-        }) {
+        })
+    };
+    // A provider without profiles that failed while others answered (its
+    // last reading carried in as stale), then a whole failed poll.
+    let provider_errors = data
+        .into_iter()
+        .flat_map(|data| data.provider_errors())
+        .map(|(provider, error)| poller::PollFailure { provider, error });
+    for failure in provider_errors.chain(failure) {
+        if providers.contains(failure.provider)
+            && !explained_by_account(failure.provider)
+            && !failures
+                .iter()
+                .any(|(provider, account, _)| *provider == failure.provider && account.is_none())
+        {
             failures.push((failure.provider, None, failure.error));
         }
     }
@@ -3483,7 +3497,8 @@ fn partial_poll_retry_delay_ms(
                     && account.usage.as_ref().is_none_or(|usage| usage.stale)
             })
         } else {
-            // Providers without profiles do not retain their last error.
+            // Providers without profiles wait for the regular interval; their
+            // failure stays listed in the tray meanwhile.
             false
         }
     });
@@ -5055,6 +5070,58 @@ mod tray_usage_summary_tests {
             },
             weekly_label: weekly_label.map(str::to_string),
             ..Default::default()
+        }
+    }
+
+    /// F69: Cursor (no profiles) fails while Claude answers. Its last reading
+    /// is carried in as stale, and the tray names the failure instead of
+    /// "updated", on both poll paths.
+    #[test]
+    fn a_failed_provider_without_profiles_is_listed_not_hidden_by_its_carried_reading() {
+        use crate::poller::PollError;
+        let providers = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Cursor]);
+        let previous: AppUsageData = [
+            (ProviderId::Claude, usage(10.0, 20.0, None)),
+            (ProviderId::Cursor, usage(30.0, 40.0, None)),
+        ]
+        .into_iter()
+        .collect();
+        let poll = |provider: ProviderId| match provider {
+            ProviderId::Cursor => Err(PollError::NetworkError),
+            _ => Ok(usage(11.0, 21.0, None)),
+        };
+        let without_profiles = crate::poller::poll_providers_for_test(providers, poll).unwrap();
+        let with_claude_profiles = crate::poller::poll_accounts_for_test(
+            providers,
+            &crate::accounts::AccountSettings::default(),
+            |provider, _| poll(provider),
+        )
+        .unwrap();
+        for fresh in [without_profiles, with_claude_profiles] {
+            let data = crate::poller::carry_forward_failures(fresh, &previous, providers);
+            assert!(
+                data.get(ProviderId::Cursor)
+                    .is_some_and(|usage| usage.stale),
+                "the last Cursor reading is carried in as stale"
+            );
+            let lines = tray_short_error_lines(Some(&data), None, providers, LanguageId::English);
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].ends_with("no connection"), "{lines:?}");
+            assert!(lines[0].to_lowercase().starts_with("cursor"), "{lines:?}");
+
+            // The next poll with Cursor back clears the failure.
+            let progress: AppUsageData = [(ProviderId::Cursor, usage(31.0, 41.0, None))]
+                .into_iter()
+                .collect();
+            let recovered = crate::poller::merge_poll_progress(
+                progress,
+                &data,
+                &crate::accounts::AccountSettings::default(),
+            );
+            assert!(
+                tray_short_error_lines(Some(&recovered), None, providers, LanguageId::English)
+                    .is_empty()
+            );
         }
     }
 
