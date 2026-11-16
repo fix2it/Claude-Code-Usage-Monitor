@@ -700,16 +700,16 @@ mod hover_revalidation_tests {
 }
 
 fn tile_hover_at(state: &super::AppState, hwnd: HWND, lparam: LPARAM, tile: Tile) -> bool {
-    if surface_index_for_window(state, hwnd) != Some(0) {
+    let Some(surface) = surface_index_for_window(state, hwnd) else {
         return false;
-    }
-    let Some(rect) = state.tiles.rect(0, tile) else {
+    };
+    let Some(rect) = state.tiles.rect(surface, tile) else {
         return false;
     };
     let Some(theme) = state.active_theme.as_ref() else {
         return false;
     };
-    let scale = theme_surface_scale(theme, 0).max(0.01);
+    let scale = theme_surface_scale(theme, surface).max(0.01);
     let (x, y) = mouse_client_point(lparam);
     let lx = x / scale;
     let ly = y / scale;

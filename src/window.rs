@@ -3227,23 +3227,25 @@ fn render_layered_impl(trigger: RenderTrigger) {
         // Each rect is rebuilt only while it is `None`. A theme without a
         // provider object keeps that rect `None` forever, so hover-only
         // animation frames skip the lookup; full renders and view-mode
-        // frames (whose geometry changes) still rebuild missing rects.
-        if surface_index == 0 {
+        // frames (whose geometry changes) still rebuild missing rects. Every
+        // surface has its own rects: a mirror of a custom theme can place the
+        // tiles elsewhere.
+        {
             let mut state = lock_state();
             if let Some(state) = state.as_mut().filter(|state| {
                 trigger == RenderTrigger::Full
                     || state.widget_animations.iter().any(Option::is_some)
             }) {
-                if state.tiles.rects_incomplete(0) {
+                if state.tiles.rects_incomplete(surface_index) {
                     let bounds = theme_engine::object_bounds_for_ids_with_metrics(
                         &theme,
-                        0,
+                        surface_index,
                         usage_data.as_ref(),
                         surface_runtime,
                         &tiles::Tiles::object_ids(),
                         &surface_metrics,
                     );
-                    state.tiles.set_rects(0, &bounds);
+                    state.tiles.set_rects(surface_index, &bounds);
                 }
             }
         }
@@ -5722,6 +5724,26 @@ fn set_tile_hover(",
         for pool in crate::theme_engine::SplitPool::ALL {
             assert_eq!(super::Tile::Split(pool).object_id(), pool.object_id());
         }
+    }
+
+    #[test]
+    fn mirror_surfaces_keep_their_own_tile_rects() {
+        // F56: a mirror's tiles sit elsewhere; its rects never borrow the
+        // primary surface's, and a missing mirror rect is rebuilt.
+        let mut tiles = super::tiles::Tiles::default();
+        let primary = [Some((0.0, 0.0, 10.0, 10.0)); super::Tile::ALL.len()];
+        let mut mirror = [Some((50.0, 0.0, 10.0, 10.0)); super::Tile::ALL.len()];
+        mirror[1] = None;
+        tiles.set_rects(0, &primary);
+        assert!(tiles.rects_incomplete(1), "mirror rects not built yet");
+        tiles.set_rects(1, &mirror);
+        assert_eq!(tiles.rect(0, super::Tile::Codex), primary[2]);
+        assert_eq!(tiles.rect(1, super::Tile::Codex), mirror[2]);
+        assert_eq!(tiles.rect(1, super::Tile::Claude), None);
+        assert!(!tiles.rects_incomplete(0));
+        assert!(tiles.rects_incomplete(1));
+        tiles.clear_rects();
+        assert!(tiles.rects_incomplete(0) && tiles.rects_incomplete(1));
     }
 
     #[test]
