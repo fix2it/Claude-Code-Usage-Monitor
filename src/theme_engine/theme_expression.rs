@@ -548,7 +548,17 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
     {
         return None;
     }
-    let scoped_error = context.get(&format!("{provider}.has_error")).or_else(|| {
+    // One key buffer for every lookup below (F41): this runs per text
+    // object on every frame.
+    let mut key = String::with_capacity(base.len() + 24);
+    let mut get = |parts: &[&str]| {
+        key.clear();
+        for part in parts {
+            key.push_str(part);
+        }
+        context.get(&key)
+    };
+    let scoped_error = get(&[provider, ".has_error"]).or_else(|| {
         if provider.starts_with("antigravity_o.") {
             context.get("antigravity_o.has_error")
         } else if provider.starts_with("antigravity.") {
@@ -560,7 +570,7 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
     if scoped_error.is_none() && context.get("data.loading").unwrap_or(0.0) != 0.0 {
         return Some("--".into());
     }
-    let available = context.get(&format!("{provider}.available")).unwrap_or(0.0) != 0.0;
+    let available = get(&[provider, ".available"]).unwrap_or(0.0) != 0.0;
     // A pool Antigravity did not report, while Antigravity itself answered, is
     // "no limit data", not an error.
     if provider.starts_with("antigravity")
@@ -572,7 +582,7 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
             })
             .unwrap_or(0.0)
             != 0.0
-        && (!available || context.get(&format!("{provider}.{window}.available")) == Some(0.0))
+        && (!available || get(&[provider, ".", window, ".available"]) == Some(0.0))
     {
         return Some("--".into());
     }
@@ -583,34 +593,26 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
         .map(|error| error != 0.0 && !available)
         .unwrap_or_else(|| context.get("data.has_error").unwrap_or(0.0) != 0.0)
         || (context.get("data.poll_ok").unwrap_or(1.0) != 0.0
-            && context.get(&format!("{provider}.available")).unwrap_or(0.0) == 0.0)
+            && get(&[provider, ".available"]).unwrap_or(0.0) == 0.0)
     {
         return Some("!".into());
     }
-    if dynamic.is_some() && context.get(&format!("{base}.available")) == Some(0.0) {
+    if dynamic.is_some() && get(&[base, ".available"]) == Some(0.0) {
         return Some("--".into());
     }
     // An Antigravity or OpenCode pool may report one window but not the other; an absent
     // window is "no limit data", not 0% used.
     if (provider.starts_with("antigravity") || provider == "opencode")
-        && context.get(&format!("{provider}.{window}.available")) == Some(0.0)
+        && get(&[provider, ".", window, ".available"]) == Some(0.0)
     {
         return Some("--".into());
     }
-    let percentage = context
-        .get(&format!("{provider}.{window}.{metric}"))
-        .unwrap_or(0.0);
+    let percentage = get(&[provider, ".", window, ".", metric]).unwrap_or(0.0);
     let percentage = format_value(percentage, "0", context);
-    if context
-        .get(&format!("{provider}.{window}.reset.unix"))
-        .unwrap_or(0.0)
-        <= 0.0
-    {
+    if get(&[provider, ".", window, ".reset.unix"]).unwrap_or(0.0) <= 0.0 {
         return Some(format!("{percentage}%"));
     }
-    let seconds = context
-        .get(&format!("{provider}.{window}.reset.seconds"))
-        .unwrap_or(0.0);
+    let seconds = get(&[provider, ".", window, ".reset.seconds"]).unwrap_or(0.0);
     Some(format!(
         "{percentage}% · {}",
         format_value(seconds, "duration_short", context)

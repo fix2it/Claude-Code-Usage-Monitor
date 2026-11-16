@@ -7545,3 +7545,91 @@ fn agy_pool_o_external_row_without_a_reading_stays_shown_empty() {
         );
     }
 }
+
+/// Reproducible frame-time measurement for the render hot path (refactor part 3).
+/// Run: `cargo test --release --bin claude-code-usage-monitor render_frame_bench -- --ignored --nocapture`
+/// Prints mean time per surface render and an FNV hash of the pixels so a
+/// before/after comparison also proves the image is unchanged.
+#[test]
+#[ignore]
+fn render_frame_bench() {
+    let theme = compact_theme();
+    let data = full_usage_with_fable();
+    let base = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::Antigravity,
+        ProviderId::OpenCode,
+        ProviderId::Qoder,
+    ]))
+    .with_show_fable(true);
+    for (label, nest, scale) in [
+        ("taskbar@1.0", SurfaceNest::Taskbar, 1.0),
+        ("taskbar@1.5", SurfaceNest::Taskbar, 1.5),
+        ("floating@1.25", SurfaceNest::Floating, 1.25),
+    ] {
+        let runtime = ThemeRuntime {
+            surface_nest: nest,
+            ..base
+        };
+        let metrics = display_metrics(&theme, Some(&data), runtime);
+        let render = || {
+            render_theme_surface_with_metrics_at_scale(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                scale,
+                &metrics,
+            )
+        };
+        let first = render();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for pixel in &first.pixels {
+            hash = (hash ^ u64::from(*pixel)).wrapping_mul(0x0100_0000_01b3);
+        }
+        // Recycle like the widget does, so the pooled-buffer path is what is
+        // measured, and check a warmed frame matches the first one.
+        recycle_pixel_buffer(first.pixels.clone());
+        for _ in 0..20 {
+            recycle_pixel_buffer(std::hint::black_box(render()).pixels);
+        }
+        assert_eq!(
+            render().pixels,
+            first.pixels,
+            "{label}: warmed frame differs"
+        );
+        let frames = 300;
+        let start = std::time::Instant::now();
+        for _ in 0..frames {
+            recycle_pixel_buffer(std::hint::black_box(render()).pixels);
+        }
+        let per_frame = start.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        println!(
+            "BENCH {label}: {}x{} {per_frame:.3} ms/frame hash={hash:016x}",
+            first.width, first.height
+        );
+    }
+}
+
+#[test]
+fn reused_render_resources_reproduce_the_first_frame() {
+    let theme = compact_theme();
+    let data = full_usage_with_fable();
+    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+        ProviderId::Claude,
+        ProviderId::Codex,
+    ]));
+    let metrics = display_metrics(&theme, Some(&data), runtime);
+    let render = |scale| {
+        render_theme_surface_with_metrics_at_scale(&theme, 0, Some(&data), runtime, scale, &metrics)
+    };
+    let first = render(1.0);
+    // A different size in between leaves a dirty, larger buffer in the pool
+    // and different text masks in the GDI cache.
+    recycle_pixel_buffer(render(2.0).pixels);
+    recycle_pixel_buffer(first.pixels.clone());
+    let again = render(1.0);
+    assert_eq!((again.width, again.height), (first.width, first.height));
+    assert_eq!(again.pixels, first.pixels);
+}
