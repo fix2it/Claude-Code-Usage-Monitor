@@ -113,107 +113,103 @@ pub(super) fn show_update_prompt(hwnd: HWND, strings: Strings, update: &Availabl
 
 pub(super) fn begin_update_check(hwnd: HWND, interactive: bool) {
     let send_hwnd = SendHwnd::from_hwnd(controller_for(hwnd));
-    let (strings, install_channel) = {
-        let mut state = lock_state();
-        let Some(app_state) = state.as_mut() else {
-            return;
-        };
-
-        if matches!(
-            app_state.update_status,
-            UpdateStatus::Checking | UpdateStatus::Applying
-        ) {
-            if interactive {
-                show_info_message(
-                    hwnd,
-                    app_state.language.strings().updates,
-                    app_state.language.strings().update_in_progress,
-                );
-            }
-            return;
-        }
-
-        app_state.update_status = UpdateStatus::Checking;
-        publish_update_status(app_state);
-        (app_state.language.strings(), app_state.install_channel)
+    let Some((strings, install_channel)) = mark_update_check_started(hwnd, interactive) else {
+        return;
     };
 
     std::thread::spawn(move || {
         let hwnd = send_hwnd.to_hwnd();
         let checked_at = now_unix_secs();
-        match updater::check_for_updates(install_channel) {
-            Ok(UpdateCheckResult::UpToDate) => {
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.update_status = UpdateStatus::UpToDate;
-                        s.last_update_check_unix = Some(checked_at);
-                        publish_update_status(s);
-                    }
-                }
-                save_state_settings();
-                if interactive {
-                    show_info_message(hwnd, strings.updates, strings.up_to_date);
-                }
-                unsafe {
-                    let _ = PostMessageW(
-                        Some(hwnd),
-                        WM_APP_UPDATE_CHECK_COMPLETE,
-                        WPARAM(0),
-                        LPARAM(0),
-                    );
-                }
-            }
-            Ok(UpdateCheckResult::Available(update)) => {
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.update_status = UpdateStatus::Available(update.clone());
-                        s.last_update_check_unix = Some(checked_at);
-                    }
-                }
-                save_state_settings();
-                if interactive && show_update_prompt(hwnd, strings, &update) {
-                    begin_update_install(hwnd, update);
-                }
-                // Keep the dashboard busy until the install prompt is dismissed.
-                if let Some(state) = lock_state().as_ref() {
-                    publish_update_status(state);
-                }
-                unsafe {
-                    let _ = PostMessageW(
-                        Some(hwnd),
-                        WM_APP_UPDATE_CHECK_COMPLETE,
-                        WPARAM(0),
-                        LPARAM(0),
-                    );
-                }
-            }
-            Err(error) => {
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.update_status = UpdateStatus::Idle;
-                        s.last_update_check_unix = Some(checked_at);
-                        publish_update_status(s);
-                    }
-                }
-                save_state_settings();
-                if interactive {
-                    let message = format!("{}.\n\n{}", strings.update_failed, error);
-                    show_error_message(hwnd, strings.updates, &message);
-                }
-                unsafe {
-                    let _ = PostMessageW(
-                        Some(hwnd),
-                        WM_APP_UPDATE_CHECK_COMPLETE,
-                        WPARAM(0),
-                        LPARAM(0),
-                    );
-                }
-            }
+        let result = updater::check_for_updates(install_channel);
+        finish_update_check(hwnd, interactive, strings, checked_at, result);
+        unsafe {
+            let _ = PostMessageW(
+                Some(hwnd),
+                WM_APP_UPDATE_CHECK_COMPLETE,
+                WPARAM(0),
+                LPARAM(0),
+            );
         }
     });
+}
+
+/// Switch to `Checking`, or return `None` (telling an interactive user why)
+/// while another check or install runs.
+fn mark_update_check_started(hwnd: HWND, interactive: bool) -> Option<(Strings, InstallChannel)> {
+    let mut state = lock_state();
+    let app_state = state.as_mut()?;
+
+    if matches!(
+        app_state.update_status,
+        UpdateStatus::Checking | UpdateStatus::Applying
+    ) {
+        if interactive {
+            show_info_message(
+                hwnd,
+                app_state.language.strings().updates,
+                app_state.language.strings().update_in_progress,
+            );
+        }
+        return None;
+    }
+
+    app_state.update_status = UpdateStatus::Checking;
+    publish_update_status(app_state);
+    Some((app_state.language.strings(), app_state.install_channel))
+}
+
+/// Store the check result and its time, then tell an interactive user.
+fn finish_update_check(
+    hwnd: HWND,
+    interactive: bool,
+    strings: Strings,
+    checked_at: u64,
+    result: Result<UpdateCheckResult, String>,
+) {
+    match result {
+        Ok(UpdateCheckResult::UpToDate) => {
+            record_update_check(UpdateStatus::UpToDate, checked_at, true);
+            if interactive {
+                show_info_message(hwnd, strings.updates, strings.up_to_date);
+            }
+        }
+        Ok(UpdateCheckResult::Available(update)) => {
+            record_update_check(UpdateStatus::Available(update.clone()), checked_at, false);
+            if interactive && show_update_prompt(hwnd, strings, &update) {
+                begin_update_install(hwnd, update);
+            }
+            // Keep the dashboard busy until the install prompt is dismissed.
+            if let Some(state) = lock_state().as_ref() {
+                publish_update_status(state);
+            }
+        }
+        Err(error) => {
+            record_update_check(UpdateStatus::Idle, checked_at, true);
+            if interactive {
+                let message = format!(
+                    "{}.
+
+{}",
+                    strings.update_failed, error
+                );
+                show_error_message(hwnd, strings.updates, &message);
+            }
+        }
+    }
+}
+
+fn record_update_check(status: UpdateStatus, checked_at: u64, publish: bool) {
+    {
+        let mut state = lock_state();
+        if let Some(s) = state.as_mut() {
+            s.update_status = status;
+            s.last_update_check_unix = Some(checked_at);
+            if publish {
+                publish_update_status(s);
+            }
+        }
+    }
+    save_state_settings();
 }
 
 pub(super) fn begin_update_apply(hwnd: HWND, release: ReleaseDescriptor) {
