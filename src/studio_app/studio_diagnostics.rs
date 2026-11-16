@@ -117,104 +117,118 @@ impl StudioApp {
             .inner_margin(egui::Margin::symmetric(32, 8))
             .show(ui, |ui| {
                 settings_group(ui, |ui| {
-                    let description = language
-                        .text("Write diagnostic events to {log path}")
-                        .replace(
-                            "{log path}",
-                            &crate::diagnose::log_path().display().to_string(),
-                        );
-                    setting_row_with_control_width(
-                        ui,
-                        language.text("Logging"),
-                        &description,
-                        134.0,
-                        |ui| {
-                            if Toggle::new(&mut recording)
-                                .labels(language.text("Enabled"), language.text("Disabled"))
-                                .show(ui)
-                                .changed()
-                            {
-                                self.diagnostics.recording_error =
-                                    set_recording(self.owner, recording).err();
-                                recording = crate::diagnose::is_enabled();
-                                self.diagnostics.last_read = None;
-                            }
-                        },
-                    );
-                    if let Some(error) = &self.diagnostics.recording_error {
-                        ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
-                    }
+                    self.recording_controls(ui, language, &mut recording);
                 });
                 ui.add_space(18.0);
                 settings_group(ui, |ui| {
-                    let mut resume_follow = false;
                     ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add(lucide_labeled_button(
-                                LucideIcon::RefreshCw,
-                                language.text("Refresh usage"),
-                            ))
-                            .clicked()
-                        {
-                            self.request_refresh();
-                        }
-                        if ui
-                            .add(
-                                lucide_labeled_button(
-                                    LucideIcon::ArrowDownToLine,
-                                    language.text("Follow latest event"),
-                                )
-                                .selected(self.diagnostics.follow),
-                            )
-                            .clicked()
-                        {
-                            self.diagnostics.follow = !self.diagnostics.follow;
-                            self.diagnostics.last_read = None;
-                            resume_follow = self.diagnostics.follow;
-                        }
-                        self.diagnostics.refresh(recording);
-                        if ui
-                            .add(lucide_labeled_button(
-                                LucideIcon::Copy,
-                                language.text("Copy log"),
-                            ))
-                            .clicked()
-                        {
-                            ui.ctx().copy_text(self.diagnostics.content.clone());
-                        }
-                    });
+                    let resume_follow = self.log_toolbar(ui, language, recording);
                     ui.add_space(8.0);
                     setting_separator(ui);
                     ui.add_space(8.0);
-                    if let Some(error) = &self.settings_error {
-                        ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
-                    }
-                    if let Some(error) = &self.diagnostics.error {
-                        ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
-                    }
-                    let mut scroll = egui::ScrollArea::both()
-                        .id_salt("diagnostics_output")
-                        .auto_shrink([false, false])
-                        .max_height(ui.available_height())
-                        .stick_to_bottom(self.diagnostics.follow);
-                    if resume_follow {
-                        scroll = scroll.vertical_scroll_offset(f32::INFINITY);
-                    }
-                    scroll.show(ui, |ui| {
-                        let mut text = self.diagnostics.display_content.as_str();
-                        ui.add(
-                            egui::TextEdit::multiline(&mut text)
-                                .code_editor()
-                                .frame(egui::Frame::NONE)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                    self.log_view(ui, resume_follow);
                 });
             });
         if recording && self.diagnostics.follow {
             ui.ctx().request_repaint_after(Duration::from_millis(500));
         }
+    }
+
+    /// Logging toggle row with the log path and the last toggle error.
+    fn recording_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        language: LanguageId,
+        recording: &mut bool,
+    ) {
+        let description = language
+            .text("Write diagnostic events to {log path}")
+            .replace(
+                "{log path}",
+                &crate::diagnose::log_path().display().to_string(),
+            );
+        setting_row_with_control_width(ui, language.text("Logging"), &description, 134.0, |ui| {
+            if Toggle::new(recording)
+                .labels(language.text("Enabled"), language.text("Disabled"))
+                .show(ui)
+                .changed()
+            {
+                self.diagnostics.recording_error = set_recording(self.owner, *recording).err();
+                *recording = crate::diagnose::is_enabled();
+                self.diagnostics.last_read = None;
+            }
+        });
+        if let Some(error) = &self.diagnostics.recording_error {
+            ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
+        }
+    }
+
+    /// Refresh, follow and copy buttons; true when follow was just turned on.
+    fn log_toolbar(&mut self, ui: &mut egui::Ui, language: LanguageId, recording: bool) -> bool {
+        let mut resume_follow = false;
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add(lucide_labeled_button(
+                    LucideIcon::RefreshCw,
+                    language.text("Refresh usage"),
+                ))
+                .clicked()
+            {
+                self.request_refresh();
+            }
+            if ui
+                .add(
+                    lucide_labeled_button(
+                        LucideIcon::ArrowDownToLine,
+                        language.text("Follow latest event"),
+                    )
+                    .selected(self.diagnostics.follow),
+                )
+                .clicked()
+            {
+                self.diagnostics.follow = !self.diagnostics.follow;
+                self.diagnostics.last_read = None;
+                resume_follow = self.diagnostics.follow;
+            }
+            self.diagnostics.refresh(recording);
+            if ui
+                .add(lucide_labeled_button(
+                    LucideIcon::Copy,
+                    language.text("Copy log"),
+                ))
+                .clicked()
+            {
+                ui.ctx().copy_text(self.diagnostics.content.clone());
+            }
+        });
+        resume_follow
+    }
+
+    /// Error lines and the scrolling log text.
+    fn log_view(&mut self, ui: &mut egui::Ui, resume_follow: bool) {
+        if let Some(error) = &self.settings_error {
+            ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
+        }
+        if let Some(error) = &self.diagnostics.error {
+            ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
+        }
+        let mut scroll = egui::ScrollArea::both()
+            .id_salt("diagnostics_output")
+            .auto_shrink([false, false])
+            .max_height(ui.available_height())
+            .stick_to_bottom(self.diagnostics.follow);
+        if resume_follow {
+            scroll = scroll.vertical_scroll_offset(f32::INFINITY);
+        }
+        scroll.show(ui, |ui| {
+            let mut text = self.diagnostics.display_content.as_str();
+            ui.add(
+                egui::TextEdit::multiline(&mut text)
+                    .code_editor()
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+        });
     }
 }
 

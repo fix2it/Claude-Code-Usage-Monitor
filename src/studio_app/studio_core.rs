@@ -340,67 +340,13 @@ impl StudioApp {
     }
 
     pub(super) fn shell(&mut self, ui: &mut egui::Ui) {
-        const GITHUB_URL: &str = "https://github.com/fix2it/Claude-Code-Usage-Monitor";
-
         let language = self.language();
         let full_height = ui.available_height();
         ui.horizontal(|ui| {
             ui.allocate_ui_with_layout(
                 egui::vec2(DEFAULT_MENU_WIDTH, full_height),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(DEFAULT_MENU_WIDTH);
-                    ui.set_min_height(full_height);
-                    ui.painter().rect_filled(ui.max_rect(), 0.0, menu_surface());
-                    egui::Frame::new()
-                        .inner_margin(egui::Margin {
-                            left: 8,
-                            right: 8,
-                            top: 20,
-                            bottom: 4,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_width(DEFAULT_MENU_WIDTH - 16.0);
-                            nav(
-                                ui,
-                                &mut self.page,
-                                Page::Settings,
-                                language.text("Settings"),
-                            );
-                            ui.separator();
-                            nav(
-                                ui,
-                                &mut self.page,
-                                Page::Diagnostics,
-                                language.text("Diagnostics"),
-                            );
-                            ui.allocate_ui_with_layout(
-                                ui.available_size(),
-                                egui::Layout::bottom_up(egui::Align::Min),
-                                |ui| {
-                                    ui.allocate_ui_with_layout(
-                                        egui::vec2(
-                                            ui.available_width(),
-                                            crate::ui::components::navigation::ITEM_HEIGHT,
-                                        ),
-                                        egui::Layout::left_to_right(egui::Align::Max),
-                                        |ui| {
-                                            ui.spacing_mut().item_spacing.x = 4.0;
-                                            crate::ui::components::navigation::github_link(
-                                                ui, GITHUB_URL,
-                                            );
-                                            ui.with_layout(
-                                                egui::Layout::right_to_left(egui::Align::Max),
-                                                |ui| {
-                                                    self.version_button(ui);
-                                                },
-                                            );
-                                        },
-                                    );
-                                },
-                            );
-                        });
-                },
+                |ui| self.nav_panel(ui, language, full_height),
             );
             ui.add(egui::Separator::default().spacing(2.0));
             ui.allocate_ui_with_layout(
@@ -408,30 +354,7 @@ impl StudioApp {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_min_height(full_height);
-                    if let Some(error) = self.theme_error.clone() {
-                        egui::Frame::new()
-                            .fill(egui::Color32::from_rgb(70, 34, 34))
-                            .corner_radius(egui::CornerRadius::same(5))
-                            .inner_margin(egui::Margin::symmetric(10, 7))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if ui
-                                                .add(lucide_icon_button(LucideIcon::X))
-                                                .on_hover_text(language.text("Dismiss error"))
-                                                .clicked()
-                                            {
-                                                self.theme_error = None;
-                                            }
-                                        },
-                                    );
-                                });
-                            });
-                        ui.add_space(8.0);
-                    }
+                    self.theme_error_banner(ui, language);
                     match self.page {
                         Page::Settings => self.settings_page(ui),
                         Page::Diagnostics => self.diagnostics_page(ui),
@@ -439,5 +362,86 @@ impl StudioApp {
                 },
             );
         });
+    }
+
+    /// Left menu: page links on top, GitHub link and version at the bottom.
+    fn nav_panel(&mut self, ui: &mut egui::Ui, language: LanguageId, full_height: f32) {
+        ui.set_width(DEFAULT_MENU_WIDTH);
+        ui.set_min_height(full_height);
+        ui.painter().rect_filled(ui.max_rect(), 0.0, menu_surface());
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 20,
+                bottom: 4,
+            })
+            .show(ui, |ui| {
+                ui.set_width(DEFAULT_MENU_WIDTH - 16.0);
+                nav(
+                    ui,
+                    &mut self.page,
+                    Page::Settings,
+                    language.text("Settings"),
+                );
+                ui.separator();
+                nav(
+                    ui,
+                    &mut self.page,
+                    Page::Diagnostics,
+                    language.text("Diagnostics"),
+                );
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::bottom_up(egui::Align::Min),
+                    |ui| {
+                        self.nav_footer(ui);
+                    },
+                );
+            });
+    }
+
+    fn nav_footer(&mut self, ui: &mut egui::Ui) {
+        const GITHUB_URL: &str = "https://github.com/fix2it/Claude-Code-Usage-Monitor";
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(
+                ui.available_width(),
+                crate::ui::components::navigation::ITEM_HEIGHT,
+            ),
+            egui::Layout::left_to_right(egui::Align::Max),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                crate::ui::components::navigation::github_link(ui, GITHUB_URL);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+                    self.version_button(ui);
+                });
+            },
+        );
+    }
+
+    /// Dismissible banner for the last theme error, if any.
+    fn theme_error_banner(&mut self, ui: &mut egui::Ui, language: LanguageId) {
+        if let Some(error) = self.theme_error.clone() {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(70, 34, 34))
+                .corner_radius(egui::CornerRadius::same(5))
+                .inner_margin(egui::Margin::symmetric(10, 7))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(egui::Color32::from_rgb(255, 190, 178), error);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(lucide_icon_button(LucideIcon::X))
+                                .on_hover_text(language.text("Dismiss error"))
+                                .clicked()
+                            {
+                                self.theme_error = None;
+                            }
+                        });
+                    });
+                });
+            ui.add_space(8.0);
+        }
     }
 }
