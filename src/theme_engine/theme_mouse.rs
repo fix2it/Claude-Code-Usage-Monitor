@@ -695,36 +695,50 @@ impl MouseActionExecutionContext<'_> {
         cached: Option<&DisplayMetrics>,
         overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
     ) -> Result<Option<MouseActionEffect>, String> {
-        match action {
-            MouseAction::ShowDashboard => return Ok(Some(MouseActionEffect::ShowDashboard)),
-            MouseAction::ToggleDashboard => return Ok(Some(MouseActionEffect::ToggleDashboard)),
-            MouseAction::OpenUrl { url } => return Ok(Some(MouseActionEffect::OpenUrl(url))),
-            MouseAction::ShowContextMenu { menu } => {
-                return Ok(Some(MouseActionEffect::ShowContextMenu(menu)))
-            }
+        let effect = match action {
+            MouseAction::ShowDashboard => MouseActionEffect::ShowDashboard,
+            MouseAction::ToggleDashboard => MouseActionEffect::ToggleDashboard,
+            MouseAction::OpenUrl { url } => MouseActionEffect::OpenUrl(url),
+            MouseAction::ShowContextMenu { menu } => MouseActionEffect::ShowContextMenu(menu),
             MouseAction::Set {
                 target,
                 property,
                 value,
-            } => self.set_property(&target, property, value, overrides)?,
+            } => {
+                return self
+                    .set_property(&target, property, value, overrides)
+                    .map(|()| None)
+            }
             MouseAction::Reset { target, property } => {
-                self.reset_property(&target, property, overrides)?
+                return self
+                    .reset_property(&target, property, overrides)
+                    .map(|()| None)
             }
             MouseAction::Increase {
                 target,
                 property,
                 amount,
-            } => self.adjust_property(&target, property, &amount, 1.0, cached, overrides)?,
+            } => {
+                return self
+                    .adjust_property(&target, property, &amount, 1.0, cached, overrides)
+                    .map(|()| None)
+            }
             MouseAction::Decrease {
                 target,
                 property,
                 amount,
-            } => self.adjust_property(&target, property, &amount, -1.0, cached, overrides)?,
-            MouseAction::Toggle { target, property } => {
-                self.toggle_property(&target, property, cached, overrides)?
+            } => {
+                return self
+                    .adjust_property(&target, property, &amount, -1.0, cached, overrides)
+                    .map(|()| None)
             }
-        }
-        Ok(None)
+            MouseAction::Toggle { target, property } => {
+                return self
+                    .toggle_property(&target, property, cached, overrides)
+                    .map(|()| None)
+            }
+        };
+        Ok(Some(effect))
     }
 
     fn adjust_property(
@@ -816,21 +830,20 @@ impl MouseActionExecutionContext<'_> {
         cached: Option<&DisplayMetrics>,
         overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
     ) -> Result<(), String> {
-        let (data, runtime) = (self.data, self.runtime);
         let effective = apply_mouse_action_overrides(self.theme, overrides);
         let (target_surface_index, object) =
             mouse_action_target(&effective, self.surface_index, self.self_id, target)?;
         let surface = &effective.surfaces[target_surface_index];
         let object_id = object.id.clone();
         let metrics = cached.map_or_else(
-            || display_metrics(&effective, data, runtime),
-            |metrics| metrics_for_phase(metrics.clone(), runtime),
+            || display_metrics(&effective, self.data, self.runtime),
+            |metrics| metrics_for_phase(metrics.clone(), self.runtime),
         );
         let (width, height) = resolve_surface_content_size_with_metrics(
             &effective,
             target_surface_index,
-            data,
-            runtime,
+            self.data,
+            self.runtime,
             &metrics,
         );
         let canvas = Canvas {
@@ -840,7 +853,7 @@ impl MouseActionExecutionContext<'_> {
             height_expression: Some(surface.height.clone()),
             background: surface.background.canvas_paint(),
         };
-        let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+        let mut context = DataContext::from_usage_with_runtime(self.data, &canvas, self.runtime);
         insert_display_metrics(&mut context, &metrics);
         let current =
             evaluate(&mouse_property_expression(object, property).0, &context).unwrap_or(0.0);
