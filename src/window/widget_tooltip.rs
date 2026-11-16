@@ -70,6 +70,15 @@ pub(super) fn reset_countdown(reset: SystemTime, now: SystemTime, strings: &Stri
     }
 }
 
+/// Healthy usage first, then any provider errors: one provider failing must
+/// not hide the other providers' quotas from this widget's tooltip.
+fn usage_summary_tooltip_text(usage: Vec<String>, errors: Vec<String>) -> String {
+    usage.into_iter().chain(errors).collect::<Vec<_>>().join(
+        "
+",
+    )
+}
+
 fn content(owner: HWND) -> Option<(String, bool, HWND)> {
     let mut state = lock_state();
     let state = state.as_mut()?;
@@ -101,22 +110,23 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
         state.providers,
         state.language,
     );
-    let text = if !errors.is_empty() {
-        errors.join("\n")
-    } else if let Some(data) = state.data.as_ref().filter(|_| state.last_poll_ok) {
-        usage_summary_lines(
-            data,
-            state.providers,
-            state.language,
-            state.usage_countdown,
-            state.show_antigravity_gemini,
-            super::effective_antigravity_external(state),
-            Some(SystemTime::now()),
-        )
-        .join("\n")
-    } else {
-        String::new()
-    };
+    let usage = state
+        .data
+        .as_ref()
+        .filter(|_| state.last_poll_ok)
+        .map(|data| {
+            usage_summary_lines(
+                data,
+                state.providers,
+                state.language,
+                state.usage_countdown,
+                state.show_antigravity_gemini,
+                super::effective_antigravity_external(state),
+                Some(SystemTime::now()),
+            )
+        })
+        .unwrap_or_default();
+    let text = usage_summary_tooltip_text(usage, errors);
     Some((
         if text.is_empty() {
             state.language.strings().window_title.to_string()
@@ -306,6 +316,26 @@ fn cursor_over(owner: HWND) -> Option<POINT> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn usage_summary_tooltip_keeps_healthy_usage_next_to_errors() {
+        assert_eq!(
+            super::usage_summary_tooltip_text(
+                vec!["Claude Code 5h: 10.0% | 7d: 20.0%".into()],
+                vec!["Codex: sign in again".into()],
+            ),
+            "Claude Code 5h: 10.0% | 7d: 20.0%
+Codex: sign in again"
+        );
+        assert_eq!(
+            super::usage_summary_tooltip_text(Vec::new(), vec!["offline".into()]),
+            "offline"
+        );
+        assert_eq!(
+            super::usage_summary_tooltip_text(Vec::new(), Vec::new()),
+            ""
+        );
+    }
+
     use super::*;
 
     #[test]
