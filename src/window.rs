@@ -5111,6 +5111,14 @@ mod tray_usage_summary_tests {
             assert!(lines[0].ends_with("no connection"), "{lines:?}");
             assert!(lines[0].to_lowercase().starts_with("cursor"), "{lines:?}");
 
+            // A whole failed poll (nothing answered) keeps Cursor's failure.
+            let failed_again =
+                crate::poller::carry_forward_failures(AppUsageData::default(), &data, providers);
+            let lines =
+                tray_short_error_lines(Some(&failed_again), None, providers, LanguageId::English);
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].ends_with("no connection"), "{lines:?}");
+
             // A later whole-poll failure of Cursor replaces the older reason.
             let newer = Some(crate::poller::PollFailure {
                 provider: ProviderId::Cursor,
