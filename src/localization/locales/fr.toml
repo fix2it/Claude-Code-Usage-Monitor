@@ -69,6 +69,12 @@ copilot_window_title = "Moniteur d'utilisation Copilot"
 qoder_window_title = "Moniteur d'utilisation Qoder"
 
 [translations]
+"updated" = "mis à jour"
+"rate limited" = "limite de requêtes"
+"no connection" = "pas de connexion"
+"sign in again" = "reconnectez-vous"
+"poll failed" = "échec de la requête"
+"more" = "de plus"
 "Pools on one widget" = "Pools dans un seul widget"
 "Use Windows default font" = "Utiliser la police par défaut de Windows"
 "Turn off to use Segoe UI for widget text" = "Désactivez pour utiliser Segoe UI pour le texte du widget"

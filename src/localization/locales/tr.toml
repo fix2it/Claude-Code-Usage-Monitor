@@ -69,6 +69,12 @@ copilot_window_title = "Copilot Kullanım İzleyicisi"
 qoder_window_title = "Qoder Kullanım İzleyicisi"
 
 [translations]
+"updated" = "güncellendi"
+"rate limited" = "istek sınırı"
+"no connection" = "bağlantı yok"
+"sign in again" = "yeniden oturum açın"
+"poll failed" = "sorgu başarısız"
+"more" = "daha"
 "Pools on one widget" = "Havuzları tek widget'ta göster"
 "Use Windows default font" = "Windows varsayılan yazı tipini kullan"
 "Turn off to use Segoe UI for widget text" = "Widget metninde Segoe UI kullanmak için kapatın"

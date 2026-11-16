@@ -71,6 +71,12 @@ copilot_window_title = "Copilot 使用量监控"
 qoder_window_title = "Qoder 使用量监控"
 
 [translations]
+"updated" = "已更新"
+"rate limited" = "请求受限"
+"no connection" = "无连接"
+"sign in again" = "需要重新登录"
+"poll failed" = "查询失败"
+"more" = "更多"
 "Pools on one widget" = "在同一小组件中显示资源池"
 "Use Windows default font" = "使用 Windows 默认字体"
 "Turn off to use Segoe UI for widget text" = "关闭后，组件文本将使用 Segoe UI"

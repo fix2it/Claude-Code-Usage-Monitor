@@ -69,6 +69,12 @@ copilot_window_title = "Copilot-gebruiksmonitor"
 qoder_window_title = "Qoder-gebruiksmonitor"
 
 [translations]
+"updated" = "bijgewerkt"
+"rate limited" = "verzoeklimiet"
+"no connection" = "geen verbinding"
+"sign in again" = "opnieuw aanmelden"
+"poll failed" = "ophalen mislukt"
+"more" = "meer"
 "Pools on one widget" = "Pools in één widget"
 "Use Windows default font" = "Standaardlettertype van Windows gebruiken"
 "Turn off to use Segoe UI for widget text" = "Schakel uit om Segoe UI voor widgettekst te gebruiken"
