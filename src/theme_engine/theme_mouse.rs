@@ -147,115 +147,129 @@ pub enum MouseActionEffect {
 /// `increase("layer-id", height, 10)`, `decrease(self.width, 5)`,
 /// `toggle(self.render)`, and `reset("layer-id", height)`.
 pub fn parse_mouse_actions(source: &str) -> Result<Vec<MouseAction>, String> {
-    let statements = split_action_statements(source)?;
-    let mut actions = Vec::with_capacity(statements.len());
-    for statement in statements {
-        let open = statement
-            .find('(')
-            .ok_or_else(|| format!("Expected an action call: {statement}"))?;
-        if !statement.ends_with(')') {
-            return Err(format!("Expected ')' at the end of: {statement}"));
-        }
-        let name = statement[..open].trim().to_ascii_lowercase();
-        let args = split_action_arguments(&statement[open + 1..statement.len() - 1])?;
-        match name.as_str() {
-            "show_dashboard" if args.is_empty() => actions.push(MouseAction::ShowDashboard),
-            "show_dashboard" => return Err("show_dashboard() does not take arguments".into()),
-            "toggle_dashboard" if args.is_empty() => actions.push(MouseAction::ToggleDashboard),
-            "toggle_dashboard" => return Err("toggle_dashboard() does not take arguments".into()),
-            "open_url" if args.len() == 1 => {
-                let url = parse_quoted_action_string(&args[0], "URL")?;
-                if !crate::context_menu::supported_url(&url) {
-                    return Err("open_url URL must start with http:// or https://".into());
-                }
-                actions.push(MouseAction::OpenUrl { url });
-            }
-            "open_url" => return Err("open_url expects one quoted URL".into()),
-            "show_context_menu" if args.is_empty() => {
-                actions.push(MouseAction::ShowContextMenu { menu: None })
-            }
-            "show_context_menu" if args.len() == 1 => {
-                actions.push(MouseAction::ShowContextMenu {
-                    menu: Some(parse_quoted_action_string(
-                        &args[0],
-                        "context menu id or name",
-                    )?),
-                });
-            }
-            "show_context_menu" => {
-                return Err("show_context_menu expects zero or one quoted menu id or name".into())
-            }
-            "set" | "increase" | "decrease" => {
-                let (target, property, value) = match args.as_slice() {
-                    [target_property, value] => {
-                        let (target, property) = parse_target_property(target_property)?;
-                        (target, property, value.as_str())
-                    }
-                    [target, property, value] => (
-                        parse_action_target(target)?,
-                        parse_action_property(property)?,
-                        value.as_str(),
-                    ),
-                    _ => return Err(
-                        format!(
-                            "{name} expects {name}(target.property, value) or {name}(target, property, value)"
-                        ),
-                    ),
-                };
-                if value.trim().is_empty() {
-                    return Err(format!("{name} requires a value expression"));
-                }
-                if name != "set" && property == MouseActionProperty::Render {
-                    return Err(format!(
-                        "{name} requires a numeric property; use toggle(..., render) for Render"
-                    ));
-                }
-                let value = Expression(value.trim().to_string());
-                match name.as_str() {
-                    "set" => actions.push(MouseAction::Set {
-                        target,
-                        property,
-                        value,
-                    }),
-                    "increase" => actions.push(MouseAction::Increase {
-                        target,
-                        property,
-                        amount: value,
-                    }),
-                    "decrease" => actions.push(MouseAction::Decrease {
-                        target,
-                        property,
-                        amount: value,
-                    }),
-                    _ => unreachable!(),
-                }
-            }
-            "toggle" | "reset" => {
-                let (target, property) = match args.as_slice() {
-                    [target_property] => parse_target_property(target_property)?,
-                    [target, property] => (
-                        parse_action_target(target)?,
-                        parse_action_property(property)?,
-                    ),
-                    _ => {
-                        return Err(format!(
-                            "{name} expects {name}(target.property) or {name}(target, property)"
-                        ))
-                    }
-                };
-                if name == "toggle" {
-                    if property != MouseActionProperty::Render {
-                        return Err("toggle currently supports the render property only".into());
-                    }
-                    actions.push(MouseAction::Toggle { target, property });
-                } else {
-                    actions.push(MouseAction::Reset { target, property });
-                }
-            }
-            _ => return Err(format!("Unknown action: {name}")),
-        }
+    split_action_statements(source)?
+        .iter()
+        .map(|statement| parse_action_statement(statement))
+        .collect()
+}
+
+fn parse_action_statement(statement: &str) -> Result<MouseAction, String> {
+    let open = statement
+        .find('(')
+        .ok_or_else(|| format!("Expected an action call: {statement}"))?;
+    if !statement.ends_with(')') {
+        return Err(format!("Expected ')' at the end of: {statement}"));
     }
-    Ok(actions)
+    let name = statement[..open].trim().to_ascii_lowercase();
+    let args = split_action_arguments(&statement[open + 1..statement.len() - 1])?;
+    match name.as_str() {
+        "show_dashboard" | "toggle_dashboard" => parse_dashboard_action(&name, &args),
+        "open_url" => parse_open_url_action(&args),
+        "show_context_menu" => parse_context_menu_action(&args),
+        "set" | "increase" | "decrease" => parse_value_action(&name, &args),
+        "toggle" | "reset" => parse_property_action(&name, &args),
+        _ => Err(format!("Unknown action: {name}")),
+    }
+}
+
+fn parse_dashboard_action(name: &str, args: &[String]) -> Result<MouseAction, String> {
+    if !args.is_empty() {
+        return Err(format!("{name}() does not take arguments"));
+    }
+    Ok(if name == "show_dashboard" {
+        MouseAction::ShowDashboard
+    } else {
+        MouseAction::ToggleDashboard
+    })
+}
+
+fn parse_open_url_action(args: &[String]) -> Result<MouseAction, String> {
+    let [url] = args else {
+        return Err("open_url expects one quoted URL".into());
+    };
+    let url = parse_quoted_action_string(url, "URL")?;
+    if !crate::context_menu::supported_url(&url) {
+        return Err("open_url URL must start with http:// or https://".into());
+    }
+    Ok(MouseAction::OpenUrl { url })
+}
+
+fn parse_context_menu_action(args: &[String]) -> Result<MouseAction, String> {
+    let menu = match args {
+        [] => None,
+        [menu] => Some(parse_quoted_action_string(menu, "context menu id or name")?),
+        _ => return Err("show_context_menu expects zero or one quoted menu id or name".into()),
+    };
+    Ok(MouseAction::ShowContextMenu { menu })
+}
+
+/// `set`, `increase` and `decrease`: a target property plus a value expression.
+fn parse_value_action(name: &str, args: &[String]) -> Result<MouseAction, String> {
+    let (target, property, value) = match args {
+        [target_property, value] => {
+            let (target, property) = parse_target_property(target_property)?;
+            (target, property, value.as_str())
+        }
+        [target, property, value] => (
+            parse_action_target(target)?,
+            parse_action_property(property)?,
+            value.as_str(),
+        ),
+        _ => {
+            return Err(format!(
+                "{name} expects {name}(target.property, value) or {name}(target, property, value)"
+            ))
+        }
+    };
+    if value.trim().is_empty() {
+        return Err(format!("{name} requires a value expression"));
+    }
+    if name != "set" && property == MouseActionProperty::Render {
+        return Err(format!(
+            "{name} requires a numeric property; use toggle(..., render) for Render"
+        ));
+    }
+    let value = Expression(value.trim().to_string());
+    Ok(match name {
+        "set" => MouseAction::Set {
+            target,
+            property,
+            value,
+        },
+        "increase" => MouseAction::Increase {
+            target,
+            property,
+            amount: value,
+        },
+        _ => MouseAction::Decrease {
+            target,
+            property,
+            amount: value,
+        },
+    })
+}
+
+/// `toggle` and `reset`: a target property without a value.
+fn parse_property_action(name: &str, args: &[String]) -> Result<MouseAction, String> {
+    let (target, property) = match args {
+        [target_property] => parse_target_property(target_property)?,
+        [target, property] => (
+            parse_action_target(target)?,
+            parse_action_property(property)?,
+        ),
+        _ => {
+            return Err(format!(
+                "{name} expects {name}(target.property) or {name}(target, property)"
+            ))
+        }
+    };
+    if name == "reset" {
+        return Ok(MouseAction::Reset { target, property });
+    }
+    if property != MouseActionProperty::Render {
+        return Err("toggle currently supports the render property only".into());
+    }
+    Ok(MouseAction::Toggle { target, property })
 }
 
 pub(super) fn split_action_statements(source: &str) -> Result<Vec<String>, String> {
@@ -674,6 +688,45 @@ pub(super) struct MouseActionExecutionContext<'a> {
 }
 
 impl MouseActionExecutionContext<'_> {
+    /// Host effects are returned; property actions update `overrides` instead.
+    fn run(
+        &self,
+        action: MouseAction,
+        cached: Option<&DisplayMetrics>,
+        overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+    ) -> Result<Option<MouseActionEffect>, String> {
+        match action {
+            MouseAction::ShowDashboard => return Ok(Some(MouseActionEffect::ShowDashboard)),
+            MouseAction::ToggleDashboard => return Ok(Some(MouseActionEffect::ToggleDashboard)),
+            MouseAction::OpenUrl { url } => return Ok(Some(MouseActionEffect::OpenUrl(url))),
+            MouseAction::ShowContextMenu { menu } => {
+                return Ok(Some(MouseActionEffect::ShowContextMenu(menu)))
+            }
+            MouseAction::Set {
+                target,
+                property,
+                value,
+            } => self.set_property(&target, property, value, overrides)?,
+            MouseAction::Reset { target, property } => {
+                self.reset_property(&target, property, overrides)?
+            }
+            MouseAction::Increase {
+                target,
+                property,
+                amount,
+            } => self.adjust_property(&target, property, &amount, 1.0, cached, overrides)?,
+            MouseAction::Decrease {
+                target,
+                property,
+                amount,
+            } => self.adjust_property(&target, property, &amount, -1.0, cached, overrides)?,
+            MouseAction::Toggle { target, property } => {
+                self.toggle_property(&target, property, cached, overrides)?
+            }
+        }
+        Ok(None)
+    }
+
     fn adjust_property(
         &self,
         target: &MouseActionTarget,
@@ -686,17 +739,8 @@ impl MouseActionExecutionContext<'_> {
         let effective = apply_mouse_action_overrides(self.theme, overrides);
         let (target_surface_index, object) =
             mouse_action_target(&effective, self.surface_index, self.self_id, target)?;
-        let surface = &effective.surfaces[target_surface_index];
+        reject_root_placement(&effective.surfaces[target_surface_index], object, property)?;
         let object_id = object.id.clone();
-        if object.id == surface.id
-            && matches!(property, MouseActionProperty::X | MouseActionProperty::Y)
-        {
-            return Err(format!(
-                "{}.{} cannot be changed because root layers use screen placement",
-                object.name,
-                property.name()
-            ));
-        }
         let context = mouse_action_object_context(
             &effective,
             target_surface_index,
@@ -725,6 +769,109 @@ impl MouseActionExecutionContext<'_> {
         );
         Ok(())
     }
+
+    fn set_property(
+        &self,
+        target: &MouseActionTarget,
+        property: MouseActionProperty,
+        value: Expression,
+        overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+    ) -> Result<(), String> {
+        let (target_surface_index, object) =
+            mouse_action_target(self.theme, self.surface_index, self.self_id, target)?;
+        reject_root_placement(&self.theme.surfaces[target_surface_index], object, property)?;
+        overrides.insert(
+            MouseActionOverrideKey {
+                surface_index: target_surface_index,
+                object_id: object.id.clone(),
+                property,
+            },
+            value,
+        );
+        Ok(())
+    }
+
+    fn reset_property(
+        &self,
+        target: &MouseActionTarget,
+        property: MouseActionProperty,
+        overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+    ) -> Result<(), String> {
+        let (target_surface_index, object) =
+            mouse_action_target(self.theme, self.surface_index, self.self_id, target)?;
+        overrides.remove(&MouseActionOverrideKey {
+            surface_index: target_surface_index,
+            object_id: object.id.clone(),
+            property,
+        });
+        Ok(())
+    }
+
+    /// Flip a property between 0 and 1, evaluated against the surface (not
+    /// the object) context; an unevaluable value counts as 0.
+    fn toggle_property(
+        &self,
+        target: &MouseActionTarget,
+        property: MouseActionProperty,
+        cached: Option<&DisplayMetrics>,
+        overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
+    ) -> Result<(), String> {
+        let (data, runtime) = (self.data, self.runtime);
+        let effective = apply_mouse_action_overrides(self.theme, overrides);
+        let (target_surface_index, object) =
+            mouse_action_target(&effective, self.surface_index, self.self_id, target)?;
+        let surface = &effective.surfaces[target_surface_index];
+        let object_id = object.id.clone();
+        let metrics = cached.map_or_else(
+            || display_metrics(&effective, data, runtime),
+            |metrics| metrics_for_phase(metrics.clone(), runtime),
+        );
+        let (width, height) = resolve_surface_content_size_with_metrics(
+            &effective,
+            target_surface_index,
+            data,
+            runtime,
+            &metrics,
+        );
+        let canvas = Canvas {
+            width,
+            width_expression: Some(surface.width.clone()),
+            height,
+            height_expression: Some(surface.height.clone()),
+            background: surface.background.canvas_paint(),
+        };
+        let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
+        insert_display_metrics(&mut context, &metrics);
+        let current =
+            evaluate(&mouse_property_expression(object, property).0, &context).unwrap_or(0.0);
+        overrides.insert(
+            MouseActionOverrideKey {
+                surface_index: target_surface_index,
+                object_id,
+                property,
+            },
+            Expression(if current == 0.0 { "1" } else { "0" }.into()),
+        );
+        Ok(())
+    }
+}
+
+/// Root layers are placed on screen by the host, so X/Y cannot be scripted.
+fn reject_root_placement(
+    surface: &SceneObject,
+    object: &SceneObject,
+    property: MouseActionProperty,
+) -> Result<(), String> {
+    if object.id == surface.id
+        && matches!(property, MouseActionProperty::X | MouseActionProperty::Y)
+    {
+        return Err(format!(
+            "{}.{} cannot be changed because root layers use screen placement",
+            object.name,
+            property.name()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -759,7 +906,6 @@ pub(crate) fn execute_mouse_actions_with_metrics(
     overrides: &mut HashMap<MouseActionOverrideKey, Expression>,
     mut cached: Option<&DisplayMetrics>,
 ) -> Result<Vec<MouseActionEffect>, String> {
-    let actions = parse_mouse_actions(source)?;
     let execution = MouseActionExecutionContext {
         theme,
         surface_index,
@@ -768,106 +914,11 @@ pub(crate) fn execute_mouse_actions_with_metrics(
         runtime,
     };
     let mut effects = Vec::new();
-    for action in actions {
-        match action {
-            MouseAction::ShowDashboard => effects.push(MouseActionEffect::ShowDashboard),
-            MouseAction::ToggleDashboard => effects.push(MouseActionEffect::ToggleDashboard),
-            MouseAction::OpenUrl { url } => effects.push(MouseActionEffect::OpenUrl(url)),
-            MouseAction::ShowContextMenu { menu } => {
-                effects.push(MouseActionEffect::ShowContextMenu(menu))
-            }
-            MouseAction::Set {
-                target,
-                property,
-                value,
-            } => {
-                let (target_surface_index, object) =
-                    mouse_action_target(theme, surface_index, self_id, &target)?;
-                let surface = &theme.surfaces[target_surface_index];
-                let object_id = object.id.clone();
-                if object.id == surface.id
-                    && matches!(property, MouseActionProperty::X | MouseActionProperty::Y)
-                {
-                    return Err(format!(
-                        "{}.{} cannot be changed because root layers use screen placement",
-                        object.name,
-                        property.name()
-                    ));
-                }
-                overrides.insert(
-                    MouseActionOverrideKey {
-                        surface_index: target_surface_index,
-                        object_id,
-                        property,
-                    },
-                    value,
-                );
-                cached = None;
-            }
-            MouseAction::Reset { target, property } => {
-                let (target_surface_index, object) =
-                    mouse_action_target(theme, surface_index, self_id, &target)?;
-                overrides.remove(&MouseActionOverrideKey {
-                    surface_index: target_surface_index,
-                    object_id: object.id.clone(),
-                    property,
-                });
-                cached = None;
-            }
-            MouseAction::Increase {
-                target,
-                property,
-                amount,
-            } => {
-                execution.adjust_property(&target, property, &amount, 1.0, cached, overrides)?;
-                cached = None;
-            }
-            MouseAction::Decrease {
-                target,
-                property,
-                amount,
-            } => {
-                execution.adjust_property(&target, property, &amount, -1.0, cached, overrides)?;
-                cached = None;
-            }
-            MouseAction::Toggle { target, property } => {
-                let effective = apply_mouse_action_overrides(theme, overrides);
-                let (target_surface_index, object) =
-                    mouse_action_target(&effective, surface_index, self_id, &target)?;
-                let surface = &effective.surfaces[target_surface_index];
-                let object_id = object.id.clone();
-                let metrics = cached.map_or_else(
-                    || display_metrics(&effective, data, runtime),
-                    |metrics| metrics_for_phase(metrics.clone(), runtime),
-                );
-                let (width, height) = resolve_surface_content_size_with_metrics(
-                    &effective,
-                    target_surface_index,
-                    data,
-                    runtime,
-                    &metrics,
-                );
-                let canvas = Canvas {
-                    width,
-                    width_expression: Some(surface.width.clone()),
-                    height,
-                    height_expression: Some(surface.height.clone()),
-                    background: surface.background.canvas_paint(),
-                };
-                let mut context = DataContext::from_usage_with_runtime(data, &canvas, runtime);
-                insert_display_metrics(&mut context, &metrics);
-                let current = evaluate(&mouse_property_expression(object, property).0, &context)
-                    .unwrap_or(0.0);
-                overrides.insert(
-                    MouseActionOverrideKey {
-                        surface_index: target_surface_index,
-                        object_id,
-                        property,
-                    },
-                    Expression(if current == 0.0 { "1" } else { "0" }.into()),
-                );
-                cached = None;
-            }
+    for action in parse_mouse_actions(source)? {
+        match execution.run(action, cached, overrides)? {
+            Some(effect) => effects.push(effect),
+            // An override changed, so cached metrics no longer match the theme.
+            None => cached = None,
         }
     }
     Ok(effects)

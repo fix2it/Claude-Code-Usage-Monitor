@@ -32,13 +32,20 @@ pub(super) fn validate_scene_object(
     context: &DataContext,
     object: &SceneObject,
 ) {
-    let mut object_context = context.clone();
+    // Gap resolves against the parent context; every other property can read
+    // the resolved `this.gap`.
     let gap = evaluate(&object.gap.0, context)
         .ok()
         .filter(|value| value.is_finite())
         .unwrap_or(0.0)
         .max(0.0);
+    let mut object_context = context.clone();
     object_context.insert("this.gap", gap);
+    let mut check = ObjectValidator {
+        errors,
+        context: &object_context,
+        name: &object.name,
+    };
     for (property, expression) in [
         ("render", &object.render),
         ("visibility", &object.visibility),
@@ -48,139 +55,99 @@ pub(super) fn validate_scene_object(
         ("height", &object.height),
         ("rotation", &object.rotation),
         ("corner_radius", &object.corner_radius),
-        ("gap", &object.gap),
     ] {
-        validate_expression(
-            errors,
-            if property == "gap" {
-                context
-            } else {
-                &object_context
-            },
-            &format!("{}.{}", object.name, property),
-            expression,
-        );
+        check.expression(property, expression);
     }
-    match &object.background {
-        LayerBackground::None => {}
-        LayerBackground::Colour { colour } => validate_paint(
-            errors,
-            &object_context,
-            &format!("{}.background.colour", object.name),
-            colour,
-        ),
-        LayerBackground::Gradient { start, end, angle } => {
-            validate_paint(
-                errors,
-                &object_context,
-                &format!("{}.background.gradient.start", object.name),
-                start,
-            );
-            validate_paint(
-                errors,
-                &object_context,
-                &format!("{}.background.gradient.end", object.name),
-                end,
-            );
-            validate_expression(
-                errors,
-                &object_context,
-                &format!("{}.background.gradient.angle", object.name),
-                angle,
-            );
-        }
-        LayerBackground::Image { path, .. } => {
-            if path.trim().is_empty() {
-                errors.push(format!("{}.background.image: choose an image", object.name));
-            }
-        }
-    }
+    validate_expression(
+        check.errors,
+        context,
+        &format!("{}.gap", object.name),
+        &object.gap,
+    );
+    check.background(&object.background);
     if let Some(border) = &object.border {
-        validate_paint(
-            errors,
-            &object_context,
-            &format!("{}.border", object.name),
-            &border.color,
-        );
-        validate_expression(
-            errors,
-            &object_context,
-            &format!("{}.border.width", object.name),
-            &border.width,
-        );
+        check.paint("border", &border.color);
+        check.expression("border.width", &border.width);
     }
-    match &object.content {
-        SceneContent::None => {}
-        SceneContent::Text {
-            template,
-            font_size,
-            contrast,
-            color,
-            ..
-        } => {
-            validate_expression(
-                errors,
-                &object_context,
-                &format!("{}.font_size", object.name),
-                font_size,
-            );
-            validate_expression(
-                errors,
-                &object_context,
-                &format!("{}.contrast", object.name),
-                contrast,
-            );
-            validate_paint(
-                errors,
-                &object_context,
-                &format!("{}.color", object.name),
-                color,
-            );
-            for error in validate_template(template, &object_context) {
-                errors.push(format!("{}.template: {error}", object.name));
+    check.content(&object.content);
+}
+
+/// Collects errors for one object's properties, labelled `<object>.<field>`.
+struct ObjectValidator<'a> {
+    errors: &'a mut Vec<String>,
+    context: &'a DataContext,
+    name: &'a str,
+}
+
+impl ObjectValidator<'_> {
+    fn label(&self, field: &str) -> String {
+        format!("{}.{field}", self.name)
+    }
+
+    fn expression(&mut self, field: &str, expression: &Expression) {
+        let label = self.label(field);
+        validate_expression(self.errors, self.context, &label, expression);
+    }
+
+    fn paint(&mut self, field: &str, paint: &Paint) {
+        let label = self.label(field);
+        validate_paint(self.errors, self.context, &label, paint);
+    }
+
+    fn background(&mut self, background: &LayerBackground) {
+        match background {
+            LayerBackground::None => {}
+            LayerBackground::Colour { colour } => self.paint("background.colour", colour),
+            LayerBackground::Gradient { start, end, angle } => {
+                self.paint("background.gradient.start", start);
+                self.paint("background.gradient.end", end);
+                self.expression("background.gradient.angle", angle);
+            }
+            LayerBackground::Image { path, .. } => {
+                if path.trim().is_empty() {
+                    let error = format!("{}: choose an image", self.label("background.image"));
+                    self.errors.push(error);
+                }
             }
         }
-        SceneContent::Progress {
-            value,
-            fill,
-            track,
-            corner_radius,
-            segment_gap,
-            segments_expression,
-            ..
-        } => {
-            for (name, expression) in [
-                ("value", value),
-                ("content.corner_radius", corner_radius),
-                ("segment_gap", segment_gap),
-            ] {
-                validate_expression(
-                    errors,
-                    &object_context,
-                    &format!("{}.{}", object.name, name),
-                    expression,
-                );
+    }
+
+    fn content(&mut self, content: &SceneContent) {
+        match content {
+            SceneContent::None => {}
+            SceneContent::Text {
+                template,
+                font_size,
+                contrast,
+                color,
+                ..
+            } => {
+                self.expression("font_size", font_size);
+                self.expression("contrast", contrast);
+                self.paint("color", color);
+                for error in validate_template(template, self.context) {
+                    let error = format!("{}: {error}", self.label("template"));
+                    self.errors.push(error);
+                }
             }
-            if let Some(expression) = segments_expression {
-                validate_expression(
-                    errors,
-                    &object_context,
-                    &format!("{}.segments", object.name),
-                    expression,
-                );
-            }
-            validate_paint(
-                errors,
-                &object_context,
-                &format!("{}.fill", object.name),
+            SceneContent::Progress {
+                value,
                 fill,
-            );
-            validate_paint(
-                errors,
-                &object_context,
-                &format!("{}.track", object.name),
                 track,
-            );
+                corner_radius,
+                segment_gap,
+                segments_expression,
+                ..
+            } => {
+                self.expression("value", value);
+                self.expression("content.corner_radius", corner_radius);
+                self.expression("segment_gap", segment_gap);
+                if let Some(expression) = segments_expression {
+                    self.expression("segments", expression);
+                }
+                self.paint("fill", fill);
+                self.paint("track", track);
+            }
         }
     }
 }

@@ -140,64 +140,9 @@ pub fn render_theme_surface_with_metrics_at_scale(
     if runtime.surface_nest == SurfaceNest::Floating
         && matches!(surface.background, LayerBackground::None)
     {
-        let alpha = ((runtime.floating_card_opacity.min(100) as u32 * 255) / 100) as u8;
-        // Match the card to the system theme: a fixed dark card under
-        // light-mode content destroys contrast when the widget floats.
-        let dark = crate::theme::is_dark_mode_cached();
-        let card_color = if dark {
-            Rgba {
-                r: 24,
-                g: 24,
-                b: 32,
-                a: alpha,
-            }
-        } else {
-            Rgba {
-                r: 243,
-                g: 243,
-                b: 243,
-                a: alpha,
-            }
-        };
-        let radius = 8.0 * scale;
-        fill_rounded(&mut pixels, width, height, card_color, radius);
-        let border_color = if dark {
-            Rgba {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 35,
-            }
-        } else {
-            Rgba {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 40,
-            }
-        };
-        stroke_rounded_rectangle(
-            &mut pixels,
-            width,
-            height,
-            border_color,
-            radius,
-            (1.0 * scale).max(1.0),
-        );
+        paint_floating_card(&mut pixels, width, height, scale, runtime);
     }
-    let root_layer = ResolvedObject {
-        source: surface,
-        x: 0.0,
-        y: 0.0,
-        width: logical_width as f64,
-        height: logical_height as f64,
-        parent_width: logical_width as f64,
-        parent_height: logical_height as f64,
-        gap: evaluate(&surface.gap.0, &context).unwrap_or(0.0).max(0.0),
-        opacity: 1.0,
-        rotation: evaluate(&surface.rotation.0, &context).unwrap_or(0.0),
-        clip: Vec::new(),
-    };
+    let root_layer = root_layer(surface, logical_width, logical_height, &context);
     render_resolved_object(
         &mut pixels,
         width,
@@ -227,32 +172,9 @@ pub fn render_theme_surface_with_metrics_at_scale(
             &mut warnings,
         );
     }
-    let visibility = theme
-        .surfaces
-        .get(surface_index)
-        .map(|surface| match evaluate(&surface.visibility.0, &context) {
-            Ok(value) if value.is_finite() => value.clamp(0.0, 100.0) / 100.0,
-            Ok(_) => {
-                warnings.push(format!(
-                    "{}.visibility did not produce a finite value",
-                    surface.name
-                ));
-                1.0
-            }
-            Err(error) => {
-                warnings.push(format!("{}.visibility: {error}", surface.name));
-                1.0
-            }
-        })
-        .unwrap_or(1.0);
+    let visibility = surface_visibility(surface, &context, &mut warnings);
     if visibility < 1.0 {
-        for pixel in &mut pixels {
-            let scale = |component: u32| ((component as f64 * visibility).round() as u32).min(255);
-            *pixel = (scale(*pixel >> 24) << 24)
-                | (scale((*pixel >> 16) & 0xff) << 16)
-                | (scale((*pixel >> 8) & 0xff) << 8)
-                | scale(*pixel & 0xff);
-        }
+        fade_pixels(&mut pixels, visibility);
     }
     RenderedTheme {
         width,
@@ -260,6 +182,115 @@ pub fn render_theme_surface_with_metrics_at_scale(
         pixels,
         #[cfg(test)]
         warnings,
+    }
+}
+
+/// The card drawn behind a floating widget whose surface has no background.
+/// It follows the system theme: a fixed dark card under light-mode content
+/// destroys contrast when the widget floats.
+fn paint_floating_card(
+    pixels: &mut [u32],
+    width: u32,
+    height: u32,
+    scale: f64,
+    runtime: ThemeRuntime,
+) {
+    let alpha = ((runtime.floating_card_opacity.min(100) as u32 * 255) / 100) as u8;
+    let dark = crate::theme::is_dark_mode_cached();
+    let (card_color, border_color) = if dark {
+        (
+            Rgba {
+                r: 24,
+                g: 24,
+                b: 32,
+                a: alpha,
+            },
+            Rgba {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 35,
+            },
+        )
+    } else {
+        (
+            Rgba {
+                r: 243,
+                g: 243,
+                b: 243,
+                a: alpha,
+            },
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 40,
+            },
+        )
+    };
+    let radius = 8.0 * scale;
+    fill_rounded(pixels, width, height, card_color, radius);
+    stroke_rounded_rectangle(
+        pixels,
+        width,
+        height,
+        border_color,
+        radius,
+        (1.0 * scale).max(1.0),
+    );
+}
+
+fn root_layer<'a>(
+    surface: &'a SceneObject,
+    width: u32,
+    height: u32,
+    context: &DataContext,
+) -> ResolvedObject<'a> {
+    ResolvedObject {
+        source: surface,
+        x: 0.0,
+        y: 0.0,
+        width: width as f64,
+        height: height as f64,
+        parent_width: width as f64,
+        parent_height: height as f64,
+        gap: evaluate(&surface.gap.0, context).unwrap_or(0.0).max(0.0),
+        opacity: 1.0,
+        rotation: evaluate(&surface.rotation.0, context).unwrap_or(0.0),
+        clip: Vec::new(),
+    }
+}
+
+/// Surface visibility as a 0..1 factor; an invalid value warns and shows it.
+fn surface_visibility(
+    surface: &SceneObject,
+    context: &DataContext,
+    warnings: &mut Vec<String>,
+) -> f64 {
+    match evaluate(&surface.visibility.0, context) {
+        Ok(value) if value.is_finite() => value.clamp(0.0, 100.0) / 100.0,
+        Ok(_) => {
+            warnings.push(format!(
+                "{}.visibility did not produce a finite value",
+                surface.name
+            ));
+            1.0
+        }
+        Err(error) => {
+            warnings.push(format!("{}.visibility: {error}", surface.name));
+            1.0
+        }
+    }
+}
+
+/// Scale every premultiplied channel, alpha included.
+fn fade_pixels(pixels: &mut [u32], visibility: f64) {
+    for pixel in pixels {
+        let scale = |component: u32| ((component as f64 * visibility).round() as u32).min(255);
+        *pixel = (scale(*pixel >> 24) << 24)
+            | (scale((*pixel >> 16) & 0xff) << 16)
+            | (scale((*pixel >> 8) & 0xff) << 8)
+            | scale(*pixel & 0xff);
     }
 }
 
@@ -975,46 +1006,14 @@ pub(super) fn resolve_geometry(
         ));
         return None;
     }
-    stack.push(index);
     let object = &layers[index];
-    match evaluate(&object.render.0, context) {
-        Ok(0.0) => {
-            stack.pop();
-            return None;
-        }
-        Ok(value) if value.is_finite() => {}
-        Ok(_) => {
-            warnings.push(format!(
-                "{}.render did not produce a finite value",
-                object.name
-            ));
-            stack.pop();
-            return None;
-        }
-        Err(error) => {
-            warnings.push(format!("{}.render: {error}", object.name));
-            stack.pop();
-            return None;
-        }
+    if !layer_renders(object, context, warnings) {
+        return None;
     }
-    let mut parent_index = None;
-    let parent = if let Some(parent_id) = &object.parent {
-        if parent_id == &root.id {
-            ObjectGeometry {
-                x: 0.0,
-                y: 0.0,
-                width: canvas.width as f64,
-                height: canvas.height as f64,
-                parent_width: canvas.width as f64,
-                parent_height: canvas.height as f64,
-                gap: evaluate(&root.gap.0, context).unwrap_or(0.0).max(0.0),
-                opacity: 1.0,
-                rotation: evaluate(&root.rotation.0, context).unwrap_or(0.0),
-                clip: Vec::new(),
-                child_clip: Vec::new(),
-            }
-        } else {
-            let Some(found_parent_index) = layers
+    stack.push(index);
+    let parent = match &object.parent {
+        Some(parent_id) if parent_id != &root.id => {
+            let Some(parent_index) = layers
                 .iter()
                 .position(|candidate| &candidate.id == parent_id)
             else {
@@ -1025,9 +1024,8 @@ pub(super) fn resolve_geometry(
                 stack.pop();
                 return None;
             };
-            parent_index = Some(found_parent_index);
             resolve_geometry(
-                found_parent_index,
+                parent_index,
                 root,
                 canvas,
                 layers,
@@ -1035,151 +1033,139 @@ pub(super) fn resolve_geometry(
                 cache,
                 stack,
                 warnings,
-            )?
+            )
+            .map(|geometry| (Some(&layers[parent_index]), geometry))
         }
-    } else {
-        ObjectGeometry {
-            x: 0.0,
-            y: 0.0,
-            width: canvas.width as f64,
-            height: canvas.height as f64,
-            parent_width: canvas.width as f64,
-            parent_height: canvas.height as f64,
-            gap: evaluate(&root.gap.0, context).unwrap_or(0.0).max(0.0),
-            opacity: 1.0,
-            rotation: evaluate(&root.rotation.0, context).unwrap_or(0.0),
-            clip: Vec::new(),
-            child_clip: Vec::new(),
-        }
+        _ => Some((None, root_geometry(root, canvas, context))),
     };
     stack.pop();
-    let mut object_context = context.clone();
-    object_context.insert("parent.width", parent.width);
-    object_context.insert("parent.height", parent.height);
-    object_context.insert("parent.gap", parent.gap);
-    let gap = match evaluate(&object.gap.0, &object_context) {
-        Ok(value) if value.is_finite() => value.max(0.0),
+    let (parent_layer, parent) = parent?;
+    let geometry = place_in_parent(
+        index,
+        object,
+        parent_layer,
+        &parent,
+        root,
+        layers,
+        context,
+        warnings,
+    );
+    cache[index] = Some(geometry.clone());
+    Some(geometry)
+}
+
+/// Evaluate `render`; zero hides the object, an invalid value warns and hides it.
+fn layer_renders(object: &SceneObject, context: &DataContext, warnings: &mut Vec<String>) -> bool {
+    match evaluate(&object.render.0, context) {
+        Ok(0.0) => false,
+        Ok(value) if value.is_finite() => true,
         Ok(_) => {
             warnings.push(format!(
-                "{}.gap did not produce a finite value",
+                "{}.render did not produce a finite value",
                 object.name
             ));
-            0.0
+            false
         }
         Err(error) => {
-            warnings.push(format!("{}.gap: {error}", object.name));
-            0.0
+            warnings.push(format!("{}.render: {error}", object.name));
+            false
         }
-    };
-    object_context.insert("this.gap", gap);
-    let mut value = |name: &str, expression: &Expression, fallback: f64| match evaluate(
-        &expression.0,
-        &object_context,
-    ) {
+    }
+}
+
+/// The root layer spans the canvas and parents top-level objects.
+fn root_geometry(root: &SceneObject, canvas: &Canvas, context: &DataContext) -> ObjectGeometry {
+    ObjectGeometry {
+        x: 0.0,
+        y: 0.0,
+        width: canvas.width as f64,
+        height: canvas.height as f64,
+        parent_width: canvas.width as f64,
+        parent_height: canvas.height as f64,
+        gap: evaluate(&root.gap.0, context).unwrap_or(0.0).max(0.0),
+        opacity: 1.0,
+        rotation: evaluate(&root.rotation.0, context).unwrap_or(0.0),
+        clip: Vec::new(),
+        child_clip: Vec::new(),
+    }
+}
+
+/// A finite property value, or `fallback` with a warning.
+fn finite_or_warn(
+    object: &SceneObject,
+    property: &str,
+    value: Result<f64, String>,
+    fallback: f64,
+    warnings: &mut Vec<String>,
+) -> f64 {
+    match value {
         Ok(value) if value.is_finite() => value,
         Ok(_) => {
             warnings.push(format!(
                 "{}.{} did not produce a finite value",
-                object.name, name
+                object.name, property
             ));
             fallback
         }
         Err(error) => {
-            warnings.push(format!("{}.{}: {error}", object.name, name));
+            warnings.push(format!("{}.{}: {error}", object.name, property));
             fallback
         }
+    }
+}
+
+/// Size the object against its parent, place it (managed layout or anchor),
+/// then carry the parent's rotation, opacity and clip.
+#[allow(clippy::too_many_arguments)]
+fn place_in_parent(
+    index: usize,
+    object: &SceneObject,
+    parent_layer: Option<&SceneObject>,
+    parent: &ObjectGeometry,
+    root: &SceneObject,
+    layers: &[SceneObject],
+    context: &DataContext,
+    warnings: &mut Vec<String>,
+) -> ObjectGeometry {
+    let parent_object = parent_layer.unwrap_or(root);
+    let mut object_context = context.clone();
+    object_context.insert("parent.width", parent.width);
+    object_context.insert("parent.height", parent.height);
+    object_context.insert("parent.gap", parent.gap);
+    let gap = finite_or_warn(
+        object,
+        "gap",
+        evaluate(&object.gap.0, &object_context),
+        0.0,
+        warnings,
+    )
+    .max(0.0);
+    object_context.insert("this.gap", gap);
+    let mut value = |name: &str, expression: &Expression, fallback: f64| {
+        finite_or_warn(
+            object,
+            name,
+            evaluate(&expression.0, &object_context),
+            fallback,
+            warnings,
+        )
     };
-    let offset_x = value("x", &object.x, 0.0);
-    let offset_y = value("y", &object.y, 0.0);
+    let offset = (value("x", &object.x, 0.0), value("y", &object.y, 0.0));
     let width = value("width", &object.width, 1.0).max(0.0);
     let height = value("height", &object.height, 1.0).max(0.0);
-    let parent_object = parent_index
-        .map(|parent_index| &layers[parent_index])
-        .unwrap_or(root);
-    let managed_layout = (parent_object.layout != ChildLayout::Freeform)
-        .then_some((parent_object.layout, parent_object.align));
-    let (local_x, local_y) = if let Some((layout, align)) = managed_layout {
-        let gap = parent.gap;
-        let mut cursor = 0.0;
-        for sibling_index in 0..index {
-            let same_parent = match parent_index {
-                Some(parent_index) => {
-                    layers[sibling_index].parent.as_deref()
-                        == Some(layers[parent_index].id.as_str())
-                }
-                None => layers[sibling_index]
-                    .parent
-                    .as_deref()
-                    .is_none_or(|parent_id| parent_id == root.id),
-            };
-            if !same_parent {
-                continue;
-            }
-            let sibling = &layers[sibling_index];
-            let sibling_renders = evaluate(&sibling.render.0, &object_context)
-                .is_ok_and(|render| render.is_finite() && render != 0.0);
-            if !sibling_renders {
-                continue;
-            }
-            let sibling_size = match layout {
-                ChildLayout::Row => evaluate(&sibling.width.0, &object_context).unwrap_or(0.0),
-                ChildLayout::Column => evaluate(&sibling.height.0, &object_context).unwrap_or(0.0),
-                ChildLayout::Freeform => 0.0,
-            }
-            .max(0.0);
-            cursor += sibling_size + gap;
+    let size = (width, height);
+    let (local_x, local_y) = match parent_object.layout {
+        ChildLayout::Freeform => anchored_position(object, parent, size, offset),
+        layout => {
+            let siblings = layout_siblings(index, parent_layer, root, layers);
+            let cursor = layout_cursor(siblings, layout, parent.gap, &object_context);
+            managed_position(layout, parent_object.align, parent, cursor, size, offset)
         }
-        match layout {
-            ChildLayout::Row => {
-                let cross = match align {
-                    ChildAlignment::Start => 0.0,
-                    ChildAlignment::Center => (parent.height - height) / 2.0,
-                    ChildAlignment::End => parent.height - height,
-                };
-                (cursor + offset_x, cross + offset_y)
-            }
-            ChildLayout::Column => {
-                let cross = match align {
-                    ChildAlignment::Start => 0.0,
-                    ChildAlignment::Center => (parent.width - width) / 2.0,
-                    ChildAlignment::End => parent.width - width,
-                };
-                (cross + offset_x, cursor + offset_y)
-            }
-            ChildLayout::Freeform => unreachable!(),
-        }
-    } else {
-        let x = match object.anchor.horizontal {
-            ObjectHorizontalAnchor::Left => offset_x,
-            ObjectHorizontalAnchor::Center => (parent.width - width) / 2.0 + offset_x,
-            ObjectHorizontalAnchor::Right => parent.width - width - offset_x,
-        };
-        let y = match object.anchor.vertical {
-            ObjectVerticalAnchor::Top => offset_y,
-            ObjectVerticalAnchor::Center => (parent.height - height) / 2.0 + offset_y,
-            ObjectVerticalAnchor::Bottom => parent.height - height - offset_y,
-        };
-        (x, y)
     };
-    let parent_center = (
-        parent.x + parent.width / 2.0,
-        parent.y + parent.height / 2.0,
-    );
-    let local_center = (
-        parent.x + local_x + width / 2.0,
-        parent.y + local_y + height / 2.0,
-    );
-    let angle = parent.rotation.to_radians();
-    let (sin, cos) = angle.sin_cos();
-    let dx = local_center.0 - parent_center.0;
-    let dy = local_center.1 - parent_center.1;
-    let world_center = (
-        parent_center.0 + dx * cos - dy * sin,
-        parent_center.1 + dx * sin + dy * cos,
-    );
-    let x = world_center.0 - width / 2.0;
-    let y = world_center.1 - height / 2.0;
+    let (x, y) = rotate_into_parent(parent, local_x, local_y, width, height);
     let rotation = parent.rotation + value("rotation", &object.rotation, 0.0);
+    let opacity =
+        parent.opacity * (value("visibility", &object.visibility, 100.0).clamp(0.0, 100.0) / 100.0);
     let clip = parent.child_clip.clone();
     let mut child_clip = clip.clone();
     child_clip.push(ClipRegion {
@@ -1189,7 +1175,7 @@ pub(super) fn resolve_geometry(
         height,
         rotation,
     });
-    let geometry = ObjectGeometry {
+    ObjectGeometry {
         x,
         y,
         width,
@@ -1197,14 +1183,123 @@ pub(super) fn resolve_geometry(
         parent_width: parent.width,
         parent_height: parent.height,
         gap,
-        opacity: parent.opacity
-            * (value("visibility", &object.visibility, 100.0).clamp(0.0, 100.0) / 100.0),
+        opacity,
         rotation,
         clip,
         child_clip,
+    }
+}
+
+/// Earlier layers that share the object's parent; `None` is the root.
+fn layout_siblings<'a>(
+    index: usize,
+    parent_layer: Option<&'a SceneObject>,
+    root: &'a SceneObject,
+    layers: &'a [SceneObject],
+) -> impl Iterator<Item = &'a SceneObject> {
+    layers[..index]
+        .iter()
+        .filter(move |sibling| match parent_layer {
+            Some(parent) => sibling.parent.as_deref() == Some(parent.id.as_str()),
+            None => sibling
+                .parent
+                .as_deref()
+                .is_none_or(|parent_id| parent_id == root.id),
+        })
+}
+
+/// Main-axis offset in a row/column layout: the sizes plus gaps of the
+/// rendered siblings before the object.
+fn layout_cursor<'a>(
+    siblings: impl Iterator<Item = &'a SceneObject>,
+    layout: ChildLayout,
+    gap: f64,
+    context: &DataContext,
+) -> f64 {
+    let mut cursor = 0.0;
+    for sibling in siblings {
+        let sibling_renders = evaluate(&sibling.render.0, context)
+            .is_ok_and(|render| render.is_finite() && render != 0.0);
+        if !sibling_renders {
+            continue;
+        }
+        let sibling_size = match layout {
+            ChildLayout::Row => evaluate(&sibling.width.0, context).unwrap_or(0.0),
+            ChildLayout::Column => evaluate(&sibling.height.0, context).unwrap_or(0.0),
+            ChildLayout::Freeform => 0.0,
+        }
+        .max(0.0);
+        cursor += sibling_size + gap;
+    }
+    cursor
+}
+
+/// Row/column position: `cursor` on the main axis, `align` on the cross axis.
+fn managed_position(
+    layout: ChildLayout,
+    align: ChildAlignment,
+    parent: &ObjectGeometry,
+    cursor: f64,
+    (width, height): (f64, f64),
+    (offset_x, offset_y): (f64, f64),
+) -> (f64, f64) {
+    let cross = |parent_size: f64, size: f64| match align {
+        ChildAlignment::Start => 0.0,
+        ChildAlignment::Center => (parent_size - size) / 2.0,
+        ChildAlignment::End => parent_size - size,
     };
-    cache[index] = Some(geometry.clone());
-    Some(geometry)
+    match layout {
+        ChildLayout::Row => (cursor + offset_x, cross(parent.height, height) + offset_y),
+        ChildLayout::Column => (cross(parent.width, width) + offset_x, cursor + offset_y),
+        ChildLayout::Freeform => unreachable!(),
+    }
+}
+
+/// Freeform position from the object's anchor; right/bottom offsets point inward.
+fn anchored_position(
+    object: &SceneObject,
+    parent: &ObjectGeometry,
+    (width, height): (f64, f64),
+    (offset_x, offset_y): (f64, f64),
+) -> (f64, f64) {
+    let x = match object.anchor.horizontal {
+        ObjectHorizontalAnchor::Left => offset_x,
+        ObjectHorizontalAnchor::Center => (parent.width - width) / 2.0 + offset_x,
+        ObjectHorizontalAnchor::Right => parent.width - width - offset_x,
+    };
+    let y = match object.anchor.vertical {
+        ObjectVerticalAnchor::Top => offset_y,
+        ObjectVerticalAnchor::Center => (parent.height - height) / 2.0 + offset_y,
+        ObjectVerticalAnchor::Bottom => parent.height - height - offset_y,
+    };
+    (x, y)
+}
+
+/// Rotate the object's centre around the parent's centre by the parent's
+/// rotation and return the top-left corner in surface coordinates.
+fn rotate_into_parent(
+    parent: &ObjectGeometry,
+    local_x: f64,
+    local_y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let parent_center = (
+        parent.x + parent.width / 2.0,
+        parent.y + parent.height / 2.0,
+    );
+    let local_center = (
+        parent.x + local_x + width / 2.0,
+        parent.y + local_y + height / 2.0,
+    );
+    let (sin, cos) = parent.rotation.to_radians().sin_cos();
+    let dx = local_center.0 - parent_center.0;
+    let dy = local_center.1 - parent_center.1;
+    let world_center = (
+        parent_center.0 + dx * cos - dy * sin,
+        parent_center.1 + dx * sin + dy * cos,
+    );
+    (world_center.0 - width / 2.0, world_center.1 - height / 2.0)
 }
 
 pub(super) fn render_object_background(
@@ -1298,100 +1393,147 @@ pub(super) fn render_object_content(
     height: u32,
     warnings: &mut Vec<String>,
 ) {
+    let canvas = ContentCanvas {
+        pixels,
+        width,
+        height,
+        scale,
+    };
     match &object.source.content {
         SceneContent::None => {}
-        SceneContent::Progress {
-            value,
-            direction,
-            fill,
-            track,
-            corner_radius,
-            segments,
-            segments_expression,
-            segment_gap,
-        } => {
-            let radius = evaluate(&corner_radius.0, context).unwrap_or(0.0) * scale;
-            let gap = evaluate(&segment_gap.0, context).unwrap_or(2.0) * scale;
-            let segments = match segments_expression {
-                Some(expression) => match evaluate(&expression.0, context) {
-                    Ok(value) if value.is_finite() => value.round().clamp(0.0, 1000.0) as u16,
-                    Ok(_) => {
-                        warnings.push(format!(
-                            "{}.segments did not produce a finite value",
-                            object.source.name
-                        ));
-                        *segments
-                    }
-                    Err(error) => {
-                        warnings.push(format!("{}.segments: {error}", object.source.name));
-                        *segments
-                    }
-                },
-                None => *segments,
-            };
-            if segments > 1 {
-                draw_progress(
-                    pixels,
-                    width,
-                    height,
-                    track.resolve(context),
-                    radius,
-                    1.0,
-                    *direction,
-                    segments,
-                    gap,
-                );
-            } else {
-                fill_rounded(pixels, width, height, track.resolve(context), radius);
-            }
-            let amount = (evaluate(&value.0, context).unwrap_or(0.0) / 100.0).clamp(0.0, 1.0);
-            draw_progress(
-                pixels,
-                width,
-                height,
-                fill.resolve(context),
-                radius,
-                amount,
-                *direction,
-                segments,
-                gap,
-            );
+        progress @ SceneContent::Progress { .. } => {
+            render_progress(canvas, object, progress, context, warnings)
         }
-        SceneContent::Text {
-            template,
-            font_family,
-            font_size,
-            weight,
-            rendering,
-            contrast,
-            align,
-            color,
-        } => {
-            let text = format_template(template, context);
-            let font_family = if context.force_segoe_ui {
-                crate::widget_font::segoe_ui_family(weight.gdi_weight())
-            } else {
-                font_family
-            };
-            let size = (evaluate(&font_size.0, context).unwrap_or(13.0) * scale).max(1.0);
-            let contrast = evaluate(&contrast.0, context)
-                .unwrap_or(1.4)
-                .clamp(0.25, 4.0);
-            render_text_mask(
-                pixels,
-                width,
-                height,
-                &text,
-                font_family,
-                size,
-                weight.gdi_weight(),
-                *rendering,
-                contrast,
-                *align,
-                color.resolve(context),
-            );
-        }
+        text @ SceneContent::Text { .. } => render_text(canvas, text, context),
     }
+}
+
+/// The target of one object's content pass.
+struct ContentCanvas<'a> {
+    pixels: &'a mut [u32],
+    width: u32,
+    height: u32,
+    scale: f64,
+}
+
+/// Track (whole or segmented) then the fill up to `value` percent.
+fn render_progress(
+    canvas: ContentCanvas<'_>,
+    object: &ResolvedObject<'_>,
+    content: &SceneContent,
+    context: &DataContext,
+    warnings: &mut Vec<String>,
+) {
+    let ContentCanvas {
+        pixels,
+        width,
+        height,
+        scale,
+    } = canvas;
+    let SceneContent::Progress {
+        value,
+        direction,
+        fill,
+        track,
+        corner_radius,
+        segments,
+        segments_expression,
+        segment_gap,
+    } = content
+    else {
+        return;
+    };
+    let radius = evaluate(&corner_radius.0, context).unwrap_or(0.0) * scale;
+    let gap = evaluate(&segment_gap.0, context).unwrap_or(2.0) * scale;
+    let segments = match segments_expression {
+        Some(expression) => match evaluate(&expression.0, context) {
+            Ok(value) if value.is_finite() => value.round().clamp(0.0, 1000.0) as u16,
+            Ok(_) => {
+                warnings.push(format!(
+                    "{}.segments did not produce a finite value",
+                    object.source.name
+                ));
+                *segments
+            }
+            Err(error) => {
+                warnings.push(format!("{}.segments: {error}", object.source.name));
+                *segments
+            }
+        },
+        None => *segments,
+    };
+    if segments > 1 {
+        draw_progress(
+            pixels,
+            width,
+            height,
+            track.resolve(context),
+            radius,
+            1.0,
+            *direction,
+            segments,
+            gap,
+        );
+    } else {
+        fill_rounded(pixels, width, height, track.resolve(context), radius);
+    }
+    let amount = (evaluate(&value.0, context).unwrap_or(0.0) / 100.0).clamp(0.0, 1.0);
+    draw_progress(
+        pixels,
+        width,
+        height,
+        fill.resolve(context),
+        radius,
+        amount,
+        *direction,
+        segments,
+        gap,
+    );
+}
+
+fn render_text(canvas: ContentCanvas<'_>, content: &SceneContent, context: &DataContext) {
+    let ContentCanvas {
+        pixels,
+        width,
+        height,
+        scale,
+    } = canvas;
+    let SceneContent::Text {
+        template,
+        font_family,
+        font_size,
+        weight,
+        rendering,
+        contrast,
+        align,
+        color,
+    } = content
+    else {
+        return;
+    };
+    let text = format_template(template, context);
+    let font_family = if context.force_segoe_ui {
+        crate::widget_font::segoe_ui_family(weight.gdi_weight())
+    } else {
+        font_family
+    };
+    let size = (evaluate(&font_size.0, context).unwrap_or(13.0) * scale).max(1.0);
+    let contrast = evaluate(&contrast.0, context)
+        .unwrap_or(1.4)
+        .clamp(0.25, 4.0);
+    render_text_mask(
+        pixels,
+        width,
+        height,
+        &text,
+        font_family,
+        size,
+        weight.gdi_weight(),
+        *rendering,
+        contrast,
+        *align,
+        color.resolve(context),
+    );
 }
 
 pub(super) fn resolve_asset_path(path: &str) -> PathBuf {

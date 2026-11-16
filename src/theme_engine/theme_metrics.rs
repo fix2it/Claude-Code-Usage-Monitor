@@ -483,12 +483,25 @@ pub(crate) fn display_metrics(
     let Some(surface) = theme.surfaces.first() else {
         return DisplayMetrics::legacy_with_widgets(runtime, widgets);
     };
+    let (lines, fingerprint) = measured_lines(surface, &measurement_contexts(data, runtime));
+    let key = display_metrics_cache_key(theme, runtime, data, surface, &fingerprint);
+    if let Some(metrics) = cached_display_metrics(&key) {
+        return metrics_for_phase(metrics, runtime);
+    }
+    let advances = LineAdvances::measure(&lines);
+    let metrics = measured_display_metrics(&advances, data, runtime, widgets);
+    store_display_metrics(key, &metrics);
+    metrics_for_phase(metrics, runtime)
+}
+
+/// Every text line each provider can show across the measurement contexts,
+/// plus a fingerprint of everything that affects their measured width.
+fn measured_lines(surface: &SceneObject, contexts: &[DataContext]) -> (Vec<MeasuredLine>, String) {
     let by_id: HashMap<&str, &SceneObject> = surface
         .children
         .iter()
         .map(|object| (object.id.as_str(), object))
         .collect();
-    let contexts = measurement_contexts(data, runtime);
     let mut fingerprint = String::new();
     let mut lines = Vec::new();
     for object in &surface.children {
@@ -522,7 +535,7 @@ pub(crate) fn display_metrics(
             weight.gdi_weight(),
             object.render.0
         ));
-        for context in &contexts {
+        for context in contexts {
             if !scene_object_renders(object, &by_id, context) {
                 fingerprint.push_str("0;");
                 continue;
@@ -556,96 +569,121 @@ pub(crate) fn display_metrics(
             });
         }
     }
-    let key = display_metrics_cache_key(theme, runtime, data, surface, &fingerprint);
-    if let Some(metrics) = cached_display_metrics(&key) {
-        return metrics_for_phase(metrics, runtime);
+    (lines, fingerprint)
+}
+
+/// Widest measured advance per widget slot and line kind.
+struct LineAdvances {
+    text: [Option<f64>; WIDGET_SLOTS],
+    percent: [Option<f64>; WIDGET_SLOTS],
+    marker: [Option<f64>; WIDGET_SLOTS],
+}
+
+impl LineAdvances {
+    fn measure(lines: &[MeasuredLine]) -> Self {
+        let mut advances = Self {
+            text: [None; WIDGET_SLOTS],
+            percent: [None; WIDGET_SLOTS],
+            marker: [None; WIDGET_SLOTS],
+        };
+        let mut measured = HashMap::new();
+        for line in lines {
+            let advance = *measured
+                .entry((
+                    &line.text,
+                    &line.family,
+                    line.font_size.to_bits(),
+                    line.weight,
+                ))
+                .or_insert_with(|| {
+                    #[cfg(test)]
+                    MEASUREMENT_COUNT.with(|count| count.set(count.get() + 1));
+                    text_measure::measure_text(
+                        &line.text,
+                        &line.family,
+                        line.font_size,
+                        line.weight,
+                    )
+                });
+            let Some(advance) = advance else {
+                continue;
+            };
+            let slot = match line.kind {
+                MeasuredLineKind::Text => &mut advances.text[line.provider_index],
+                MeasuredLineKind::Percent => &mut advances.percent[line.provider_index],
+                MeasuredLineKind::Marker => &mut advances.marker[line.provider_index],
+            };
+            *slot = Some((*slot).map_or(advance, |current: f64| current.max(advance)));
+        }
+        advances
     }
 
+    /// Measured text column (plus a 2 px reserve) or `fallback`.
+    fn text_box(&self, index: usize, fallback: f64) -> f64 {
+        self.text[index].map_or(fallback, |advance| advance + 2.0)
+    }
+
+    fn percent_box(&self, index: usize, fallback: f64) -> f64 {
+        self.percent[index].map_or(fallback, |advance| advance + 2.0)
+    }
+}
+
+/// Which providers currently show a pool marker column.
+struct PoolMarkers {
+    claude_dual: bool,
+    codex_dual: bool,
+    qoder_pool: bool,
+    agy_pool_o: bool,
+}
+
+fn measured_display_metrics(
+    advances: &LineAdvances,
+    data: Option<&AppUsageData>,
+    runtime: ThemeRuntime,
+    widgets: usize,
+) -> DisplayMetrics {
     let base = DataContext::from_usage_with_runtime(data, &Canvas::default(), runtime);
-    let mut text_advance = [None::<f64>; WIDGET_SLOTS];
-    let mut percent_advance = [None::<f64>; WIDGET_SLOTS];
-    let mut marker_advance = [None::<f64>; WIDGET_SLOTS];
-    let mut advances = HashMap::new();
-    for line in &lines {
-        let advance = *advances
-            .entry((
-                &line.text,
-                &line.family,
-                line.font_size.to_bits(),
-                line.weight,
-            ))
-            .or_insert_with(|| {
-                #[cfg(test)]
-                MEASUREMENT_COUNT.with(|count| count.set(count.get() + 1));
-                text_measure::measure_text(&line.text, &line.family, line.font_size, line.weight)
-            });
-        let Some(advance) = advance else {
-            continue;
-        };
-        let slot = match line.kind {
-            MeasuredLineKind::Text => &mut text_advance[line.provider_index],
-            MeasuredLineKind::Percent => &mut percent_advance[line.provider_index],
-            MeasuredLineKind::Marker => &mut marker_advance[line.provider_index],
-        };
-        *slot = Some((*slot).map_or(advance, |current: f64| current.max(advance)));
-    }
-
+    let flag = |name: &str| base.get(name).unwrap_or(0.0) != 0.0;
+    let markers = PoolMarkers {
+        claude_dual: flag("claude.dual_mode"),
+        codex_dual: flag("codex.dual_mode"),
+        qoder_pool: flag("qoder.session.available") || flag("qoder.week.available"),
+        agy_pool_o: flag("antigravity.pool_o"),
+    };
     let legacy = DisplayMetrics::legacy_with_widgets(runtime, widgets);
     let bar = compact_bar_full_width(widgets);
-    let claude_dual = base.get("claude.dual_mode").unwrap_or(0.0) != 0.0;
-    let codex_dual = base.get("codex.dual_mode").unwrap_or(0.0) != 0.0;
-    let qoder_pool = base.get("qoder.session.available").unwrap_or(0.0) != 0.0
-        || base.get("qoder.week.available").unwrap_or(0.0) != 0.0;
-    let agy_pool_o = base.get("antigravity.pool_o").unwrap_or(0.0) != 0.0;
+    let phases = |index: usize| decompose_mode_phase(runtime.widget_mode_phase(index));
     let mut metrics = legacy.clone();
-    metrics.agy_split = base.get("display.agy_split").unwrap_or(0.0) != 0.0;
+    metrics.agy_split = flag("display.agy_split");
     metrics.agy_separate = agy_separate(data, runtime);
     let (fable_marker_box, fable_origin) =
-        marker_column(marker_advance[FABLE_METRICS_INDEX], legacy.fable);
+        marker_column(advances.marker[FABLE_METRICS_INDEX], legacy.fable);
     metrics.fable = fable_column(
         bar,
-        text_advance[FABLE_METRICS_INDEX].map_or(legacy.fable.text_box, |advance| advance + 2.0),
-        percent_advance[FABLE_METRICS_INDEX].map_or(COMPACT_PERCENT_WIDTH, |advance| advance + 2.0),
+        advances.text_box(FABLE_METRICS_INDEX, legacy.fable.text_box),
+        advances.percent_box(FABLE_METRICS_INDEX, COMPACT_PERCENT_WIDTH),
         fable_marker_box,
         fable_origin,
-        decompose_mode_phase(runtime.widget_mode_phase(FABLE_METRICS_INDEX)),
-        claude_dual,
+        phases(FABLE_METRICS_INDEX),
+        markers.claude_dual,
     );
     let (external_marker_box, external_origin) =
-        marker_column(marker_advance[AGY_EXTERNAL_INDEX], legacy.agy_external);
+        marker_column(advances.marker[AGY_EXTERNAL_INDEX], legacy.agy_external);
     metrics.agy_external = agy_external_column(
         bar,
-        text_advance[AGY_EXTERNAL_INDEX]
-            .map_or(legacy.agy_external.text_box, |advance| advance + 2.0),
-        percent_advance[AGY_EXTERNAL_INDEX]
-            .map_or(legacy.agy_external.percent_box, |advance| advance + 2.0),
+        advances.text_box(AGY_EXTERNAL_INDEX, legacy.agy_external.text_box),
+        advances.percent_box(AGY_EXTERNAL_INDEX, legacy.agy_external.percent_box),
         external_origin,
-        decompose_mode_phase(runtime.widget_mode_phase(AGY_EXTERNAL_INDEX)),
+        phases(AGY_EXTERNAL_INDEX),
         external_marker_box,
     );
     for (index, key) in DISPLAY_PROVIDER_KEYS.iter().enumerate() {
-        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
         let fallback = legacy.providers[index];
-        let text_box = text_advance[index].map_or(fallback.text_box, |advance| advance + 2.0);
-        let percent_box =
-            percent_advance[index].map_or(fallback.percent_box, |advance| advance + 2.0);
-        let (marker_box, origin) = match *key {
-            "claude" if !claude_dual => (0.0, 0.0),
-            "codex" if !codex_dual => (0.0, 0.0),
-            "claude" | "codex" => marker_column(marker_advance[index], fallback),
-            "opencode" => (fallback.marker_box, fallback.origin),
-            "qoder" if qoder_pool => marker_column(marker_advance[index], fallback),
-            "qoder" => (fallback.marker_box, fallback.origin),
-            "antigravity" if agy_pool_o => marker_column(
-                marker_advance[index],
-                ProviderMetrics {
-                    marker_box: COMPACT_MARKER_WIDTH,
-                    origin: COMPACT_ORIGIN_LEGACY,
-                    ..fallback
-                },
-            ),
-            _ => (0.0, 0.0),
-        };
+        let text_box = advances.text_box(index, fallback.text_box);
+        let percent_box = advances.percent_box(index, fallback.percent_box);
+        let (marker_box, origin) =
+            provider_marker_column(key, advances.marker[index], fallback, &markers);
+        let phases = phases(index);
         metrics.providers[index] = ProviderMetrics {
             text_box,
             percent_box,
@@ -661,10 +699,9 @@ pub(crate) fn display_metrics(
         (AGY_EXTERNAL_INDEX + 3, &mut metrics.agy_external_o),
         (AGY_EXTERNAL_INDEX + 4, &mut metrics.codex_x),
     ] {
-        let phases = decompose_mode_phase(runtime.widget_mode_phase(index));
-        target.text_box = text_advance[index].map_or(target.text_box, |advance| advance + 2.0);
-        target.percent_box =
-            percent_advance[index].map_or(target.percent_box, |advance| advance + 2.0);
+        let phases = phases(index);
+        target.text_box = advances.text_box(index, target.text_box);
+        target.percent_box = advances.percent_box(index, target.percent_box);
         if index != AGY_EXTERNAL_INDEX + 3 {
             target.origin = 0.0;
         }
@@ -678,8 +715,33 @@ pub(crate) fn display_metrics(
         );
     }
     metrics.providers_width = metrics.providers_width(runtime);
-    store_display_metrics(key, &metrics);
-    metrics_for_phase(metrics, runtime)
+    metrics
+}
+
+/// Marker box and text origin of a main provider row.
+fn provider_marker_column(
+    key: &str,
+    advance: Option<f64>,
+    fallback: ProviderMetrics,
+    markers: &PoolMarkers,
+) -> (f64, f64) {
+    match key {
+        "claude" if !markers.claude_dual => (0.0, 0.0),
+        "codex" if !markers.codex_dual => (0.0, 0.0),
+        "claude" | "codex" => marker_column(advance, fallback),
+        "opencode" => (fallback.marker_box, fallback.origin),
+        "qoder" if markers.qoder_pool => marker_column(advance, fallback),
+        "qoder" => (fallback.marker_box, fallback.origin),
+        "antigravity" if markers.agy_pool_o => marker_column(
+            advance,
+            ProviderMetrics {
+                marker_box: COMPACT_MARKER_WIDTH,
+                origin: COMPACT_ORIGIN_LEGACY,
+                ..fallback
+            },
+        ),
+        _ => (0.0, 0.0),
+    }
 }
 
 pub(crate) fn metrics_for_phase(

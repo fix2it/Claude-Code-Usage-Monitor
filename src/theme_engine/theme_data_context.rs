@@ -1,4 +1,6 @@
 use super::*;
+use crate::models::{UsageData, UsageSection};
+use std::time::SystemTime;
 
 impl DataContext {
     /// Evaluate a surface render expression only when it does not require its
@@ -38,57 +40,75 @@ impl DataContext {
             force_segoe_ui: !runtime.use_windows_default_font,
             ..Self::default()
         };
-        context.insert("canvas.width", canvas.width as f64);
-        context.insert("canvas.height", canvas.height as f64);
-        context.insert("parent.width", canvas.width as f64);
-        context.insert("parent.height", canvas.height as f64);
-        context.insert("host.width", runtime.host_width as f64);
-        context.insert("host.height", runtime.host_height as f64);
-        context.insert("pi", std::f64::consts::PI);
-        context.insert("e", std::f64::consts::E);
-        context.insert("true", 1.0);
-        context.insert("false", 0.0);
-        context.insert_string("app.version", env!("CARGO_PKG_VERSION"));
+        context.insert_environment(canvas, runtime);
+        context.insert_i18n(runtime);
+        context.insert_clock();
+        context.insert_provider_flags(data, runtime);
+        context.insert_display_flags(data, runtime);
+        insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
+        let pool_o = context.insert_antigravity_display(data, runtime);
+        context.insert_hover_states(data, runtime);
+        match data {
+            Some(data) => context.insert_usage(data, runtime, pool_o),
+            None => context.insert_empty_usage(runtime, pool_o),
+        }
+        context.insert_split_pools(data, runtime);
+        context
+    }
+
+    /// Canvas size, math constants, app version and poll status.
+    fn insert_environment(&mut self, canvas: &Canvas, runtime: ThemeRuntime) {
+        self.insert("canvas.width", canvas.width as f64);
+        self.insert("canvas.height", canvas.height as f64);
+        self.insert("parent.width", canvas.width as f64);
+        self.insert("parent.height", canvas.height as f64);
+        self.insert("host.width", runtime.host_width as f64);
+        self.insert("host.height", runtime.host_height as f64);
+        self.insert("pi", std::f64::consts::PI);
+        self.insert("e", std::f64::consts::E);
+        self.insert("true", 1.0);
+        self.insert("false", 0.0);
+        self.insert_string("app.version", env!("CARGO_PKG_VERSION"));
         let mut version_parts = env!("CARGO_PKG_VERSION")
             .split(['.', '-', '+'])
             .filter_map(|part| part.parse::<f64>().ok());
-        context.insert("app.version.major", version_parts.next().unwrap_or(0.0));
-        context.insert("app.version.minor", version_parts.next().unwrap_or(0.0));
-        context.insert("app.version.patch", version_parts.next().unwrap_or(0.0));
-        context.insert(
+        self.insert("app.version.major", version_parts.next().unwrap_or(0.0));
+        self.insert("app.version.minor", version_parts.next().unwrap_or(0.0));
+        self.insert("app.version.patch", version_parts.next().unwrap_or(0.0));
+        self.insert(
             "system.dark",
             crate::theme::is_dark_mode_cached() as u8 as f64,
         );
-        context.insert("data.poll_ok", runtime.poll_ok as u8 as f64);
-        context.insert("data.has_error", runtime.has_error as u8 as f64);
-        context.insert(
+        self.insert("data.poll_ok", runtime.poll_ok as u8 as f64);
+        self.insert("data.has_error", runtime.has_error as u8 as f64);
+        self.insert(
             "data.loading",
             (!runtime.poll_ok && !runtime.has_error) as u8 as f64,
         );
+    }
+
+    fn insert_i18n(&mut self, runtime: ThemeRuntime) {
         let strings = runtime.language.strings();
-        context.insert_string("i18n.locale", runtime.language.code());
-        context.insert_string("i18n.session_window", strings.session_window);
-        context.insert_string("i18n.weekly_window", strings.weekly_window);
-        context.insert_string("i18n.cursor_auto_window", strings.cursor_auto_window);
-        context.insert_string("i18n.cursor_api_window", strings.cursor_api_window);
-        context.insert_string("i18n.now", strings.now);
-        context.insert_string("i18n.day_suffix", strings.day_suffix);
-        context.insert_string("i18n.hour_suffix", strings.hour_suffix);
-        context.insert_string("i18n.minute_suffix", strings.minute_suffix);
-        context.insert_string("i18n.second_suffix", strings.second_suffix);
-        context.insert(
-            "providers.count",
-            (runtime.provider_count()
-                + pool_separate(runtime, ProviderId::Claude) as usize
-                + pool_separate(runtime, ProviderId::Codex) as usize
-                + agy_separate(data, runtime) as usize) as f64,
-        );
+        self.insert_string("i18n.locale", runtime.language.code());
+        self.insert_string("i18n.session_window", strings.session_window);
+        self.insert_string("i18n.weekly_window", strings.weekly_window);
+        self.insert_string("i18n.cursor_auto_window", strings.cursor_auto_window);
+        self.insert_string("i18n.cursor_api_window", strings.cursor_api_window);
+        self.insert_string("i18n.now", strings.now);
+        self.insert_string("i18n.day_suffix", strings.day_suffix);
+        self.insert_string("i18n.hour_suffix", strings.hour_suffix);
+        self.insert_string("i18n.minute_suffix", strings.minute_suffix);
+        self.insert_string("i18n.second_suffix", strings.second_suffix);
+    }
+
+    /// Current time as unix seconds plus local and UTC calendar parts.
+    fn insert_clock(&mut self) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|value| value.as_secs_f64())
             .unwrap_or(0.0);
-        context.insert("time.now.unix", now);
-        context.insert("time.now.milliseconds", now * 1000.0);
+        self.insert("time.now.unix", now);
+        self.insert("time.now.milliseconds", now * 1000.0);
         for (zone, local) in [("local", true), ("utc", false)] {
             if let Some(value) = timestamp_parts(now, local) {
                 for (component, value) in [
@@ -100,36 +120,50 @@ impl DataContext {
                     ("minute", value.minute),
                     ("second", value.second),
                 ] {
-                    context.insert(&format!("time.{zone}.{component}"), f64::from(value));
+                    self.insert(&format!("time.{zone}.{component}"), f64::from(value));
                 }
             }
         }
+    }
+
+    fn insert_provider_flags(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
+        self.insert(
+            "providers.count",
+            (runtime.provider_count()
+                + pool_separate(runtime, ProviderId::Claude) as usize
+                + pool_separate(runtime, ProviderId::Codex) as usize
+                + agy_separate(data, runtime) as usize) as f64,
+        );
         for descriptor in PROVIDER_DESCRIPTORS {
-            context.insert_string(&format!("{}.account.name", descriptor.key), "");
-            context.insert(
+            self.insert_string(&format!("{}.account.name", descriptor.key), "");
+            self.insert(
                 &format!("providers.{}.enabled", descriptor.key),
                 runtime.provider_enabled(descriptor.id) as u8 as f64,
             );
         }
-        context.insert("display.countdown", runtime.countdown as u8 as f64);
-        context.insert("display.show_pace", runtime.show_pace as u8 as f64);
-        context.insert(
+    }
+
+    /// Display settings and the Fable / pool-split row switches.
+    fn insert_display_flags(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
+        self.insert("display.countdown", runtime.countdown as u8 as f64);
+        self.insert("display.show_pace", runtime.show_pace as u8 as f64);
+        self.insert(
             "display.pool_split_supported",
             runtime.pool_split_supported as u8 as f64,
         );
-        context.insert("display.show_fable", runtime.show_fable as u8 as f64);
+        self.insert("display.show_fable", runtime.show_fable as u8 as f64);
         let (fable_main, fable_x) = fable_pools(runtime);
-        context.insert("display.fable_main", fable_main as u8 as f64);
-        context.insert("display.fable_x", fable_x as u8 as f64);
-        context.insert(
+        self.insert("display.fable_main", fable_main as u8 as f64);
+        self.insert("display.fable_x", fable_x as u8 as f64);
+        self.insert(
             "display.fable_visible",
             fable_visible(data, runtime) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.fable_separate",
             (fable_visible(data, runtime) && claude_dual(runtime)) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.fable_row",
             (if pool_separate(runtime, ProviderId::Claude) {
                 runtime.show_fable
@@ -137,56 +171,64 @@ impl DataContext {
                 fable_visible(data, runtime) && !claude_dual(runtime)
             }) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.fable_x_row",
             (pool_separate(runtime, ProviderId::Claude) && runtime.show_fable_x) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.claude_split",
             pool_separate(runtime, ProviderId::Claude) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.codex_split",
             pool_separate(runtime, ProviderId::Codex) as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.agy_pool_split",
             agy_separate(data, runtime) as u8 as f64,
         );
-        insert_animation_bindings(&mut context, &runtime, widget_count(data, runtime));
-        context.insert(
+    }
+
+    /// Antigravity pool switches and crossfade opacities; returns whether
+    /// pool O shares the Antigravity widget.
+    fn insert_antigravity_display(
+        &mut self,
+        data: Option<&AppUsageData>,
+        runtime: ThemeRuntime,
+    ) -> bool {
+        self.insert(
             "antigravity.gemini.enabled",
             runtime.antigravity_gemini_enabled as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "antigravity.external.enabled",
             runtime.antigravity_external_enabled as u8 as f64,
         );
         let pool_o = antigravity_pool_o(data, runtime) && !agy_separate(data, runtime);
-        context.insert(
+        self.insert(
             "antigravity.x.enabled",
             runtime.antigravity_x_enabled as u8 as f64,
         );
-        context.insert("antigravity.pool_o", pool_o as u8 as f64);
-        context.insert(
+        self.insert("antigravity.pool_o", pool_o as u8 as f64);
+        self.insert(
             "antigravity.a.enabled",
             runtime.antigravity_a_enabled as u8 as f64,
         );
-        context.insert(
+        self.insert(
             "display.agy_split",
             antigravity_split(data, runtime) as u8 as f64,
         );
-        context.insert("display.agy_o_external", 0.0);
+        self.insert("display.agy_o_external", 0.0);
         // Two rows: Gemini and external models (pool A), or pools A and O.
         let agy_dual_mode =
             (runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled) || pool_o;
-        context.insert("antigravity.dual_mode", agy_dual_mode as u8 as f64);
+        self.insert("antigravity.dual_mode", agy_dual_mode as u8 as f64);
         let crossfade = runtime.crossfade_opacity.clamp(0.0, 1.0);
-        context.insert("antigravity.crossfade_opacity", crossfade);
+        self.insert("antigravity.crossfade_opacity", crossfade);
         let (agy_normal_opacity, agy_hover_opacity) =
             asymmetric_crossfade_opacities(1.0 - crossfade);
-        context.insert("antigravity.normal.opacity", agy_normal_opacity);
-        context.insert("antigravity.hover.opacity", agy_hover_opacity);
+        self.insert("antigravity.normal.opacity", agy_normal_opacity);
+        self.insert("antigravity.hover.opacity", agy_hover_opacity);
         // crossfade 1.0 shows the primary pool: Gemini in dual mode, otherwise
         // the single enabled pool; hover fades toward the other one.
         let (gemini_opacity, external_opacity) = match (
@@ -198,36 +240,41 @@ impl DataContext {
             _ => (agy_normal_opacity, agy_hover_opacity),
         };
         let only_gemini_a = agy_separate(data, runtime) && !runtime.antigravity_external_enabled;
-        context.insert(
+        self.insert(
             "antigravity.gemini.opacity",
             if only_gemini_a { 1.0 } else { gemini_opacity },
         );
-        context.insert(
+        self.insert(
             "antigravity.external.opacity",
             if only_gemini_a { 0.0 } else { external_opacity },
         );
-        context.insert("claude.hovered", runtime.claude_hovered as u8 as f64);
-        context.insert_hover_crossfade("claude", runtime.claude_crossfade_opacity);
-        context.insert(
+        pool_o
+    }
+
+    /// Hover state and crossfades of the dual-pool provider widgets.
+    fn insert_hover_states(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
+        self.insert("claude.hovered", runtime.claude_hovered as u8 as f64);
+        self.insert_hover_crossfade("claude", runtime.claude_crossfade_opacity);
+        self.insert(
             "claude.main.enabled",
             runtime.claude_main_enabled as u8 as f64,
         );
-        context.insert("claude.x.enabled", runtime.claude_x_enabled as u8 as f64);
-        context.insert("claude.dual_mode", claude_dual(runtime) as u8 as f64);
-        context.insert("codex.hovered", runtime.codex_hovered as u8 as f64);
-        context.insert_hover_crossfade("codex", runtime.codex_crossfade_opacity);
-        context.insert(
+        self.insert("claude.x.enabled", runtime.claude_x_enabled as u8 as f64);
+        self.insert("claude.dual_mode", claude_dual(runtime) as u8 as f64);
+        self.insert("codex.hovered", runtime.codex_hovered as u8 as f64);
+        self.insert_hover_crossfade("codex", runtime.codex_crossfade_opacity);
+        self.insert(
             "codex.main.enabled",
             runtime.codex_main_enabled as u8 as f64,
         );
-        context.insert("codex.x.enabled", runtime.codex_x_enabled as u8 as f64);
-        context.insert(
+        self.insert("codex.x.enabled", runtime.codex_x_enabled as u8 as f64);
+        self.insert(
             "codex.dual_mode",
             (runtime.codex_main_enabled
                 && runtime.codex_x_enabled
                 && runtime.codex_pools_one_widget) as u8 as f64,
         );
-        context.insert_hover_crossfade("opencode", runtime.opencode_crossfade_opacity);
+        self.insert_hover_crossfade("opencode", runtime.opencode_crossfade_opacity);
         // Qoder's hover only swaps in a second pool. If a poll removes that
         // pool mid-hover, rest at phase 0 so the single bottom row stays drawn.
         let qoder_phase = if data
@@ -238,106 +285,114 @@ impl DataContext {
         } else {
             0.0
         };
-        context.insert("qoder.hover_phase", qoder_phase);
-        context.insert_hover_crossfade("qoder", qoder_phase);
-        context.insert_hover_crossfade(AGY_EXTERNAL_KEY, runtime.agy_external_crossfade_opacity);
-        if let Some(data) = data {
-            for account in &data.accounts {
-                let key = format!(
-                    "accounts.{}.{}",
-                    account.provider.descriptor().key,
-                    account.profile.id
-                );
-                context.insert_string(&format!("{key}.name"), &account.profile.name);
-                context.insert(&format!("{key}.selected"), account.selected as u8 as f64);
-                context.insert(
-                    &format!("{key}.has_error"),
+        self.insert("qoder.hover_phase", qoder_phase);
+        self.insert_hover_crossfade("qoder", qoder_phase);
+        self.insert_hover_crossfade(AGY_EXTERNAL_KEY, runtime.agy_external_crossfade_opacity);
+    }
+
+    /// Per-account, per-provider, Antigravity pool and `active` readings.
+    fn insert_usage(&mut self, data: &AppUsageData, runtime: ThemeRuntime, pool_o: bool) {
+        for account in &data.accounts {
+            let key = format!(
+                "accounts.{}.{}",
+                account.provider.descriptor().key,
+                account.profile.id
+            );
+            self.insert_string(&format!("{key}.name"), &account.profile.name);
+            self.insert(&format!("{key}.selected"), account.selected as u8 as f64);
+            self.insert(
+                &format!("{key}.has_error"),
+                account.error.is_some() as u8 as f64,
+            );
+            self.insert_provider(
+                &key,
+                account.usage.as_ref(),
+                account.provider == ProviderId::Codex,
+                runtime.countdown,
+            );
+        }
+        self.insert_missing_pool_accounts(data, runtime.countdown);
+        for descriptor in PROVIDER_DESCRIPTORS {
+            if let Some(account) = data
+                .accounts
+                .iter()
+                .find(|account| account.provider == descriptor.id && account.selected)
+            {
+                self.insert(
+                    &format!("{}.has_error", descriptor.key),
                     account.error.is_some() as u8 as f64,
                 );
-                context.insert_provider(
-                    &key,
-                    account.usage.as_ref(),
-                    account.provider == ProviderId::Codex,
-                    runtime.countdown,
-                );
             }
-            context.insert_missing_pool_accounts(data, runtime.countdown);
-            for descriptor in PROVIDER_DESCRIPTORS {
-                if let Some(account) = data
-                    .accounts
-                    .iter()
-                    .find(|account| account.provider == descriptor.id && account.selected)
-                {
-                    context.insert(
-                        &format!("{}.has_error", descriptor.key),
-                        account.error.is_some() as u8 as f64,
-                    );
-                }
-                context.insert_string(
-                    &format!("{}.account.name", descriptor.key),
-                    data.selected_account_name(descriptor.id).unwrap_or(""),
-                );
-                context.insert_provider(
-                    descriptor.key,
-                    data.get(descriptor.id),
-                    descriptor.id == ProviderId::Codex,
-                    runtime.countdown,
-                );
-            }
-            let pool_o_usage = data
-                .antigravity_x()
-                .and_then(|account| account.usage.as_ref());
-            // With pool A off, pool O fills the single-pool layout alone.
-            let pool_a = if runtime.antigravity_o_only() {
-                pool_o_usage
-            } else {
-                // Never pool O's stand-in reading under pool A's label.
-                data.antigravity_pool_a_reading()
-            };
-            context.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
-            if let Some(agy) = pool_a {
-                // Antigravity answered this poll; pool-level gaps are "no limit
-                // data" ("--"), not a provider error.
-                context.insert("antigravity.reported", 1.0);
-                context.insert_provider("antigravity.gemini", Some(agy), false, runtime.countdown);
-                // A missing external pool stays empty ("--"); never show Gemini figures in its place.
-                context.insert_provider(
-                    "antigravity.external",
-                    agy.external_pool.as_deref(),
-                    false,
-                    runtime.countdown,
-                );
-            } else {
-                context.insert_provider("antigravity.gemini", None, false, runtime.countdown);
-                context.insert_provider("antigravity.external", None, false, runtime.countdown);
-            }
-            let active = ProviderId::ALL
-                .into_iter()
-                .find_map(|provider| data.get(provider).map(|usage| (provider, usage)));
-            context.insert_provider(
-                "active",
-                active.map(|(_, usage)| usage),
-                active.is_some_and(|(provider, _)| provider == ProviderId::Codex),
+            self.insert_string(
+                &format!("{}.account.name", descriptor.key),
+                data.selected_account_name(descriptor.id).unwrap_or(""),
+            );
+            self.insert_provider(
+                descriptor.key,
+                data.get(descriptor.id),
+                descriptor.id == ProviderId::Codex,
+                runtime.countdown,
+            );
+        }
+        let pool_o_usage = data
+            .antigravity_x()
+            .and_then(|account| account.usage.as_ref());
+        // With pool A off, pool O fills the single-pool layout alone.
+        let pool_a = if runtime.antigravity_o_only() {
+            pool_o_usage
+        } else {
+            // Never pool O's stand-in reading under pool A's label.
+            data.antigravity_pool_a_reading()
+        };
+        self.insert_antigravity_rows(pool_a, pool_o_usage, pool_o, runtime);
+        if let Some(agy) = pool_a {
+            // Antigravity answered this poll; pool-level gaps are "no limit
+            // data" ("--"), not a provider error.
+            self.insert("antigravity.reported", 1.0);
+            self.insert_provider("antigravity.gemini", Some(agy), false, runtime.countdown);
+            // A missing external pool stays empty ("--"); never show Gemini figures in its place.
+            self.insert_provider(
+                "antigravity.external",
+                agy.external_pool.as_deref(),
+                false,
                 runtime.countdown,
             );
         } else {
-            for descriptor in PROVIDER_DESCRIPTORS {
-                context.insert_provider(
-                    descriptor.key,
-                    None,
-                    descriptor.id == ProviderId::Codex,
-                    runtime.countdown,
-                );
-            }
-            context.insert_provider("antigravity.gemini", None, false, runtime.countdown);
-            context.insert_provider("antigravity.external", None, false, runtime.countdown);
-            context.insert_antigravity_rows(None, None, pool_o, runtime);
-            context.insert_provider("active", None, false, runtime.countdown);
+            self.insert_provider("antigravity.gemini", None, false, runtime.countdown);
+            self.insert_provider("antigravity.external", None, false, runtime.countdown);
         }
-        // Theme validation evaluates every expression even when its parent is
-        // hidden, so the split namespaces must exist in single-pool contexts.
+        let active = ProviderId::ALL
+            .into_iter()
+            .find_map(|provider| data.get(provider).map(|usage| (provider, usage)));
+        self.insert_provider(
+            "active",
+            active.map(|(_, usage)| usage),
+            active.is_some_and(|(provider, _)| provider == ProviderId::Codex),
+            runtime.countdown,
+        );
+    }
+
+    /// Before the first poll every reading binding exists but is empty.
+    fn insert_empty_usage(&mut self, runtime: ThemeRuntime, pool_o: bool) {
+        for descriptor in PROVIDER_DESCRIPTORS {
+            self.insert_provider(
+                descriptor.key,
+                None,
+                descriptor.id == ProviderId::Codex,
+                runtime.countdown,
+            );
+        }
+        self.insert_provider("antigravity.gemini", None, false, runtime.countdown);
+        self.insert_provider("antigravity.external", None, false, runtime.countdown);
+        self.insert_antigravity_rows(None, None, pool_o, runtime);
+        self.insert_provider("active", None, false, runtime.countdown);
+    }
+
+    /// Theme validation evaluates every expression even when its parent is
+    /// hidden, so the split namespaces must exist in single-pool contexts.
+    fn insert_split_pools(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
         for pool in SplitPool::ALL {
-            context.copy_prefix(
+            self.copy_prefix(
                 &format!("{}.", pool.base_key()),
                 &format!("{}.", pool.key()),
             );
@@ -345,15 +400,14 @@ impl DataContext {
         if pool_separate(runtime, ProviderId::Claude) {
             // Claude rebinds even before the first poll (the tiles then read
             // nothing); Codex keeps its empty provider bindings until data.
-            context.bind_account_pools(SplitPool::ClaudeX, &[], true, runtime);
+            self.bind_account_pools(SplitPool::ClaudeX, &[], true, runtime);
         }
         if pool_separate(runtime, ProviderId::Codex) {
-            context.bind_account_pools(SplitPool::CodexX, &["credits."], data.is_some(), runtime);
+            self.bind_account_pools(SplitPool::CodexX, &["credits."], data.is_some(), runtime);
         }
         if agy_separate(data, runtime) {
-            context.insert_antigravity_pool_o(data, runtime);
+            self.insert_antigravity_pool_o(data, runtime);
         }
-        context
     }
 
     /// Account bindings for pools that have no account entry yet: the
@@ -566,21 +620,31 @@ impl DataContext {
     pub(super) fn insert_provider(
         &mut self,
         name: &str,
-        usage: Option<&crate::models::UsageData>,
+        usage: Option<&UsageData>,
         codex_compatibility: bool,
         countdown: bool,
     ) {
-        // What a gauge or a badge should show. `percentage` stays the share
-        // that has been spent so warning thresholds keep working, while
-        // `display` follows the countdown setting.
         self.insert_limits(name, usage, countdown);
-        let display = |percentage: f64| {
-            if countdown {
-                100.0 - percentage
-            } else {
-                percentage
-            }
-        };
+        self.insert_window_labels(name, usage);
+        // Before Codex windows were classified by duration, a weekly-only
+        // response arrived in the primary slot and was exposed to themes as
+        // `codex.session`. Keep that established binding working for existing
+        // custom themes, while `codex.five_hour` always means the real window.
+        let codex_session_fallback = codex_compatibility
+            && usage.is_some_and(|usage| !usage.session.available && usage.weekly.available);
+        for (window, binding) in quota_windows(name, usage, codex_session_fallback) {
+            self.insert_window(name, window, binding, countdown);
+        }
+        self.insert(&format!("{name}.available"), usage.is_some() as u8 as f64);
+        // Carried over from an earlier poll: real figures, not current ones.
+        self.insert(
+            &format!("{name}.stale"),
+            usage.is_some_and(|usage| usage.stale) as u8 as f64,
+        );
+        self.insert_credits_and_headline(name, usage, countdown);
+    }
+
+    fn insert_window_labels(&mut self, name: &str, usage: Option<&UsageData>) {
         let weekly_label = usage
             .and_then(|usage| usage.weekly_label.as_deref())
             .or_else(|| self.get_string("i18n.weekly_window"))
@@ -594,203 +658,64 @@ impl DataContext {
             .to_string();
         self.insert_string(&format!("{name}.session.name"), pool_name(&session_label));
         self.insert_string(&format!("{name}.session.label"), session_label);
-        let (five_hour, weekly) = usage
-            .map(|usage| (usage.session.percentage, usage.weekly.percentage))
-            .unwrap_or((0.0, 0.0));
-        // Before Codex windows were classified by duration, a weekly-only
-        // response arrived in the primary slot and was exposed to themes as
-        // `codex.session`. Keep that established binding working for existing
-        // custom themes, while `codex.five_hour` always means the real window.
-        let use_codex_session_fallback = codex_compatibility
-            && usage.is_some_and(|usage| !usage.session.available && usage.weekly.available);
-        let session = if use_codex_session_fallback {
-            weekly
-        } else {
-            five_hour
-        };
-        let (session_available, weekly_available) = usage
-            .map(|usage| {
-                (
-                    usage.session.available || use_codex_session_fallback,
-                    usage.weekly.available,
-                )
-            })
-            .unwrap_or((false, false));
-        self.insert(
-            &format!("{name}.session.available"),
-            session_available as u8 as f64,
-        );
-        self.insert(
-            &format!("{name}.five_hour.available"),
-            usage.is_some_and(|usage| usage.session.available) as u8 as f64,
-        );
-        self.insert(
-            &format!("{name}.weekly.available"),
-            weekly_available as u8 as f64,
-        );
-        self.insert(&format!("{name}.session.percentage"), session);
-        self.insert(&format!("{name}.session.remaining"), 100.0 - session);
-        // An Antigravity pool window that was not reported draws an empty
-        // gauge in either usage direction instead of a full "remaining" one.
-        let shown_session = if name.starts_with("antigravity") && !session_available {
-            0.0
-        } else {
-            display(session)
-        };
-        self.insert(&format!("{name}.session.display"), shown_session);
-        self.insert(&format!("{name}.five_hour.percentage"), five_hour);
-        self.insert(&format!("{name}.five_hour.remaining"), 100.0 - five_hour);
-        // An Antigravity pool window that was not reported draws an empty
-        // gauge in either usage direction instead of a full "remaining" one.
-        let shown_five_hour = if name.starts_with("antigravity")
-            && !usage.is_some_and(|usage| usage.session.available)
-        {
-            0.0
-        } else {
-            display(five_hour)
-        };
-        self.insert(&format!("{name}.five_hour.display"), shown_five_hour);
-        self.insert(&format!("{name}.weekly.percentage"), weekly);
-        self.insert(&format!("{name}.weekly.remaining"), 100.0 - weekly);
-        // An Antigravity pool window that was not reported draws an empty
-        // gauge in either usage direction instead of a full "remaining" one.
-        let shown_weekly = if name.starts_with("antigravity") && !weekly_available {
-            0.0
-        } else {
-            display(weekly)
-        };
-        self.insert(&format!("{name}.weekly.display"), shown_weekly);
-        // Pace: the share a window would have spent by now at an even rate.
-        // `expected_display` follows the countdown setting like `display`.
-        // Providers with a non-standard session slot (Qoder credit packs)
-        // give its start; everyone else uses the 5-hour window.
-        let session_length = usage
-            .and_then(|usage| usage.session_started_at.zip(usage.session.resets_at))
-            .and_then(|(start, end)| end.duration_since(start).ok())
-            .filter(|length| !length.is_zero())
-            .unwrap_or(FIVE_HOURS);
-        let five_hour_section = usage
-            .filter(|usage| usage.session.available)
-            .map(|usage| &usage.session);
-        let weekly_section = usage
-            .filter(|usage| usage.weekly.available)
-            .map(|usage| &usage.weekly);
-        let session_section = if use_codex_session_fallback {
-            weekly_section.map(|section| (section, WEEK))
-        } else {
-            five_hour_section.map(|section| (section, session_length))
-        };
-        for (window, section) in [
-            ("session", session_section),
-            (
-                "five_hour",
-                five_hour_section.map(|section| (section, FIVE_HOURS)),
-            ),
-            ("weekly", weekly_section.map(|section| (section, WEEK))),
-        ] {
-            let expected =
-                section.and_then(|(section, length)| expected_used(section.resets_at?, length));
-            self.insert(
-                &format!("{name}.{window}.expected_available"),
-                expected.is_some() as u8 as f64,
-            );
-            let expected = expected.unwrap_or(0.0);
-            self.insert(&format!("{name}.{window}.expected"), expected);
-            self.insert(
-                &format!("{name}.{window}.expected_display"),
-                display(expected),
-            );
-        }
-        // The true 7-day window (OpenCode Go). `weekly` above may instead
-        // hold the more constrained 30-day window, so its pace bindings must
-        // come from `week` directly rather than from the auto-selected slot.
-        let week = usage.and_then(|usage| usage.week.as_ref());
-        let week_percentage = week.map(|week| week.percentage).unwrap_or(0.0);
         let week_label = usage
             .and_then(|usage| usage.week_label.as_deref())
             .unwrap_or("7d")
             .to_string();
         self.insert_string(&format!("{name}.week.name"), pool_name(&week_label));
         self.insert_string(&format!("{name}.week.label"), week_label);
-        let week_length = usage
-            .and_then(|usage| {
-                usage
-                    .week_started_at
-                    .zip(week.and_then(|week| week.resets_at))
-            })
-            .and_then(|(start, end)| end.duration_since(start).ok())
-            .filter(|length| !length.is_zero())
-            .unwrap_or(WEEK);
-        self.insert(
-            &format!("{name}.week.available"),
-            week.is_some() as u8 as f64,
-        );
-        self.insert(&format!("{name}.week.percentage"), week_percentage);
-        self.insert(&format!("{name}.week.remaining"), 100.0 - week_percentage);
-        let shown_week = if name == "opencode" && week.is_none() {
-            0.0
-        } else {
-            display(week_percentage)
-        };
-        self.insert(&format!("{name}.week.display"), shown_week);
-        let week_expected = week
-            .filter(|week| week.available)
-            .and_then(|week| expected_used(week.resets_at?, week_length));
-        self.insert(
-            &format!("{name}.week.expected_available"),
-            week_expected.is_some() as u8 as f64,
-        );
-        let week_expected = week_expected.unwrap_or(0.0);
-        self.insert(&format!("{name}.week.expected"), week_expected);
-        self.insert(
-            &format!("{name}.week.expected_display"),
-            display(week_expected),
-        );
-        let monthly = usage.and_then(|usage| usage.monthly.as_ref());
-        let monthly_percentage = monthly.map(|m| m.percentage).unwrap_or(0.0);
         self.insert_string(&format!("{name}.monthly.label"), "30d");
-        self.insert(&format!("{name}.monthly.percentage"), monthly_percentage);
+    }
+
+    /// `percentage` stays the share that has been spent so warning thresholds
+    /// keep working, while `display` follows the countdown setting.
+    fn insert_window(&mut self, name: &str, window: &str, binding: WindowBinding, countdown: bool) {
+        let percentage = binding.percentage;
         self.insert(
-            &format!("{name}.monthly.remaining"),
-            100.0 - monthly_percentage,
+            &format!("{name}.{window}.available"),
+            binding.available as u8 as f64,
         );
-        let shown_monthly = if name == "opencode" && monthly.is_none() {
+        self.insert(&format!("{name}.{window}.percentage"), percentage);
+        self.insert(&format!("{name}.{window}.remaining"), 100.0 - percentage);
+        let shown = if binding.empty_gauge {
             0.0
         } else {
-            display(monthly_percentage)
+            display_percentage(percentage, countdown)
         };
-        self.insert(&format!("{name}.monthly.display"), shown_monthly);
+        self.insert(&format!("{name}.{window}.display"), shown);
         self.insert(
-            &format!("{name}.monthly.available"),
-            monthly.is_some() as u8 as f64,
+            &format!("{name}.{window}.expected_available"),
+            binding.expected.is_some() as u8 as f64,
         );
-        // The 30-day window's real length is the billing period. Cached
-        // readings without `startsAt` fall back to a fixed 30-day window.
-        let monthly_length = usage
-            .and_then(|usage| usage.monthly_started_at)
-            .zip(monthly.and_then(|monthly| monthly.resets_at))
-            .and_then(|(start, end)| end.duration_since(start).ok())
-            .filter(|length| !length.is_zero())
-            .unwrap_or(MONTH);
-        let monthly_expected = monthly
-            .filter(|monthly| monthly.available)
-            .and_then(|monthly| expected_used(monthly.resets_at?, monthly_length));
+        let expected = binding.expected.unwrap_or(0.0);
+        self.insert(&format!("{name}.{window}.expected"), expected);
         self.insert(
-            &format!("{name}.monthly.expected_available"),
-            monthly_expected.is_some() as u8 as f64,
+            &format!("{name}.{window}.expected_display"),
+            display_percentage(expected, countdown),
         );
-        let monthly_expected = monthly_expected.unwrap_or(0.0);
-        self.insert(&format!("{name}.monthly.expected"), monthly_expected);
-        self.insert(
-            &format!("{name}.monthly.expected_display"),
-            display(monthly_expected),
-        );
-        self.insert(&format!("{name}.available"), usage.is_some() as u8 as f64);
-        // Carried over from an earlier poll: real figures, not current ones.
-        self.insert(
-            &format!("{name}.stale"),
-            usage.is_some_and(|usage| usage.stale) as u8 as f64,
-        );
+        let unix = binding
+            .resets_at
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|value| value.as_secs_f64())
+            .unwrap_or(0.0);
+        let seconds = binding
+            .resets_at
+            .and_then(|value| value.duration_since(std::time::SystemTime::now()).ok())
+            .map(|value| value.as_secs_f64())
+            .unwrap_or(0.0);
+        self.insert(&format!("{name}.{window}.reset.unix"), unix);
+        self.insert(&format!("{name}.{window}.reset.seconds"), seconds);
+        self.insert(&format!("{name}.{window}.reset.minutes"), seconds / 60.0);
+        self.insert(&format!("{name}.{window}.reset.hours"), seconds / 3600.0);
+        self.insert(&format!("{name}.{window}.reset.days"), seconds / 86400.0);
+    }
+
+    fn insert_credits_and_headline(
+        &mut self,
+        name: &str,
+        usage: Option<&UsageData>,
+        countdown: bool,
+    ) {
         // Credits are absent for most accounts, so `credits.available` is what
         // a theme should gate the overlay on rather than `available`.
         let credits = usage.and_then(|usage| usage.credits.as_ref());
@@ -802,7 +727,7 @@ impl DataContext {
         );
         self.insert(
             &format!("{name}.credits.display"),
-            display(credits_percentage),
+            display_percentage(credits_percentage, countdown),
         );
         // Currency, unlike the percentages either side of it.
         self.insert(
@@ -823,66 +748,16 @@ impl DataContext {
         // leaves it reporting 0% while another allowance is spent.
         let headline = match credits {
             Some(credits) => credits.percentage,
-            None => five_hour.max(weekly),
+            None => usage
+                .map(|usage| usage.session.percentage.max(usage.weekly.percentage))
+                .unwrap_or(0.0),
         };
         self.insert(&format!("{name}.headline.percentage"), headline);
         self.insert(&format!("{name}.headline.remaining"), 100.0 - headline);
-        self.insert(&format!("{name}.headline.display"), display(headline));
-        let reset_value = |reset: Option<std::time::SystemTime>| {
-            let unix = reset
-                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|value| value.as_secs_f64())
-                .unwrap_or(0.0);
-            let seconds = reset
-                .and_then(|value| value.duration_since(std::time::SystemTime::now()).ok())
-                .map(|value| value.as_secs_f64())
-                .unwrap_or(0.0);
-            (unix, seconds)
-        };
-        let (five_hour_unix, five_hour_seconds) =
-            reset_value(usage.and_then(|value| value.session.resets_at));
-        let (weekly_unix, weekly_seconds) =
-            reset_value(usage.and_then(|value| value.weekly.resets_at));
-        let (session_unix, session_seconds) = if use_codex_session_fallback {
-            (weekly_unix, weekly_seconds)
-        } else {
-            (five_hour_unix, five_hour_seconds)
-        };
-        let five_hour_available = usage.is_some_and(|value| value.session.available);
-        let weekly_available = usage.is_some_and(|value| value.weekly.available);
-        let session_available = if use_codex_session_fallback {
-            weekly_available
-        } else {
-            five_hour_available
-        };
-        // Presence is independent of percentage and reset times. Monthly
-        // availability remains based on its explicitly optional section.
-        for (window, available) in [
-            ("session", session_available),
-            ("five_hour", five_hour_available),
-            ("weekly", weekly_available),
-        ] {
-            self.insert(
-                &format!("{name}.{window}.available"),
-                available as u8 as f64,
-            );
-        }
-        let (monthly_unix, monthly_seconds) =
-            reset_value(monthly.and_then(|value| value.resets_at));
-        let (week_unix, week_seconds) = reset_value(week.and_then(|value| value.resets_at));
-        for (window, unix, seconds) in [
-            ("session", session_unix, session_seconds),
-            ("five_hour", five_hour_unix, five_hour_seconds),
-            ("weekly", weekly_unix, weekly_seconds),
-            ("week", week_unix, week_seconds),
-            ("monthly", monthly_unix, monthly_seconds),
-        ] {
-            self.insert(&format!("{name}.{window}.reset.unix"), unix);
-            self.insert(&format!("{name}.{window}.reset.seconds"), seconds);
-            self.insert(&format!("{name}.{window}.reset.minutes"), seconds / 60.0);
-            self.insert(&format!("{name}.{window}.reset.hours"), seconds / 3600.0);
-            self.insert(&format!("{name}.{window}.reset.days"), seconds / 86400.0);
-        }
+        self.insert(
+            &format!("{name}.headline.display"),
+            display_percentage(headline, countdown),
+        );
     }
 
     pub fn insert(&mut self, name: &str, value: f64) {
@@ -988,4 +863,119 @@ impl DataContext {
         self.insert("parent.height", object.parent_height);
         self
     }
+}
+
+fn display_percentage(percentage: f64, countdown: bool) -> f64 {
+    if countdown {
+        100.0 - percentage
+    } else {
+        percentage
+    }
+}
+
+/// One quota window's bindings under `<provider>.<window>`.
+struct WindowBinding {
+    percentage: f64,
+    available: bool,
+    /// Draw an empty gauge in either usage direction instead of a full
+    /// "remaining" one, for a window the provider did not report.
+    empty_gauge: bool,
+    /// Pace: the share the window would have spent by now at an even rate.
+    expected: Option<f64>,
+    resets_at: Option<SystemTime>,
+}
+
+/// Length of a window from its start to its reset, or `fallback`.
+fn window_length(
+    start: Option<SystemTime>,
+    end: Option<SystemTime>,
+    fallback: Duration,
+) -> Duration {
+    start
+        .zip(end)
+        .and_then(|(start, end)| end.duration_since(start).ok())
+        .filter(|length| !length.is_zero())
+        .unwrap_or(fallback)
+}
+
+fn section_expected(section: &UsageSection, length: Duration) -> Option<f64> {
+    section
+        .available
+        .then(|| expected_used(section.resets_at?, length))
+        .flatten()
+}
+
+/// The session, five-hour, weekly, 7-day and 30-day windows of a reading.
+fn quota_windows(
+    name: &str,
+    usage: Option<&UsageData>,
+    codex_session_fallback: bool,
+) -> [(&'static str, WindowBinding); 5] {
+    // An Antigravity pool window that was not reported draws an empty gauge.
+    let quota = |section: Option<&UsageSection>, length| {
+        let available = section.is_some_and(|section| section.available);
+        WindowBinding {
+            percentage: section.map_or(0.0, |section| section.percentage),
+            available,
+            empty_gauge: name.starts_with("antigravity") && !available,
+            expected: section.and_then(|section| section_expected(section, length)),
+            resets_at: section.and_then(|section| section.resets_at),
+        }
+    };
+    // Providers with a non-standard session slot (Qoder credit packs) give
+    // its start; everyone else uses the 5-hour window.
+    let session = if codex_session_fallback {
+        quota(usage.map(|usage| &usage.weekly), WEEK)
+    } else {
+        let length = window_length(
+            usage.and_then(|usage| usage.session_started_at),
+            usage.and_then(|usage| usage.session.resets_at),
+            FIVE_HOURS,
+        );
+        quota(usage.map(|usage| &usage.session), length)
+    };
+    // Optional windows count as available whenever they are present; a
+    // missing OpenCode window draws an empty gauge.
+    let optional = |section: Option<&UsageSection>, start, fallback| {
+        let length = window_length(
+            start,
+            section.and_then(|section| section.resets_at),
+            fallback,
+        );
+        WindowBinding {
+            percentage: section.map_or(0.0, |section| section.percentage),
+            available: section.is_some(),
+            empty_gauge: name == "opencode" && section.is_none(),
+            expected: section.and_then(|section| section_expected(section, length)),
+            resets_at: section.and_then(|section| section.resets_at),
+        }
+    };
+    [
+        ("session", session),
+        (
+            "five_hour",
+            quota(usage.map(|usage| &usage.session), FIVE_HOURS),
+        ),
+        ("weekly", quota(usage.map(|usage| &usage.weekly), WEEK)),
+        // The true 7-day window (OpenCode Go). `weekly` may instead hold the
+        // more constrained 30-day window, so its pace comes from `week`.
+        (
+            "week",
+            optional(
+                usage.and_then(|usage| usage.week.as_ref()),
+                usage.and_then(|usage| usage.week_started_at),
+                WEEK,
+            ),
+        ),
+        // The 30-day window's real length is the billing period; cached
+        // readings without `startsAt` fall back to a fixed 30 days.
+        (
+            "monthly",
+            optional(
+                usage.and_then(|usage| usage.monthly.as_ref()),
+                usage.and_then(|usage| usage.monthly_started_at),
+                MONTH,
+            ),
+        ),
+    ]
 }
