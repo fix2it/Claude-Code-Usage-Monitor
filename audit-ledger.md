@@ -154,12 +154,12 @@ Stopped incomplete: 5-pass limit reached, still new findings in pass 5, coverage
 ## Findings
 
 ### Level 4 — Medium
-- F58 | P4 | src/window/widget_tooltip.rs:112, src/window.rs:1337-1400 `usage_summary_lines` | usage-summary tooltip shows only the selected pool per provider (`data.get(provider)`); Claude X, Codex X, agy O quotas are absent, also when they have their own split tile | user hovers a split X/O tile and sees no numbers for it | proposal: add per-account lines for enabled side pools | open (reviewer: 3; orchestrator: 4, widget itself shows correct numbers)
-- F62 | P3/P7 | src/theme_engine.rs:2930-2950 (Claude; same pattern for Codex) | when the `claude_x`/`codex_x` account entry is missing (pool just enabled, before its poll) the split namespace is filled from the selected provider reading minus limits | X tile briefly shows the first pool's session/weekly numbers and reset time | proposal: empty/"--" binding for a missing account | open
+- F58 | P4 | src/window/widget_tooltip.rs:112, src/window.rs:1337-1400 `usage_summary_lines` | usage-summary tooltip shows only the selected pool per provider (`data.get(provider)`); Claude X, Codex X, agy O quotas are absent, also when they have their own split tile | user hovers a split X/O tile and sees no numbers for it | proposal: add per-account lines for enabled side pools | fixed (fix/pool-split-l4: widget tooltip lists Claude X, Codex X, agy O + its Claude/GPT pool; tray unchanged)
+- F62 | P3/P7 | src/theme_engine.rs:2930-2950 (Claude; same pattern for Codex) | when the `claude_x`/`codex_x` account entry is missing (pool just enabled, before its poll) the split namespace is filled from the selected provider reading minus limits | X tile briefly shows the first pool's session/weekly numbers and reset time | proposal: empty/"--" binding for a missing account | fixed (fix/pool-split-l4: missing claude_x/codex_x account binds no reading, tile shows "--")
 
 ### Level 5 — Minor
 - F56 | P4/P6 | src/window/mouse.rs:722 `tile_hover_at`, src/window.rs:3076 rect cache | tile hit-testing and tile rects only for surface 0 | split (and other) tiles on a mirror surface of a custom theme get no hover readings | open
-- F63 | P4/P7 | src/window/message_loop.rs:191 `WM_APP_USAGE_UPDATED` | poll that changes the layout (agy O appears/disappears) rerenders without `revalidate_mouse_hover`, unlike menu toggles | stationary cursor keeps the old tile hover until the next mouse move | open
+- F63 | P4/P7 | src/window/message_loop.rs:191 `WM_APP_USAGE_UPDATED` | poll that changes the layout (agy O appears/disappears) rerenders without `revalidate_mouse_hover`, unlike menu toggles | stationary cursor keeps the old tile hover until the next mouse move | fixed (fix/pool-split-l4: WM_APP_USAGE_UPDATED posts request_hover_revalidation after render)
 - F66 | P6/P8 | src/theme_engine.rs:4125 `supports_pool_splitting` | capability checked on the primary surface only; a mirror surface with the combined layout gets split bindings | custom theme mirror can lose the second pool's display | open (reviewer: 4; orchestrator: 5, needs a mixed custom theme)
 Duplication (input to part 5):
 - F57 | P7 | src/window/message_loop.rs:996-1104 (Claude) and 1105-~1210 (Codex) | pool enable/disable handlers duplicated (~110 lines each: profile creation, last-pool guard, provider state, refresh) | proposal: one `toggle_pool(provider, pool)` with provider defaults | open
@@ -170,7 +170,7 @@ Long functions on this path (already in ledger, relevant for part 5): F6 `sync_s
 
 ### Level 6 — Preferences
 - F60 | P7 | src/window/message_loop.rs:884-905 | flag selection by `if id == …` chain | proposal: map command → `&mut bool` accessor | open
-- F61 | P9 | src/window/widget_tooltip.rs:320 tests | no tooltip test with distinct main/side pool values (would catch F58) | open
+- F61 | P9 | src/window/widget_tooltip.rs:320 tests | no tooltip test with distinct main/side pool values (would catch F58) | fixed (fix/pool-split-l4: widget_summary_lists_side_pools_with_their_own_numbers, unpolled_second_pool_never_shows_first_pool_reading)
 - F65 | P9 | src/theme_engine/tests.rs:6599 (~150 lines), 6751 (~135 lines) | long split tests | proposal: split into focused tests | open
 - F68 | P8 | src/theme_engine.rs:4127 | split capability requires all four providers' split objects; a custom theme with only Claude split cannot split anything (documented design) | proposal: per-provider capability, plus tests for partial/mixed themes (placement_regression_tests.rs:120) | open (reviewer: 4; orchestrator: 6, deliberate documented rule)
 

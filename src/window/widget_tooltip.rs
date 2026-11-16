@@ -115,7 +115,7 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
         .as_ref()
         .filter(|_| state.last_poll_ok)
         .map(|data| {
-            usage_summary_lines(
+            usage_summary_lines_with_side_pools(
                 data,
                 state.providers,
                 state.language,
@@ -123,6 +123,7 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
                 state.show_antigravity_gemini,
                 super::effective_antigravity_external(state),
                 Some(SystemTime::now()),
+                true,
             )
         })
         .unwrap_or_default();

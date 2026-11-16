@@ -201,6 +201,10 @@ pub(super) unsafe extern "system" fn wnd_proc(
             check_theme_change();
             check_language_change();
             render_layered();
+            // A poll can change the layout (agy pool O appears or goes away)
+            // under a stationary cursor; recheck hover on every visible
+            // surface against the new rects (posted, after this render).
+            super::mouse::request_hover_revalidation(hwnd);
             schedule_countdown_timer();
             schedule_clock_timer();
             suppress_tray_reposition_for(Duration::from_millis(

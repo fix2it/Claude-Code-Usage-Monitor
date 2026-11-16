@@ -2932,20 +2932,9 @@ impl DataContext {
                 .iter()
                 .any(|a| a.provider == ProviderId::Claude && a.profile.id == "claude_x")
             {
-                // A missing second profile keeps the legacy fallback for its
-                // windows, but never borrows the default profile's limits.
-                let claude_usage =
-                    data.get(ProviderId::Claude)
-                        .map(|usage| crate::models::UsageData {
-                            limits: Vec::new(),
-                            ..usage.clone()
-                        });
-                context.insert_provider(
-                    "accounts.claude.claude_x",
-                    claude_usage.as_ref(),
-                    false,
-                    runtime.countdown,
-                );
+                // A second pool that has not been polled yet shows "--": the
+                // provider reading belongs to the first pool.
+                context.insert_provider("accounts.claude.claude_x", None, false, runtime.countdown);
             }
             if !data
                 .accounts
@@ -2965,13 +2954,8 @@ impl DataContext {
                 .iter()
                 .any(|a| a.provider == ProviderId::Codex && a.profile.id == "codex_x")
             {
-                let codex_usage = data.get(ProviderId::Codex);
-                context.insert_provider(
-                    "accounts.codex.codex_x",
-                    codex_usage,
-                    true,
-                    runtime.countdown,
-                );
+                // Same as Claude X: never the first pool's reading.
+                context.insert_provider("accounts.codex.codex_x", None, true, runtime.countdown);
             }
             for descriptor in PROVIDER_DESCRIPTORS {
                 if let Some(account) = data
