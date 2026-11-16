@@ -283,57 +283,15 @@ pub(super) fn position_at_taskbar() {
         return;
     }
     refresh_dpi();
-    let custom_position = {
-        let mut state = lock_state();
-        state.as_mut().and_then(|s| {
-            if s.custom_theme_enabled {
-                effective_theme_from_state(s).map(|mut theme| {
-                    let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(s));
-                    let metrics = prepared_metrics(s, &theme, runtime);
-                    let (width, height) = theme_engine::resolve_surface_size_with_metrics(
-                        &theme,
-                        0,
-                        s.data.as_ref(),
-                        runtime,
-                        &metrics,
-                    );
-                    theme.canvas.width = width;
-                    theme.canvas.height = height;
-                    let scale = theme_surface_scale(&theme, 0);
-                    (s.hwnd.to_hwnd(), theme, scale)
-                })
-            } else {
-                None
-            }
-        })
-    };
+    let custom_position = custom_theme_position();
     if let Some((hwnd, theme, scale)) = custom_position {
         position_custom_theme(hwnd, &theme, scale);
         return;
     }
     // Drop the app-state lock before any Win32 call that may synchronously
     // re-enter our window procedure.
-    let (hwnd, embedded, tray_offset, taskbar_hwnd) = {
-        let state = lock_state();
-        let s = match state.as_ref() {
-            Some(s) => s,
-            None => return,
-        };
-
-        // Don't fight the user's drag
-        if s.dragging {
-            return;
-        }
-
-        let taskbar_hwnd = match s.taskbar_hwnd {
-            Some(h) => h.to_hwnd(),
-            None => {
-                diagnose::log("position_at_taskbar skipped: no taskbar handle");
-                return;
-            }
-        };
-
-        (s.hwnd.to_hwnd(), s.embedded, s.tray_offset, taskbar_hwnd)
+    let Some((hwnd, embedded, tray_offset, taskbar_hwnd)) = legacy_taskbar_target() else {
+        return;
     };
 
     let taskbar_rect = match native_interop::get_taskbar_rect(taskbar_hwnd) {
@@ -350,19 +308,7 @@ pub(super) fn position_at_taskbar() {
     let widget_height = total_widget_height();
     let (rect, tray_offset) =
         legacy_taskbar_rect(taskbar_rect, tray, widget_width, widget_height, tray_offset);
-    let offset_changed = {
-        let mut state = lock_state();
-        if let Some(s) = state.as_mut() {
-            if s.tray_offset != tray_offset {
-                s.tray_offset = tray_offset;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
+    let offset_changed = store_tray_offset(tray_offset);
     if offset_changed {
         save_state_settings();
     }
@@ -379,6 +325,72 @@ pub(super) fn position_at_taskbar() {
     diagnose::log(format!(
         "positioned widget embedded={embedded} at x={x} y={y} w={widget_width} h={widget_height}"
     ));
+}
+
+/// Theme window, sized theme and scale when the custom theme places surface 0.
+fn custom_theme_position() -> Option<(HWND, ThemeDocument, f64)> {
+    let mut state = lock_state();
+    state.as_mut().and_then(|s| {
+        if s.custom_theme_enabled {
+            effective_theme_from_state(s).map(|mut theme| {
+                let runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(s));
+                let metrics = prepared_metrics(s, &theme, runtime);
+                let (width, height) = theme_engine::resolve_surface_size_with_metrics(
+                    &theme,
+                    0,
+                    s.data.as_ref(),
+                    runtime,
+                    &metrics,
+                );
+                theme.canvas.width = width;
+                theme.canvas.height = height;
+                let scale = theme_surface_scale(&theme, 0);
+                (s.hwnd.to_hwnd(), theme, scale)
+            })
+        } else {
+            None
+        }
+    })
+}
+
+/// Legacy widget window, embed mode, saved tray offset and taskbar handle;
+/// `None` while dragging or without a taskbar.
+fn legacy_taskbar_target() -> Option<(HWND, bool, i32, HWND)> {
+    let state = lock_state();
+    let s = match state.as_ref() {
+        Some(s) => s,
+        None => return None,
+    };
+
+    // Don't fight the user's drag
+    if s.dragging {
+        return None;
+    }
+
+    let taskbar_hwnd = match s.taskbar_hwnd {
+        Some(h) => h.to_hwnd(),
+        None => {
+            diagnose::log("position_at_taskbar skipped: no taskbar handle");
+            return None;
+        }
+    };
+
+    Some((s.hwnd.to_hwnd(), s.embedded, s.tray_offset, taskbar_hwnd))
+}
+
+/// Stores the computed tray offset; true when it changed and needs saving.
+fn store_tray_offset(tray_offset: i32) -> bool {
+    let mut state = lock_state();
+    if let Some(s) = state.as_mut() {
+        if s.tray_offset != tray_offset {
+            s.tray_offset = tray_offset;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    }
 }
 
 /// Screen coordinates for both child and popup legacy widgets. The tray sits
@@ -536,15 +548,7 @@ pub(super) fn position_custom_theme_internal(
     let taskbars = native_interop::find_taskbars();
     let displays = native_interop::find_monitors();
     let display_index = theme.placement.reference.display;
-    let is_primary_surface = lock_state().as_ref().is_some_and(|state| {
-        state.hwnd.to_hwnd() == hwnd
-            || state
-                .desktop_hwnds
-                .first()
-                .and_then(|window| *window)
-                .map(SendHwnd::to_hwnd)
-                == Some(hwnd)
-    });
+    let is_primary_surface = is_primary_surface(hwnd);
     if !is_primary_surface && display_index >= displays.len() {
         unsafe {
             let _ = ShowWindow(hwnd, SW_HIDE);
@@ -581,6 +585,23 @@ pub(super) fn position_custom_theme_internal(
         .placement
         .nest
         .resolve(theme.placement.reference.region);
+    if !unsafe { place_surface(hwnd, nest, taskbar, x, y, width, height) } {
+        return false;
+    }
+    record_position(key);
+    true
+}
+
+/// Parents and moves a theme surface for its nest; false when it was hidden.
+unsafe fn place_surface(
+    hwnd: HWND,
+    nest: SurfaceNest,
+    taskbar: Option<&native_interop::TaskbarWindow>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> bool {
     unsafe {
         match nest {
             SurfaceNest::Taskbar => {
@@ -641,8 +662,20 @@ pub(super) fn position_custom_theme_internal(
             }
         }
     }
-    record_position(key);
     true
+}
+
+/// Whether `hwnd` is the main window or the first desktop surface.
+fn is_primary_surface(hwnd: HWND) -> bool {
+    lock_state().as_ref().is_some_and(|state| {
+        state.hwnd.to_hwnd() == hwnd
+            || state
+                .desktop_hwnds
+                .first()
+                .and_then(|window| *window)
+                .map(SendHwnd::to_hwnd)
+                == Some(hwnd)
+    })
 }
 
 pub(super) fn sync_theme_window_visibility() {
