@@ -1298,106 +1298,62 @@ fn usage_summary_lines(
             "--".to_string()
         }
     };
+    let quota_line = |label: &str, usage: &crate::models::UsageData| {
+        let session_label = usage
+            .session_label
+            .as_deref()
+            .unwrap_or(strings.session_window);
+        let weekly_label = usage
+            .weekly_label
+            .as_deref()
+            .unwrap_or(strings.weekly_window);
+        format!(
+            "{label} {session_label}: {} | {weekly_label}: {}",
+            window_text(&usage.session),
+            window_text(&usage.weekly),
+        )
+    };
     let mut lines = Vec::new();
     for provider in providers.iter() {
+        let base_name = language.text(provider.descriptor().display_name);
+        let acct = data.selected_account_name(provider);
+        let label = |pool: Option<&str>| match (pool, acct) {
+            (Some(pool), Some(name)) => format!("{base_name} ({pool}, {name})"),
+            (Some(pool), None) => format!("{base_name} ({pool})"),
+            (None, Some(name)) => format!("{base_name} ({name})"),
+            (None, None) => base_name.to_string(),
+        };
         if provider == ProviderId::Antigravity {
-            let base_name = language.text(provider.descriptor().display_name);
-            let acct = data.selected_account_name(provider);
             if show_antigravity_gemini {
                 if let Some(usage) = data.get(provider) {
-                    let weekly_label = usage
-                        .weekly_label
-                        .as_deref()
-                        .unwrap_or(strings.weekly_window);
-                    let session_label = usage
-                        .session_label
-                        .as_deref()
-                        .unwrap_or(strings.session_window);
-                    let label = match acct {
-                        Some(name) => format!("{base_name} (Gemini, {name})"),
-                        None => format!("{base_name} (Gemini)"),
-                    };
-                    lines.push(format!(
-                        "{} {}: {} | {}: {}",
-                        label,
-                        session_label,
-                        window_text(&usage.session),
-                        weekly_label,
-                        window_text(&usage.weekly),
-                    ));
+                    lines.push(quota_line(&label(Some("Gemini")), usage));
                 }
             }
             if show_antigravity_external {
                 if data.get(provider).is_some() && data.antigravity_external().is_none() {
-                    let label = match acct {
-                        Some(name) => format!("{base_name} (Claude/GPT, {name})"),
-                        None => format!("{base_name} (Claude/GPT)"),
-                    };
-                    lines.push(format!("{label}: --"));
+                    lines.push(format!("{}: --", label(Some("Claude/GPT"))));
                 }
                 if let Some(usage) = data.antigravity_external() {
-                    let weekly_label = usage
-                        .weekly_label
-                        .as_deref()
-                        .unwrap_or(strings.weekly_window);
-                    let session_label = usage
-                        .session_label
-                        .as_deref()
-                        .unwrap_or(strings.session_window);
-                    let label = match acct {
-                        Some(name) => format!("{base_name} (Claude/GPT, {name})"),
-                        None => format!("{base_name} (Claude/GPT)"),
-                    };
-                    lines.push(format!(
-                        "{} {}: {} | {}: {}",
-                        label,
-                        session_label,
-                        window_text(&usage.session),
-                        weekly_label,
-                        window_text(&usage.weekly),
-                    ));
+                    lines.push(quota_line(&label(Some("Claude/GPT")), usage));
                 }
             }
         } else {
             let Some(usage) = data.get(provider) else {
                 continue;
             };
-            let descriptor = provider.descriptor();
-            let weekly_label = usage
-                .weekly_label
-                .as_deref()
-                .unwrap_or(strings.weekly_window);
-            let session_label = usage
-                .session_label
-                .as_deref()
-                .unwrap_or(strings.session_window);
-            let label = match data.selected_account_name(provider) {
-                Some(name) => format!("{} ({name})", language.text(descriptor.display_name)),
-                None => language.text(descriptor.display_name).to_string(),
-            };
             if provider == ProviderId::Claude && !usage.session.available {
+                let weekly_label = usage
+                    .weekly_label
+                    .as_deref()
+                    .unwrap_or(strings.weekly_window);
                 lines.push(format!(
-                    "{label} {weekly_label}: {}",
+                    "{} {weekly_label}: {}",
+                    label(None),
                     window_text(&usage.weekly)
                 ));
                 continue;
             }
-            lines.push(format!(
-                "{} {}: {} | {}: {}",
-                label,
-                session_label,
-                if detailed_at.is_some() {
-                    window_text(&usage.session)
-                } else {
-                    format!("{:.0}%", shown(usage.session.percentage))
-                },
-                weekly_label,
-                if detailed_at.is_some() {
-                    window_text(&usage.weekly)
-                } else {
-                    format!("{:.0}%", shown(usage.weekly.percentage))
-                },
-            ));
+            lines.push(quota_line(&label(None), usage));
         }
     }
     lines
@@ -5259,6 +5215,23 @@ mod tray_usage_summary_tests {
             Some(now)
         )
         .is_empty());
+    }
+
+    #[test]
+    fn compact_tray_summary_shows_unavailable_windows_as_dashes() {
+        let mut reading = usage(10.0, 20.0, Some("30d"));
+        reading.weekly = UsageSection::default();
+        let data = [(ProviderId::OpenCode, reading)].into_iter().collect();
+
+        assert_eq!(
+            tray_usage_summary_lines(
+                &data,
+                ProviderSet::from_enabled([ProviderId::OpenCode]),
+                LanguageId::English,
+                true,
+            ),
+            ["OpenCode 5h: 90% | 30d: --"]
+        );
     }
 
     #[test]
