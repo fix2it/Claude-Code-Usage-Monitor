@@ -137,6 +137,22 @@ pub(super) fn partial_poll_retry_delay_ms(
     })
 }
 
+/// What one poll asked for; results are dropped when the selection changed.
+struct PollRequest {
+    providers: ProviderSet,
+    accounts: crate::accounts::AccountSettings,
+    previous: Option<AppUsageData>,
+    force: bool,
+    started: Instant,
+}
+
+impl PollRequest {
+    /// A result from an old provider/account selection must not be shown.
+    fn is_stale(&self, state: &AppState) -> bool {
+        state.providers != self.providers || state.accounts != self.accounts
+    }
+}
+
 pub(super) fn do_poll_once(hwnd: HWND) {
     let poll_started = Instant::now();
     let (enabled_providers, accounts, previous, force) = {
@@ -153,274 +169,270 @@ pub(super) fn do_poll_once(hwnd: HWND) {
             })
             .unwrap_or_default()
     };
+    let request = PollRequest {
+        providers: enabled_providers,
+        accounts,
+        previous,
+        force,
+        started: poll_started,
+    };
 
     diagnose::log_lazy(|| format!("poll started providers={enabled_providers:?} force={force}"));
     let result = poller::poll(
-        enabled_providers,
-        &accounts,
-        previous.as_ref(),
-        force,
-        |update| {
-            let cache_data = {
-                let mut state = lock_state();
-                let Some(state) = state.as_mut() else {
-                    return;
-                };
-                // A result from an old provider/account selection must not be shown.
-                if state.providers != enabled_providers || state.accounts != accounts {
-                    return;
-                }
-                let data = poller::merge_poll_progress(
-                    update,
-                    &state.data.clone().unwrap_or_default(),
-                    &accounts,
-                );
-                state.data = Some(data.clone());
-                invalidate_metrics(state);
-                state.last_poll_ok = true;
-                state.last_poll_failure = None;
-                state.last_poll_ok_at = Some(SystemTime::now());
-                data
-            };
-            // The dashboard runs separately and follows the same cache as the
-            // widget. Publish before waiting for slower providers to finish.
-            if let Err(error) = app_settings::save_usage_cache(&cache_data, true) {
-                diagnose::log_error("unable to save partial usage cache", error);
-            }
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
-            }
-        },
+        request.providers,
+        &request.accounts,
+        request.previous.as_ref(),
+        request.force,
+        |update| publish_poll_progress(hwnd, &request, update),
     );
     match result {
-        Ok(data) => {
-            let mut state = lock_state();
-            if state
-                .as_ref()
-                .is_some_and(|s| s.providers != enabled_providers || s.accounts != accounts)
-            {
-                return;
+        Ok(data) => apply_poll_success(hwnd, &request, data),
+        Err(failure) => apply_poll_failure(hwnd, &request, failure),
+    }
+}
+
+/// Show a provider's reading as soon as it arrives, before slower providers.
+fn publish_poll_progress(hwnd: HWND, request: &PollRequest, update: AppUsageData) {
+    let cache_data = {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        // A result from an old provider/account selection must not be shown.
+        if request.is_stale(state) {
+            return;
+        }
+        let data = poller::merge_poll_progress(
+            update,
+            &state.data.clone().unwrap_or_default(),
+            &request.accounts,
+        );
+        state.data = Some(data.clone());
+        invalidate_metrics(state);
+        state.last_poll_ok = true;
+        state.last_poll_failure = None;
+        state.last_poll_ok_at = Some(SystemTime::now());
+        data
+    };
+    // The dashboard runs separately and follows the same cache as the
+    // widget. Publish before waiting for slower providers to finish.
+    if let Err(error) = app_settings::save_usage_cache(&cache_data, true) {
+        diagnose::log_error("unable to save partial usage cache", error);
+    }
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
+    }
+}
+
+fn apply_poll_success(hwnd: HWND, request: &PollRequest, data: AppUsageData) {
+    let mut state = lock_state();
+    if state.as_ref().is_some_and(|s| request.is_stale(s)) {
+        return;
+    }
+    let mut data = match state.as_ref().and_then(|s| s.data.as_ref()) {
+        Some(previous) => poller::carry_forward_failures(data, previous, request.providers),
+        None => data,
+    };
+    data.select_accounts(&request.accounts);
+    let notifications: Vec<_> = data
+        .new_auth_failures(request.previous.as_ref(), request.force)
+        .into_iter()
+        .map(|account| (account.provider, account.profile.name.clone()))
+        .collect();
+    let language = state
+        .as_ref()
+        .map(|state| state.language)
+        .unwrap_or(LanguageId::English);
+    let cache_data = data.clone();
+    if let Some(s) = state.as_mut() {
+        // Stop fast-poll if reset data is now fresh
+        if !poller::app_is_past_reset(&data) {
+            unsafe {
+                let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
             }
-            let mut data = match state.as_ref().and_then(|s| s.data.as_ref()) {
-                Some(previous) => poller::carry_forward_failures(data, previous, enabled_providers),
-                None => data,
-            };
-            data.select_accounts(&accounts);
-            let notifications: Vec<_> = data
-                .new_auth_failures(previous.as_ref(), force)
-                .into_iter()
-                .map(|account| (account.provider, account.profile.name.clone()))
-                .collect();
-            let language = state
-                .as_ref()
-                .map(|state| state.language)
-                .unwrap_or(LanguageId::English);
-            let cache_data = data.clone();
-            if let Some(s) = state.as_mut() {
-                // Stop fast-poll if reset data is now fresh
-                if !poller::app_is_past_reset(&data) {
+        }
+
+        let retry_ms = partial_poll_retry_delay_ms(
+            &data,
+            request.providers,
+            &request.accounts,
+            s.retry_count,
+            s.poll_interval_ms,
+            poller::retry_delay_ms(0, request.started),
+        );
+        s.data = Some(data);
+        invalidate_metrics(s);
+        s.last_poll_ok = true;
+        s.last_poll_failure = None;
+        s.last_poll_ok_at = Some(SystemTime::now());
+
+        // Retry partial failures; restore the normal interval after recovery.
+        if let Some(retry_ms) = retry_ms {
+            s.retry_count = s.retry_count.saturating_add(1);
+            unsafe {
+                let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
+                set_controller_timer(Some(hwnd), TIMER_POLL, retry_ms, None);
+            }
+        } else if s.retry_count > 0 {
+            s.retry_count = 0;
+            let interval = s.poll_interval_ms;
+            unsafe {
+                set_controller_timer(Some(hwnd), TIMER_POLL, interval, None);
+            }
+        }
+        s.auth_error_paused_polling = false;
+        s.auth_watch_mode =
+            poller::CredentialWatchMode::ActiveSource(s.providers.first().unwrap_or_default());
+        s.auth_watch_snapshot.clear();
+    }
+    drop(state);
+    match app_settings::save_usage_cache(&cache_data, true) {
+        Ok(()) => diagnose::log_lazy(|| {
+            format!(
+                "usage cache saved: accounts={} elapsed_ms={}",
+                cache_data.accounts.len(),
+                request.started.elapsed().as_millis()
+            )
+        }),
+        Err(error) => diagnose::log_error("unable to save usage cache", error),
+    }
+    if !notifications.is_empty() {
+        let body = notifications
+            .iter()
+            .map(|(provider, name)| {
+                format!(
+                    "{} ({name}): {}",
+                    language.text(provider.descriptor().display_name),
+                    language.provider_auth_error(*provider).1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        tray_icon::notify_balloon(hwnd, language.text("Sign in again"), &body);
+    }
+
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
+    }
+}
+
+fn apply_poll_failure(hwnd: HWND, request: &PollRequest, failure: poller::PollFailure) {
+    diagnose::log_lazy(|| {
+        format!(
+            "poll failed: {failure:?} elapsed_ms={}",
+            request.started.elapsed().as_millis()
+        )
+    });
+    if lock_state().as_ref().is_some_and(|s| request.is_stale(s)) {
+        return;
+    }
+    let auth_watch = match failure.error {
+        poller::PollError::AuthRequired
+        | poller::PollError::TokenExpired
+        | poller::PollError::HttpStatus(401 | 403) => {
+            let mode = poller::CredentialWatchMode::ActiveSource(failure.provider);
+            Some((mode, poller::credential_watch_snapshot(mode)))
+        }
+        poller::PollError::NoCredentials => {
+            let mode = poller::CredentialWatchMode::AllSources(failure.provider);
+            Some((mode, poller::credential_watch_snapshot(mode)))
+        }
+        poller::PollError::RequestFailed
+        | poller::PollError::NetworkError
+        | poller::PollError::UnexpectedResponse
+        | poller::PollError::HttpStatus(_) => None,
+    };
+    // Distinguish auth-required errors from transient errors.
+    let (notify_auth_error, cache_data, cache_poll_ok) = {
+        let mut state = lock_state();
+        if state.as_ref().is_some_and(|s| request.is_stale(s)) {
+            return;
+        }
+        let mut should_notify = false;
+        if let Some(s) = state.as_mut() {
+            if failure.error.is_transient() {
+                if let Some(previous) = s.data.as_ref() {
+                    let carried = poller::carry_forward_failures(
+                        AppUsageData::default(),
+                        previous,
+                        request.providers,
+                    );
+                    s.data = Some(carried);
+                }
+            }
+            invalidate_metrics(s);
+            s.last_poll_ok = false;
+            s.last_poll_failure = Some(failure);
+            match auth_watch {
+                Some((watch_mode, watch_snapshot)) => {
+                    // Only show the balloon on the first failure so it doesn't spam.
+                    if s.retry_count == 0 || request.force {
+                        should_notify = true;
+                    }
+                    s.auth_error_paused_polling = true;
+                    s.auth_watch_mode = watch_mode;
+                    s.auth_watch_snapshot = watch_snapshot;
+                    s.retry_count = s.retry_count.saturating_add(1);
                     unsafe {
+                        let _ = kill_controller_timer(Some(hwnd), TIMER_POLL);
                         let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
+                        let _ = kill_controller_timer(Some(hwnd), TIMER_COUNTDOWN);
+                        set_controller_timer(Some(hwnd), TIMER_POLL, s.poll_interval_ms, None);
                     }
                 }
-
-                let retry_ms = partial_poll_retry_delay_ms(
-                    &data,
-                    enabled_providers,
-                    &accounts,
-                    s.retry_count,
-                    s.poll_interval_ms,
-                    poller::retry_delay_ms(0, poll_started),
-                );
-                s.data = Some(data);
-                invalidate_metrics(s);
-                s.last_poll_ok = true;
-                s.last_poll_failure = None;
-                s.last_poll_ok_at = Some(SystemTime::now());
-
-                // Retry partial failures; restore the normal interval after recovery.
-                if let Some(retry_ms) = retry_ms {
+                _ => {
+                    // Transient errors: exponential backoff, respecting server cooldowns.
+                    s.auth_error_paused_polling = false;
+                    s.auth_watch_mode = poller::CredentialWatchMode::ActiveSource(
+                        s.providers.first().unwrap_or_default(),
+                    );
+                    s.auth_watch_snapshot.clear();
                     s.retry_count = s.retry_count.saturating_add(1);
+                    let backoff = RETRY_BASE_MS
+                        .saturating_mul(1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX));
+                    let retry_ms =
+                        poller::retry_delay_ms(backoff.min(s.poll_interval_ms), request.started);
                     unsafe {
                         let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
                         set_controller_timer(Some(hwnd), TIMER_POLL, retry_ms, None);
                     }
-                } else if s.retry_count > 0 {
-                    s.retry_count = 0;
-                    let interval = s.poll_interval_ms;
-                    unsafe {
-                        set_controller_timer(Some(hwnd), TIMER_POLL, interval, None);
-                    }
                 }
-                s.auth_error_paused_polling = false;
-                s.auth_watch_mode = poller::CredentialWatchMode::ActiveSource(
-                    s.providers.first().unwrap_or_default(),
-                );
-                s.auth_watch_snapshot.clear();
-            }
-            drop(state);
-            match app_settings::save_usage_cache(&cache_data, true) {
-                Ok(()) => diagnose::log_lazy(|| {
-                    format!(
-                        "usage cache saved: accounts={} elapsed_ms={}",
-                        cache_data.accounts.len(),
-                        poll_started.elapsed().as_millis()
-                    )
-                }),
-                Err(error) => diagnose::log_error("unable to save usage cache", error),
-            }
-            if !notifications.is_empty() {
-                let body = notifications
-                    .iter()
-                    .map(|(provider, name)| {
-                        format!(
-                            "{} ({name}): {}",
-                            language.text(provider.descriptor().display_name),
-                            language.provider_auth_error(*provider).1
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                tray_icon::notify_balloon(hwnd, language.text("Sign in again"), &body);
-            }
-
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
             }
         }
-        Err(failure) => {
-            diagnose::log_lazy(|| {
-                format!(
-                    "poll failed: {failure:?} elapsed_ms={}",
-                    poll_started.elapsed().as_millis()
-                )
-            });
-            if lock_state()
+        let cache_data = state
+            .as_ref()
+            .and_then(|state| state.data.clone())
+            .unwrap_or_default();
+        let cache_poll_ok = state.as_ref().is_some_and(|state| {
+            poll_display_state(
+                state.last_poll_ok,
+                state.retry_count,
+                state.auth_error_paused_polling,
+                state.data.as_ref(),
+            )
+            .0
+        });
+        (should_notify, cache_data, cache_poll_ok)
+    };
+    // Theme Studio is a separate process and follows this cache. A
+    // transient failure with usable stale data remains displayable;
+    // hard failures and failures without a reading stay errors.
+    let _ = app_settings::save_usage_cache(&cache_data, cache_poll_ok);
+
+    if notify_auth_error {
+        let balloon = {
+            let state = lock_state();
+            state
                 .as_ref()
-                .is_some_and(|s| s.providers != enabled_providers || s.accounts != accounts)
-            {
-                return;
-            }
-            let auth_watch = match failure.error {
-                poller::PollError::AuthRequired
-                | poller::PollError::TokenExpired
-                | poller::PollError::HttpStatus(401 | 403) => {
-                    let mode = poller::CredentialWatchMode::ActiveSource(failure.provider);
-                    Some((mode, poller::credential_watch_snapshot(mode)))
-                }
-                poller::PollError::NoCredentials => {
-                    let mode = poller::CredentialWatchMode::AllSources(failure.provider);
-                    Some((mode, poller::credential_watch_snapshot(mode)))
-                }
-                poller::PollError::RequestFailed
-                | poller::PollError::NetworkError
-                | poller::PollError::UnexpectedResponse
-                | poller::PollError::HttpStatus(_) => None,
-            };
-            // Distinguish auth-required errors from transient errors.
-            let (notify_auth_error, cache_data, cache_poll_ok) = {
-                let mut state = lock_state();
-                if state
-                    .as_ref()
-                    .is_some_and(|s| s.providers != enabled_providers || s.accounts != accounts)
-                {
-                    return;
-                }
-                let mut should_notify = false;
-                if let Some(s) = state.as_mut() {
-                    if failure.error.is_transient() {
-                        if let Some(previous) = s.data.as_ref() {
-                            let carried = poller::carry_forward_failures(
-                                AppUsageData::default(),
-                                previous,
-                                enabled_providers,
-                            );
-                            s.data = Some(carried);
-                        }
-                    }
-                    invalidate_metrics(s);
-                    s.last_poll_ok = false;
-                    s.last_poll_failure = Some(failure);
-                    match auth_watch {
-                        Some((watch_mode, watch_snapshot)) => {
-                            // Only show the balloon on the first failure so it doesn't spam.
-                            if s.retry_count == 0 || force {
-                                should_notify = true;
-                            }
-                            s.auth_error_paused_polling = true;
-                            s.auth_watch_mode = watch_mode;
-                            s.auth_watch_snapshot = watch_snapshot;
-                            s.retry_count = s.retry_count.saturating_add(1);
-                            unsafe {
-                                let _ = kill_controller_timer(Some(hwnd), TIMER_POLL);
-                                let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
-                                let _ = kill_controller_timer(Some(hwnd), TIMER_COUNTDOWN);
-                                set_controller_timer(
-                                    Some(hwnd),
-                                    TIMER_POLL,
-                                    s.poll_interval_ms,
-                                    None,
-                                );
-                            }
-                        }
-                        _ => {
-                            // Transient errors: exponential backoff, respecting server cooldowns.
-                            s.auth_error_paused_polling = false;
-                            s.auth_watch_mode = poller::CredentialWatchMode::ActiveSource(
-                                s.providers.first().unwrap_or_default(),
-                            );
-                            s.auth_watch_snapshot.clear();
-                            s.retry_count = s.retry_count.saturating_add(1);
-                            let backoff = RETRY_BASE_MS.saturating_mul(
-                                1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX),
-                            );
-                            let retry_ms = poller::retry_delay_ms(
-                                backoff.min(s.poll_interval_ms),
-                                poll_started,
-                            );
-                            unsafe {
-                                let _ = kill_controller_timer(Some(hwnd), TIMER_RESET_POLL);
-                                set_controller_timer(Some(hwnd), TIMER_POLL, retry_ms, None);
-                            }
-                        }
-                    }
-                }
-                let cache_data = state
-                    .as_ref()
-                    .and_then(|state| state.data.clone())
-                    .unwrap_or_default();
-                let cache_poll_ok = state.as_ref().is_some_and(|state| {
-                    poll_display_state(
-                        state.last_poll_ok,
-                        state.retry_count,
-                        state.auth_error_paused_polling,
-                        state.data.as_ref(),
-                    )
-                    .0
-                });
-                (should_notify, cache_data, cache_poll_ok)
-            };
-            // Theme Studio is a separate process and follows this cache. A
-            // transient failure with usable stale data remains displayable;
-            // hard failures and failures without a reading stay errors.
-            let _ = app_settings::save_usage_cache(&cache_data, cache_poll_ok);
-
-            if notify_auth_error {
-                let balloon = {
-                    let state = lock_state();
-                    state
-                        .as_ref()
-                        .map(|state| state.language.provider_auth_error(failure.provider))
-                };
-                if let Some((title, body)) = balloon {
-                    tray_icon::notify_balloon(hwnd, title, body);
-                }
-            }
-
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
-            }
+                .map(|state| state.language.provider_auth_error(failure.provider))
+        };
+        if let Some((title, body)) = balloon {
+            tray_icon::notify_balloon(hwnd, title, body);
         }
+    }
+
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
     }
 }
 
