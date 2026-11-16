@@ -629,9 +629,11 @@ mod hover_revalidation_tests {
         let messages = include_str!("message_loop.rs");
         assert!(messages.contains("super::mouse::request_hover_revalidation(hwnd)"));
         assert!(messages.contains("super::mouse::run_requested_hover_revalidation()"));
-        let render = include_str!("../window.rs");
+        let render = include_str!("render.rs");
         assert!(!render.contains("mouse::revalidate_active_hover"));
-        assert!(render.contains("mouse::request_hover_revalidation(replacement)"));
+        let surfaces = include_str!("surfaces.rs");
+        assert!(!surfaces.contains("mouse::revalidate_active_hover"));
+        assert!(surfaces.contains("mouse::request_hover_revalidation(replacement)"));
     }
 
     #[test]
