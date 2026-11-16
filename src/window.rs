@@ -1169,10 +1169,20 @@ fn set_window_state_timer(hwnd: HWND, required: bool) {
     }
 }
 
+/// Serializes `save_state_settings` so two writers cannot interleave their
+/// load-modify-save cycles; held across the file I/O instead of `STATE`.
+static SETTINGS_IO: Mutex<()> = Mutex::new(());
+
 fn save_state_settings() {
-    let state = lock_state();
-    if let Some(s) = state.as_ref() {
-        let mut persisted = load_settings();
+    // Lock order: SETTINGS_IO, then STATE. The state lock is held only while
+    // copying fields, so file I/O never blocks other `STATE` users (F35).
+    let _io = SETTINGS_IO.lock().unwrap_or_else(|e| e.into_inner());
+    let mut persisted = load_settings();
+    {
+        let state = lock_state();
+        let Some(s) = state.as_ref() else {
+            return;
+        };
         persisted.tray_offset = s.tray_offset;
         persisted.taskbar_index = s.taskbar_index;
         persisted.legacy_placement_pending = false;
@@ -1206,9 +1216,9 @@ fn save_state_settings() {
         persisted.accounts = s.accounts.clone();
         // The dashboard process owns its dimensions, so leave the freshly
         // loaded values unchanged when monitor actions persist settings.
-        if let Err(error) = save_settings(&persisted) {
-            diagnose::log(format!("unable to save settings: {error}"));
-        }
+    }
+    if let Err(error) = save_settings(&persisted) {
+        diagnose::log(format!("unable to save settings: {error}"));
     }
 }
 

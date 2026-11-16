@@ -234,7 +234,7 @@ pub(super) fn show_context_menu_document(
     }
     let _guard = MenuSessionGuard;
 
-    let document = match context_menu::resolve_context_menu(reference) {
+    let document = match context_menu::resolve_context_menu_cached(reference) {
         Ok(document) => document,
         Err(error) => {
             diagnose::log(format!("context menu load failed: {error}"));

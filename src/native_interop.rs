@@ -481,24 +481,13 @@ pub fn find_desktop_host() -> Option<DesktopHost> {
 
         // Ask Explorer to create the wallpaper WorkerW on shell versions that
         // do not keep it alive until a desktop-hosted surface is requested.
-        let _ = SendMessageTimeoutW(
-            progman,
-            0x052C,
-            WPARAM(0xD),
-            LPARAM(0),
-            SMTO_NORMAL,
-            1_000,
-            None,
-        );
-        let _ = SendMessageTimeoutW(
-            progman,
-            0x052C,
-            WPARAM(0xD),
-            LPARAM(1),
-            SMTO_NORMAL,
-            1_000,
-            None,
-        );
+        // This runs on the UI thread, so bound the wait (F36): give up at once
+        // when Explorer is hung, and skip the second request when the first
+        // already timed out instead of waiting a second time. A slow success
+        // followed by a timeout can still take ~2 s; see F36 in the ledger.
+        if request_wallpaper_worker(progman, 0) {
+            let _ = request_wallpaper_worker(progman, 1);
+        }
 
         // In the raised-desktop architecture Progman has both DefView and the
         // wallpaper WorkerW as direct children. A layered child of WorkerW is
@@ -538,6 +527,25 @@ pub fn find_desktop_host() -> Option<DesktopHost> {
             Some((host.parent.0 as isize, host.insert_after.0 as isize));
         Some(host)
     }
+}
+
+/// Send Progman the undocumented "spawn wallpaper WorkerW" request with a
+/// bounded wait. Returns false when the request failed or timed out.
+fn request_wallpaper_worker(progman: HWND, lparam: isize) -> bool {
+    const SPAWN_WORKER_MSG: u32 = 0x052C;
+    const SPAWN_WORKER_TIMEOUT_MS: u32 = 1_000;
+    let result = unsafe {
+        SendMessageTimeoutW(
+            progman,
+            SPAWN_WORKER_MSG,
+            WPARAM(0xD),
+            LPARAM(lparam),
+            SMTO_NORMAL | SMTO_ABORTIFHUNG,
+            SPAWN_WORKER_TIMEOUT_MS,
+            None,
+        )
+    };
+    result.0 != 0
 }
 
 /// Move the window

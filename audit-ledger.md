@@ -60,7 +60,7 @@ Long functions (> ~100 lines):
 - F14 | S1 | src/theme_engine.rs:3238-3558 | `insert_provider` (~320) | proposal: quota-window, reset-time, provider-specific helpers | open
 - F15 | S1 | src/theme_engine/theme_rendering.rs:98-265 | `render_theme_surface_with_metrics_at_scale` (~170) | proposal: setup / background / opacity pass | open
 - F16 | S1 | src/theme_engine/theme_rendering.rs:893-1143 | `resolve_geometry` (~250) | proposal: parent resolve / expression eval / transform | open
-- F19 | S1 | src/window/window_context_menu.rs:237 | every right-click enumerates, reads, parses and validates the menu directory on the UI thread (reviewer said L4; orchestrator: local small files, click-only → L5) | proposal: cache parsed menus, invalidate on file change | open
+- F19 | S1 | src/window/window_context_menu.rs:237 | every right-click enumerates, reads, parses and validates the menu directory on the UI thread (reviewer said L4; orchestrator: local small files, click-only → L5) | proposal: cache parsed menus, invalidate on file change | fixed (refactor/2: right-click uses resolve_context_menu_cached, keyed by reference + directory size/mtime fingerprint; errors not cached; known limit: an edit that keeps size and mtime is not seen)
 - F20 | S1 | src/theme_engine/theme_rendering.rs:296 | per-object pixel buffer allocated and cleared each frame | proposal: reuse scratch buffers / composite directly | open
 - F21 | S1 | src/theme_engine/theme_rendering.rs:1435-1538 | `render_text_mask` (~100) creates/destroys DC, bitmap, font per text object per frame | proposal: cache fonts and mask resources by params; split setup vs compositing | open
 Duplication:
@@ -78,8 +78,8 @@ More long functions:
 - F32 | S1 | src/context_menu.rs:369-574 | `classic_context_menu` | proposal: provider and settings menu builders | open
 - F33 | S1 | src/context_menu.rs:824-953 | test `classic_provider_children_follow_their_parents` (L6: test shape) | proposal: split into focused cases | open
 UI-thread blocking (round 3):
-- F35 | S1/M1 | src/window.rs:1172 | `save_state_settings` loads and writes settings file while holding the global state lock (called from menu actions) | proposal: snapshot under lock, do file I/O after release | open
-- F36 | S1/M6 | src/native_interop.rs:435-541 (484,493) | `find_desktop_host` (~105 lines) can block UI thread up to 2×1 s in `SendMessageTimeoutW` when cached host is invalid | proposal: background/bounded rediscovery; split cached-host validation vs discovery | open
+- F35 | S1/M1 | src/window.rs:1172 | `save_state_settings` loads and writes settings file while holding the global state lock (called from menu actions) | proposal: snapshot under lock, do file I/O after release | fixed (refactor/2: file I/O outside STATE; SETTINGS_IO mutex serializes saves, lock order SETTINGS_IO → STATE)
+- F36 | S1/M6 | src/native_interop.rs:435-541 (484,493) | `find_desktop_host` (~105 lines) can block UI thread up to 2×1 s in `SendMessageTimeoutW` when cached host is invalid | proposal: background/bounded rediscovery; split cached-host validation vs discovery | partly fixed (refactor/2: SMTO_ABORTIFHUNG (hung Explorer → no wait) + second WorkerW request skipped after a failed first one (timeout → 1 s instead of 2 s). Still up to ~2 s when the first request succeeds slowly and the second times out; a shared deadline would skip a request that used to succeed. Background rediscovery not done: three callers need the host synchronously, moving it off-thread changes placement timing — visible behavior)
 More long functions (round 3):
 - F37 | S1 | src/poller/accounts.rs:108-299 | `poll_accounts_with_progress` | proposal: targets / dispatch / aggregate | open
 - F38 | M2 | src/poller/qoder.rs:318-429 | `usage_data` | proposal: credit pools vs window select | open
@@ -98,7 +98,7 @@ Round 4:
 Round 5:
 - F53 | S1 | src/window.rs:4328 | hover setters for Claude, Codex, Antigravity, OpenCode, Qoder, agy external repeat state-change + animation + timer logic | proposal: one generic hover-animation helper with per-provider eligibility | open
 - F54 | S1 | src/window.rs:1490-1588 | `sync_tray_icon` (~100) mixes state collection, surface filter, render, shell sync | proposal: extract themed-icon build | open
-- F55 | S1/M6 | src/desktop_compositor.rs:130 | `Present(1, …)` (vsync wait) on the UI thread for every desktop-surface paint | proposal: measure; `Present(0, …)` or DXGI_PRESENT_DO_NOT_WAIT / waitable swap chain | open
+- F55 | S1/M6 | src/desktop_compositor.rs:130 | `Present(1, …)` (vsync wait) on the UI thread for every desktop-surface paint | proposal: measure; `Present(0, …)` or DXGI_PRESENT_DO_NOT_WAIT / waitable swap chain | fixed (refactor/2: Present(0); composition flip-model swap chain does not tear, DWM syncs; not measured with GPU tools)
 Dead code:
 - F34 | S1 | src/poller/antigravity.rs:514,791 | `fetch_antigravity_model_quota` (`#[allow(dead_code)]`) and its only helper `is_antigravity_display_model` unused | proposal: delete | fixed (refactor/4-dead-code)
 - F17 | S5 | src/app_settings.rs:338 | `set_antigravity_external_enabled` only called from tests (1089) | proposal: `#[cfg(test)]` or remove | fixed (refactor/4-dead-code)
