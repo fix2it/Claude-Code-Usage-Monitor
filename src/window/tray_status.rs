@@ -454,74 +454,19 @@ pub(super) fn sync_tray_icon(hwnd: HWND) {
                 == SurfaceNest::TrayIcon
         });
         if has_tray_surfaces {
+            let input = TrayFrame {
+                theme: &theme,
+                data: data.as_ref(),
+                runtime,
+                metrics: metrics.as_ref(),
+            };
             let icons = theme
                 .surfaces
                 .iter()
                 .enumerate()
-                .filter(|(surface_index, surface)| {
-                    if !tray_surface_candidate(surface) {
-                        return false;
-                    }
-                    let Some(metrics) = metrics.as_ref() else {
-                        return false;
-                    };
-                    let surface_runtime =
-                        theme_runtime_for_surface(&theme, *surface_index, runtime);
-                    let surface_metrics =
-                        theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
-                    theme_engine::surface_should_render_with_metrics(
-                        &theme,
-                        *surface_index,
-                        data.as_ref(),
-                        surface_runtime,
-                        &surface_metrics,
-                    )
-                })
+                .filter(|(surface_index, surface)| input.surface_renders(*surface_index, surface))
                 .filter_map(|(surface_index, surface)| {
-                    let surface_runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
-                    let surface_metrics = theme_engine::metrics_for_phase(
-                        metrics.as_ref().unwrap().clone(),
-                        surface_runtime,
-                    );
-                    let (logical_width, logical_height) =
-                        theme_engine::resolve_surface_size_with_metrics(
-                            &theme,
-                            surface_index,
-                            data.as_ref(),
-                            surface_runtime,
-                            &surface_metrics,
-                        );
-                    let max_dimension = logical_width.max(logical_height) as f64;
-                    let scale =
-                        theme_surface_scale(&theme, surface_index).min(if max_dimension > 0.0 {
-                            512.0 / max_dimension
-                        } else {
-                            1.0
-                        });
-                    if scale < 0.25 {
-                        diagnose::log(format!(
-                            "tray-icon theme surface '{}' exceeds the 512px source limit",
-                            surface.name
-                        ));
-                        return None;
-                    }
-                    let rendered = theme_engine::render_theme_surface_with_metrics_at_scale(
-                        &theme,
-                        surface_index,
-                        data.as_ref(),
-                        surface_runtime,
-                        scale,
-                        &surface_metrics,
-                    );
-                    Some(tray_icon::ThemedTrayIcon {
-                        surface_index,
-                        tooltip: usage_tooltip
-                            .clone()
-                            .unwrap_or_else(|| surface.name.clone()),
-                        width: rendered.width,
-                        height: rendered.height,
-                        pixels: rendered.pixels,
-                    })
+                    input.render_icon(surface_index, surface, usage_tooltip.as_ref())
                 })
                 .collect::<Vec<_>>();
             tray_icon::sync_themed(hwnd, &icons);
@@ -532,6 +477,83 @@ pub(super) fn sync_tray_icon(hwnd: HWND) {
         }
     }
     tray_icon::sync(hwnd, &tray_icon_tooltip_from_state());
+}
+
+/// The theme state one tray sync renders its icons from.
+struct TrayFrame<'a> {
+    theme: &'a ThemeDocument,
+    data: Option<&'a AppUsageData>,
+    runtime: ThemeRuntime,
+    metrics: Option<&'a theme_engine::DisplayMetrics>,
+}
+
+impl TrayFrame<'_> {
+    fn surface_renders(&self, surface_index: usize, surface: &theme_engine::SceneObject) -> bool {
+        if !tray_surface_candidate(surface) {
+            return false;
+        }
+        let Some(metrics) = self.metrics else {
+            return false;
+        };
+        let surface_runtime = theme_runtime_for_surface(self.theme, surface_index, self.runtime);
+        let surface_metrics = theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
+        theme_engine::surface_should_render_with_metrics(
+            self.theme,
+            surface_index,
+            self.data,
+            surface_runtime,
+            &surface_metrics,
+        )
+    }
+
+    /// Render one tray surface (at most 512 px per side) into an icon.
+    fn render_icon(
+        &self,
+        surface_index: usize,
+        surface: &theme_engine::SceneObject,
+        usage_tooltip: Option<&String>,
+    ) -> Option<tray_icon::ThemedTrayIcon> {
+        let surface_runtime = theme_runtime_for_surface(self.theme, surface_index, self.runtime);
+        let surface_metrics =
+            theme_engine::metrics_for_phase(self.metrics.unwrap().clone(), surface_runtime);
+        let (logical_width, logical_height) = theme_engine::resolve_surface_size_with_metrics(
+            self.theme,
+            surface_index,
+            self.data,
+            surface_runtime,
+            &surface_metrics,
+        );
+        let max_dimension = logical_width.max(logical_height) as f64;
+        let scale = theme_surface_scale(self.theme, surface_index).min(if max_dimension > 0.0 {
+            512.0 / max_dimension
+        } else {
+            1.0
+        });
+        if scale < 0.25 {
+            diagnose::log(format!(
+                "tray-icon theme surface '{}' exceeds the 512px source limit",
+                surface.name
+            ));
+            return None;
+        }
+        let rendered = theme_engine::render_theme_surface_with_metrics_at_scale(
+            self.theme,
+            surface_index,
+            self.data,
+            surface_runtime,
+            scale,
+            &surface_metrics,
+        );
+        Some(tray_icon::ThemedTrayIcon {
+            surface_index,
+            tooltip: usage_tooltip
+                .cloned()
+                .unwrap_or_else(|| surface.name.clone()),
+            width: rendered.width,
+            height: rendered.height,
+            pixels: rendered.pixels,
+        })
+    }
 }
 
 // Literal zero is disabled independently of data, surface size, and runtime.
