@@ -35,12 +35,12 @@ Surface 5 — module slice:
 ## Findings
 
 ### Level 4 — Medium
-- F1 | S1 | src/window.rs:1385-1398 | Compact tray summary prints `{:.0}%` bypassing `window_text`, so an unavailable session/weekly window shows as 0% used / 100% left (only Claude session has a guard at 1378) | user sees a fake number instead of "unavailable" | open
+- F1 | S1 | src/window.rs:1385-1398 | Compact tray summary prints `{:.0}%` bypassing `window_text`, so an unavailable session/weekly window shows as 0% used / 100% left (only Claude session has a guard at 1378) | user sees a fake number instead of "unavailable" | fixed (refactor/1-level4-fixes)
 
-- F46 | M5 | src/updater.rs:287-315 | `replace_target_binary`: if copy fails and restoring the backup also fails, the old exe lives only in the backup, and the next loop iteration (`remove_file(&backup_path)`) deletes it; after 60 failures the install has no exe | user loses the installed app until manual re-download | proposal: never delete backup unless target exists; report restore error | open
-- F47 | S1 | src/window/widget_tooltip.rs:97-103 | usage-summary tooltip: any provider error (`tray_error_lines`) replaces the whole summary, so a healthy widget's tooltip shows only another provider's error (bad with split pools/widgets) | proposal: show healthy usage plus errors, or scope to the widget's provider | open
+- F46 | M5 | src/updater.rs:287-315 | `replace_target_binary`: if copy fails and restoring the backup also fails, the old exe lives only in the backup, and the next loop iteration (`remove_file(&backup_path)`) deletes it; after 60 failures the install has no exe | user loses the installed app until manual re-download | proposal: never delete backup unless target exists; report restore error | fixed (refactor/1-level4-fixes)
+- F47 | S1 | src/window/widget_tooltip.rs:97-103 | usage-summary tooltip: any provider error (`tray_error_lines`) replaces the whole summary, so a healthy widget's tooltip shows only another provider's error (bad with split pools/widgets) | proposal: show healthy usage plus errors, or scope to the widget's provider | fixed (refactor/1-level4-fixes)
 
-- F52 | S1 | src/desktop_compositor.rs:154-185 (caller positioning.rs:432) | failed presenter (device loss / Present error) stays cached in PRESENTERS; caller only logs, so a desktop-nested widget can stay blank/stale until restart | proposal: `remove(hwnd)` on present/resize error, recreate next frame | open
+- F52 | S1 | src/desktop_compositor.rs:154-185 (caller positioning.rs:432) | failed presenter (device loss / Present error) stays cached in PRESENTERS; caller only logs, so a desktop-nested widget can stay blank/stale until restart | proposal: `remove(hwnd)` on present/resize error, recreate next frame | fixed (refactor/1-level4-fixes)
 
 ### Level 5 — Minor (refactoring focus)
 Hot paths:
@@ -48,7 +48,7 @@ Hot paths:
 - F3 | S1 | src/theme_engine/theme_rendering.rs:134 | `vec![0u32; w*h]` pixel buffer allocated and zeroed every render | proposal: reuse a size-matched buffer per surface | open
 - F4 | S1 | src/theme_engine/theme_rendering.rs:141 | `crate::theme::is_dark_mode()` (registry read) on every floating-card frame | proposal: cache dark-mode flag, invalidate on WM_SETTINGCHANGE | open
 Long functions (> ~100 lines):
-- F5 | S1 | src/window.rs:1266-1404 | `usage_summary_lines` (~140 lines), compact/detailed formatting duplicated (root of F1) | proposal: extract provider-label and quota-window formatter helpers | open
+- F5 | S1 | src/window.rs:1266-1404 | `usage_summary_lines` (~140 lines), compact/detailed formatting duplicated (root of F1) | proposal: extract provider-label and quota-window formatter helpers | fixed (refactor/1-level4-fixes)
 - F6 | S1 | src/window.rs:2240-2418 | `sync_surface_windows_with` (~180) | proposal: split primary recovery / mirror reconcile / desktop-surface reconcile | open
 - F7 | S1 | src/window.rs:2597-2988 | `run` (~390) | proposal: split instance setup, state init, loop start | open
 - F8 | S1 | src/window.rs:3011-3219 | `render_layered_impl` (~210) | proposal: frame prep / hover bounds / per-surface present | open
