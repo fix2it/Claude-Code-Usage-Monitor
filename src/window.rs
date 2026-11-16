@@ -1548,38 +1548,105 @@ fn tray_short_error_lines(
     tray_failures(data, failure, providers)
         .into_iter()
         .map(|(provider, account, error)| {
-            let provider = language.text(provider.descriptor().display_name);
-            let error = tray_short_error(error, language);
-            match account {
-                Some(name) => format!("{provider} ({name}): {error}"),
-                None => format!("{provider}: {error}"),
-            }
+            format!(
+                "{}: {}",
+                tray_pool_label(provider, account),
+                tray_short_error(error, language)
+            )
         })
         .collect()
 }
 
+/// Short pool name for the tray: the provider key for its default pool
+/// (`claude`), the pool id for a second pool (`claude_x`, `codex_x`,
+/// `antigravity_x`), and the key plus the name for any other profile.
+fn tray_pool_label(
+    provider: ProviderId,
+    account: Option<&crate::accounts::AccountProfile>,
+) -> String {
+    let key = provider.descriptor().key;
+    match account {
+        None => key.to_string(),
+        Some(profile) if profile.id == "default" || profile.id.is_empty() => key.to_string(),
+        Some(profile) if profile.id.starts_with(key) => profile.id.clone(),
+        Some(profile) => format!("{key} {}", profile.name),
+    }
+}
+
+/// Length as Windows counts it in `szTip`: UTF-16 code units.
+fn tray_tip_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// Shorten a "label: reason" line to `budget` UTF-16 units by cutting the
+/// label, so the reason at the end always stays readable.
+fn shorten_tray_line(line: &str, budget: usize) -> String {
+    if tray_tip_len(line) <= budget {
+        return line.to_string();
+    }
+    let (label, reason) = line.rsplit_once(": ").unwrap_or((line, ""));
+    let reason = if reason.is_empty() {
+        String::new()
+    } else {
+        format!(": {reason}")
+    };
+    let room = budget.saturating_sub(tray_tip_len(&reason) + 1);
+    let mut head = String::new();
+    for ch in label.chars() {
+        if tray_tip_len(&head) + ch.len_utf16() > room {
+            break;
+        }
+        head.push(ch);
+    }
+    let shortened = format!("{head}\u{2026}{reason}");
+    if tray_tip_len(&shortened) <= budget {
+        return shortened;
+    }
+    // A reason longer than the whole budget: keep what fits of the line.
+    let mut cut = String::new();
+    for ch in line.chars() {
+        if tray_tip_len(&cut) + ch.len_utf16() + 1 > budget {
+            break;
+        }
+        cut.push(ch);
+    }
+    cut.push('\u{2026}');
+    cut
+}
+
 /// Whole lines that fit the tray limit; the lines left over become "… +N".
+/// A line too long on its own is shortened, never cut by Windows.
 fn fit_tray_tip(lines: &[String], language: LanguageId) -> String {
     let more = |count: usize| format!("\u{2026} +{count} {}", language.text("more"));
     let mut text = String::new();
     for (index, line) in lines.iter().enumerate() {
         let left_after = lines.len() - index - 1;
-        let mut candidate = text.clone();
-        if !candidate.is_empty() {
-            candidate.push('\n');
-        }
-        candidate.push_str(line);
+        let sep = usize::from(!text.is_empty());
         let tail = if left_after > 0 {
-            more(left_after).chars().count() + 1
+            tray_tip_len(&more(left_after)) + 1
         } else {
             0
         };
-        if !text.is_empty() && candidate.chars().count() + tail > TRAY_TIP_MAX_CHARS {
-            text.push('\n');
-            text.push_str(&more(lines.len() - index));
+        let used = tray_tip_len(&text) + sep;
+        if used + tray_tip_len(line) + tail <= TRAY_TIP_MAX_CHARS {
+            if sep == 1 {
+                text.push('\n');
+            }
+            text.push_str(line);
+            continue;
+        }
+        if text.is_empty() {
+            // The first line always shows, shortened to leave room for "+N".
+            text = shorten_tray_line(line, TRAY_TIP_MAX_CHARS.saturating_sub(tail));
+            if left_after > 0 {
+                text.push('\n');
+                text.push_str(&more(left_after));
+            }
             return text;
         }
-        text = candidate;
+        text.push('\n');
+        text.push_str(&more(lines.len() - index));
+        return text;
     }
     text
 }
@@ -1594,7 +1661,7 @@ fn tray_error_lines(
         .into_iter()
         .map(|(provider, account, error)| {
             let provider = language.text(provider.descriptor().display_name);
-            match account {
+            match account.map(|profile| &profile.name) {
                 Some(name) => format!("{provider} ({name}): {}", error.message(language)),
                 None => format!("{provider}: {}", error.message(language)),
             }
@@ -1608,7 +1675,11 @@ fn tray_failures(
     data: Option<&AppUsageData>,
     failure: Option<poller::PollFailure>,
     providers: ProviderSet,
-) -> Vec<(ProviderId, Option<&str>, poller::PollError)> {
+) -> Vec<(
+    ProviderId,
+    Option<&crate::accounts::AccountProfile>,
+    poller::PollError,
+)> {
     let mut accounts: Vec<_> = data
         .into_iter()
         .flat_map(|data| &data.accounts)
@@ -1625,13 +1696,7 @@ fn tray_failures(
     accounts.sort_by_key(|account| !account.selected);
     let mut failures: Vec<_> = accounts
         .into_iter()
-        .filter_map(|account| {
-            Some((
-                account.provider,
-                Some(account.profile.name.as_str()),
-                account.error?,
-            ))
-        })
+        .filter_map(|account| Some((account.provider, Some(&account.profile), account.error?)))
         .collect();
     if let Some(failure) = failure.filter(|failure| providers.contains(failure.provider)) {
         if !data.is_some_and(|data| {
@@ -5257,7 +5322,7 @@ mod tray_usage_summary_tests {
             });
             assert_eq!(
                 tray_short_error_lines(None, failure, providers, LanguageId::English),
-                [format!("Claude Code: {expected}")]
+                [format!("claude: {expected}")]
             );
             assert_eq!(
                 tray_short_error_lines(
@@ -5266,14 +5331,19 @@ mod tray_usage_summary_tests {
                     providers,
                     LanguageId::from_code("ru").unwrap()
                 ),
-                [format!("Claude Code: {russian}")]
+                [format!("claude: {russian}")]
             );
         }
         let mut data = AppUsageData::default();
-        for (name, selected) in [("Claude Code X", false), ("Default", true)] {
+        for (id, name, selected) in [
+            ("claude_x", "Claude Code X", false),
+            ("default", "Default", true),
+            ("a1b2", "Work", false),
+        ] {
             data.accounts.push(crate::models::AccountUsage {
                 provider: ProviderId::Claude,
                 profile: crate::accounts::AccountProfile {
+                    id: id.into(),
                     name: name.into(),
                     enabled: true,
                     ..Default::default()
@@ -5289,14 +5359,15 @@ mod tray_usage_summary_tests {
         assert_eq!(
             lines,
             [
-                "Claude Code (Default): rate limited",
-                "Claude Code (Claude Code X): rate limited"
+                "claude: rate limited",
+                "claude_x: rate limited",
+                "claude Work: rate limited"
             ]
         );
         // Both pools fit whole in the Windows tooltip, unlike the long messages.
         let tip = fit_tray_tip(&lines, LanguageId::English);
         assert_eq!(tip, lines.join("\n"));
-        assert!(tip.chars().count() <= TRAY_TIP_MAX_CHARS);
+        assert!(tray_tip_len(&tip) <= TRAY_TIP_MAX_CHARS);
     }
 
     #[test]
@@ -5305,7 +5376,7 @@ mod tray_usage_summary_tests {
             .map(|index| format!("Provider number {index} (Account): rate limited"))
             .collect();
         let tip = fit_tray_tip(&lines, LanguageId::English);
-        assert!(tip.chars().count() <= TRAY_TIP_MAX_CHARS, "{tip}");
+        assert!(tray_tip_len(&tip) <= TRAY_TIP_MAX_CHARS, "{tip}");
         let shown: Vec<&str> = tip.lines().collect();
         let (last, kept) = shown.split_last().unwrap();
         assert_eq!(kept, &lines[..kept.len()]);
@@ -5315,6 +5386,28 @@ mod tray_usage_summary_tests {
         );
         assert!(!kept.is_empty());
         assert_eq!(fit_tray_tip(&lines[..1], LanguageId::English), lines[0]);
+        // A first line longer than the limit keeps its reason and the count;
+        // emoji take two UTF-16 units, the unit Windows counts.
+        let long = vec![
+            format!("Claude Code ({}): rate limited", "\u{1F600}".repeat(80)),
+            "Codex: no connection".to_string(),
+        ];
+        let tip = fit_tray_tip(&long, LanguageId::English);
+        assert!(tray_tip_len(&tip) <= TRAY_TIP_MAX_CHARS, "{tip}");
+        let shown: Vec<&str> = tip.lines().collect();
+        assert!(
+            shown[0].starts_with("Claude Code (") && shown[0].ends_with("\u{2026}: rate limited")
+        );
+        assert_eq!(shown[1], "\u{2026} +1 more");
+        let alone = fit_tray_tip(&long[..1], LanguageId::English);
+        assert!(tray_tip_len(&alone) <= TRAY_TIP_MAX_CHARS);
+        assert!(alone.ends_with(": rate limited"));
+        // Lines that only fit when counted in chars are summarized instead.
+        let wide: Vec<String> = (0..3)
+            .map(|index| format!("P{index} ({}): poll failed", "\u{1F600}".repeat(18)))
+            .collect();
+        let tip = fit_tray_tip(&wide, LanguageId::English);
+        assert!(tray_tip_len(&tip) <= TRAY_TIP_MAX_CHARS, "{tip}");
         assert_eq!(fit_tray_tip(&[], LanguageId::English), "");
     }
 
