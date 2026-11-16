@@ -71,6 +71,12 @@ copilot_window_title = "ตัวติดตามการใช้งาน C
 qoder_window_title = "ตัวติดตามการใช้งาน Qoder"
 
 [translations]
+"updated" = "อัปเดต"
+"rate limited" = "เกินขีดจำกัดคำขอ"
+"no connection" = "ไม่มีการเชื่อมต่อ"
+"sign in again" = "ลงชื่อเข้าใช้อีกครั้ง"
+"poll failed" = "ดึงข้อมูลล้มเหลว"
+"more" = "เพิ่มเติม"
 "Pools on one widget" = "รวมพูลไว้ในวิดเจ็ตเดียว"
 "Use Windows default font" = "ใช้แบบอักษรเริ่มต้นของ Windows"
 "Turn off to use Segoe UI for widget text" = "ปิดเพื่อใช้ Segoe UI สำหรับข้อความในวิดเจ็ต"

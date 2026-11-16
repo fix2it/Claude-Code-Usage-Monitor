@@ -71,6 +71,12 @@ copilot_window_title = "Copilot 使用量モニター"
 qoder_window_title = "Qoder 使用量モニター"
 
 [translations]
+"updated" = "更新"
+"rate limited" = "リクエスト制限"
+"no connection" = "接続なし"
+"sign in again" = "再ログインが必要"
+"poll failed" = "取得失敗"
+"more" = "件"
 "Pools on one widget" = "プールを一つのウィジェットにまとめる"
 "Use Windows default font" = "Windows の既定のフォントを使用"
 "Turn off to use Segoe UI for widget text" = "オフにするとウィジェットのテキストに Segoe UI を使用します"

@@ -56,6 +56,7 @@ pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> A
         auth_watch_snapshot: Vec::new(),
         last_poll_ok: false,
         last_poll_failure: None,
+        last_poll_ok_at: None,
         update_status: UpdateStatus::Idle,
         last_update_check_unix: None,
         taskbar_index: 0,

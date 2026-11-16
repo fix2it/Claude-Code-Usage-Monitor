@@ -150,6 +150,8 @@ struct AppState {
     auth_watch_snapshot: poller::CredentialWatchSnapshot,
     last_poll_ok: bool,
     last_poll_failure: Option<poller::PollFailure>,
+    /// When the last poll succeeded, for the tray tooltip's "updated HH:MM".
+    last_poll_ok_at: Option<SystemTime>,
     update_status: UpdateStatus,
     last_update_check_unix: Option<u64>,
 
@@ -1305,6 +1307,7 @@ pub(super) fn toggle_taskbar_lock(hwnd: HWND) {
     diagnose::log(format!("taskbar lock toggled: {enabled}"));
 }
 
+/// Compact usage text (whole percents); the widget tooltip adds precision.
 #[cfg(test)]
 fn tray_usage_summary_lines(
     data: &AppUsageData,
@@ -1312,28 +1315,10 @@ fn tray_usage_summary_lines(
     language: LanguageId,
     countdown: bool,
 ) -> Vec<String> {
-    tray_usage_summary_lines_with_pools(data, providers, language, countdown, true, true)
+    usage_summary_lines(data, providers, language, countdown, true, true, None)
 }
 
-fn tray_usage_summary_lines_with_pools(
-    data: &AppUsageData,
-    providers: ProviderSet,
-    language: LanguageId,
-    countdown: bool,
-    show_antigravity_gemini: bool,
-    show_antigravity_external: bool,
-) -> Vec<String> {
-    usage_summary_lines(
-        data,
-        providers,
-        language,
-        countdown,
-        show_antigravity_gemini,
-        show_antigravity_external,
-        None,
-    )
-}
-
+#[cfg(test)]
 fn usage_summary_lines(
     data: &AppUsageData,
     providers: ProviderSet,
@@ -1490,30 +1475,113 @@ fn usage_summary_lines_with_side_pools(
     lines
 }
 
-fn tray_usage_summary_from_state() -> Option<String> {
+/// Windows cuts a tray tooltip at 127 characters (`szTip`).
+const TRAY_TIP_MAX_CHARS: usize = 127;
+
+/// The tray tooltip is a status line, not the usage numbers (those are on the
+/// widget and the icon): "updated HH:MM", or one short line per failing pool.
+fn tray_status_from_state() -> Option<String> {
     let state = lock_state();
     let state = state.as_ref()?;
-    let errors = tray_error_lines(
+    let errors = tray_short_error_lines(
         state.data.as_ref(),
         state.last_poll_failure,
         state.providers,
         state.language,
     );
     if !errors.is_empty() {
-        return Some(errors.join("\n"));
+        return Some(fit_tray_tip(&errors, state.language));
     }
     if !state.last_poll_ok {
         return None;
     }
-    let lines = tray_usage_summary_lines_with_pools(
-        state.data.as_ref()?,
-        state.providers,
-        state.language,
-        state.usage_countdown,
-        state.show_antigravity_gemini,
-        effective_antigravity_external(state),
-    );
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    let (hour, minute) = state.last_poll_ok_at.and_then(local_hour_minute)?;
+    Some(tray_updated_text(state.language, hour, minute))
+}
+
+fn tray_updated_text(language: LanguageId, hour: u16, minute: u16) -> String {
+    format!(
+        "{} \u{2014} {} {hour:02}:{minute:02}",
+        language.strings().window_title,
+        language.text("updated"),
+    )
+}
+
+/// Local wall-clock hour and minute of `time`.
+fn local_hour_minute(time: SystemTime) -> Option<(u16, u16)> {
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTimeEx};
+    // FILETIME counts 100 ns ticks since 1601-01-01.
+    let ticks = (time.duration_since(UNIX_EPOCH).ok()?.as_nanos() / 100) as u64
+        + 11_644_473_600 * 10_000_000;
+    let file_time = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let mut utc = SYSTEMTIME::default();
+    let mut local = SYSTEMTIME::default();
+    unsafe {
+        FileTimeToSystemTime(&file_time, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTimeEx(None, &utc, &mut local).ok()?;
+    }
+    Some((local.wHour, local.wMinute))
+}
+
+/// Short failure text for the tray, where the full message would be cut off.
+fn tray_short_error(error: poller::PollError, language: LanguageId) -> &'static str {
+    use poller::PollError;
+    language.text(match error {
+        PollError::NoCredentials => "sign in again",
+        _ if error.is_auth() => "sign in again",
+        PollError::HttpStatus(429) => "rate limited",
+        PollError::NetworkError => "no connection",
+        _ => "poll failed",
+    })
+}
+
+/// Same failures as `tray_error_lines`, one short line each.
+fn tray_short_error_lines(
+    data: Option<&AppUsageData>,
+    failure: Option<poller::PollFailure>,
+    providers: ProviderSet,
+    language: LanguageId,
+) -> Vec<String> {
+    tray_failures(data, failure, providers)
+        .into_iter()
+        .map(|(provider, account, error)| {
+            let provider = language.text(provider.descriptor().display_name);
+            let error = tray_short_error(error, language);
+            match account {
+                Some(name) => format!("{provider} ({name}): {error}"),
+                None => format!("{provider}: {error}"),
+            }
+        })
+        .collect()
+}
+
+/// Whole lines that fit the tray limit; the lines left over become "… +N".
+fn fit_tray_tip(lines: &[String], language: LanguageId) -> String {
+    let more = |count: usize| format!("\u{2026} +{count} {}", language.text("more"));
+    let mut text = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        let left_after = lines.len() - index - 1;
+        let mut candidate = text.clone();
+        if !candidate.is_empty() {
+            candidate.push('\n');
+        }
+        candidate.push_str(line);
+        let tail = if left_after > 0 {
+            more(left_after).chars().count() + 1
+        } else {
+            0
+        };
+        if !text.is_empty() && candidate.chars().count() + tail > TRAY_TIP_MAX_CHARS {
+            text.push('\n');
+            text.push_str(&more(lines.len() - index));
+            return text;
+        }
+        text = candidate;
+    }
+    text
 }
 
 fn tray_error_lines(
@@ -1522,6 +1590,25 @@ fn tray_error_lines(
     providers: ProviderSet,
     language: LanguageId,
 ) -> Vec<String> {
+    tray_failures(data, failure, providers)
+        .into_iter()
+        .map(|(provider, account, error)| {
+            let provider = language.text(provider.descriptor().display_name);
+            match account {
+                Some(name) => format!("{provider} ({name}): {}", error.message(language)),
+                None => format!("{provider}: {}", error.message(language)),
+            }
+        })
+        .collect()
+}
+
+/// Failing pools as (provider, account name, error): accounts first, the
+/// selected one leading, then a provider-wide failure no account explains.
+fn tray_failures(
+    data: Option<&AppUsageData>,
+    failure: Option<poller::PollFailure>,
+    providers: ProviderSet,
+) -> Vec<(ProviderId, Option<&str>, poller::PollError)> {
     let mut accounts: Vec<_> = data
         .into_iter()
         .flat_map(|data| &data.accounts)
@@ -1536,15 +1623,14 @@ fn tray_error_lines(
         .collect();
     // Windows truncates tray tooltips: put the selected account's error first.
     accounts.sort_by_key(|account| !account.selected);
-    let mut lines: Vec<_> = accounts
+    let mut failures: Vec<_> = accounts
         .into_iter()
-        .map(|account| {
-            format!(
-                "{} ({}): {}",
-                language.text(account.provider.descriptor().display_name),
-                account.profile.name,
-                account.error.unwrap().message(language),
-            )
+        .filter_map(|account| {
+            Some((
+                account.provider,
+                Some(account.profile.name.as_str()),
+                account.error?,
+            ))
         })
         .collect();
     if let Some(failure) = failure.filter(|failure| providers.contains(failure.provider)) {
@@ -1555,18 +1641,14 @@ fn tray_error_lines(
                     && account.error.is_some()
             })
         }) {
-            lines.push(format!(
-                "{}: {}",
-                language.text(failure.provider.descriptor().display_name),
-                failure.error.message(language)
-            ));
+            failures.push((failure.provider, None, failure.error));
         }
     }
-    lines
+    failures
 }
 
 fn tray_icon_tooltip_from_state() -> String {
-    tray_usage_summary_from_state().unwrap_or_else(|| {
+    tray_status_from_state().unwrap_or_else(|| {
         lock_state()
             .as_ref()
             .map(|state| state.language.strings().window_title.to_string())
@@ -1577,7 +1659,7 @@ fn tray_icon_tooltip_from_state() -> String {
 fn sync_tray_icon(hwnd: HWND) {
     let hwnd = controller_for(hwnd);
     widget_tooltip::refresh();
-    let usage_tooltip = tray_usage_summary_from_state();
+    let usage_tooltip = tray_status_from_state();
     let themed = {
         let mut state = lock_state();
         state.as_mut().and_then(|state| {
@@ -2927,6 +3009,7 @@ pub fn run() {
                 auth_watch_snapshot: Vec::new(),
                 last_poll_ok: false,
                 last_poll_failure: None,
+                last_poll_ok_at: None,
                 update_status: UpdateStatus::Idle,
                 last_update_check_unix: settings.last_update_check_unix,
                 taskbar_index: settings.taskbar_index,
@@ -3469,6 +3552,7 @@ fn do_poll_once(hwnd: HWND) {
                 invalidate_metrics(state);
                 state.last_poll_ok = true;
                 state.last_poll_failure = None;
+                state.last_poll_ok_at = Some(SystemTime::now());
                 data
             };
             // The dashboard runs separately and follows the same cache as the
@@ -3525,6 +3609,7 @@ fn do_poll_once(hwnd: HWND) {
                 invalidate_metrics(s);
                 s.last_poll_ok = true;
                 s.last_poll_failure = None;
+                s.last_poll_ok_at = Some(SystemTime::now());
 
                 // Retry partial failures; restore the normal interval after recovery.
                 if let Some(retry_ms) = retry_ms {
@@ -5139,6 +5224,114 @@ mod tray_usage_summary_tests {
             weekly_label: weekly_label.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn tray_status_names_each_failing_pool_in_a_few_words() {
+        use crate::poller::{PollError, PollFailure};
+        let providers = ProviderSet::from_enabled([ProviderId::Claude]);
+        for (error, expected, russian) in [
+            (PollError::HttpStatus(429), "rate limited", "лимит запросов"),
+            (PollError::NetworkError, "no connection", "нет связи"),
+            (
+                PollError::TokenExpired,
+                "sign in again",
+                "нужно войти заново",
+            ),
+            (
+                PollError::NoCredentials,
+                "sign in again",
+                "нужно войти заново",
+            ),
+            (
+                PollError::HttpStatus(401),
+                "sign in again",
+                "нужно войти заново",
+            ),
+            (PollError::HttpStatus(500), "poll failed", "ошибка опроса"),
+            (PollError::RequestFailed, "poll failed", "ошибка опроса"),
+        ] {
+            let failure = Some(PollFailure {
+                provider: ProviderId::Claude,
+                error,
+            });
+            assert_eq!(
+                tray_short_error_lines(None, failure, providers, LanguageId::English),
+                [format!("Claude Code: {expected}")]
+            );
+            assert_eq!(
+                tray_short_error_lines(
+                    None,
+                    failure,
+                    providers,
+                    LanguageId::from_code("ru").unwrap()
+                ),
+                [format!("Claude Code: {russian}")]
+            );
+        }
+        let mut data = AppUsageData::default();
+        for (name, selected) in [("Claude Code X", false), ("Default", true)] {
+            data.accounts.push(crate::models::AccountUsage {
+                provider: ProviderId::Claude,
+                profile: crate::accounts::AccountProfile {
+                    name: name.into(),
+                    enabled: true,
+                    ..Default::default()
+                },
+                source_signature: String::new(),
+                source_path: None,
+                usage: None,
+                error: Some(PollError::HttpStatus(429)),
+                selected,
+            });
+        }
+        let lines = tray_short_error_lines(Some(&data), None, providers, LanguageId::English);
+        assert_eq!(
+            lines,
+            [
+                "Claude Code (Default): rate limited",
+                "Claude Code (Claude Code X): rate limited"
+            ]
+        );
+        // Both pools fit whole in the Windows tooltip, unlike the long messages.
+        let tip = fit_tray_tip(&lines, LanguageId::English);
+        assert_eq!(tip, lines.join("\n"));
+        assert!(tip.chars().count() <= TRAY_TIP_MAX_CHARS);
+    }
+
+    #[test]
+    fn tray_tip_keeps_whole_lines_and_counts_the_rest() {
+        let lines: Vec<String> = (1..=6)
+            .map(|index| format!("Provider number {index} (Account): rate limited"))
+            .collect();
+        let tip = fit_tray_tip(&lines, LanguageId::English);
+        assert!(tip.chars().count() <= TRAY_TIP_MAX_CHARS, "{tip}");
+        let shown: Vec<&str> = tip.lines().collect();
+        let (last, kept) = shown.split_last().unwrap();
+        assert_eq!(kept, &lines[..kept.len()]);
+        assert_eq!(
+            *last,
+            format!("\u{2026} +{} more", lines.len() - kept.len())
+        );
+        assert!(!kept.is_empty());
+        assert_eq!(fit_tray_tip(&lines[..1], LanguageId::English), lines[0]);
+        assert_eq!(fit_tray_tip(&[], LanguageId::English), "");
+    }
+
+    #[test]
+    fn tray_status_when_healthy_is_the_update_time() {
+        assert_eq!(
+            tray_updated_text(LanguageId::English, 7, 5),
+            format!(
+                "{} \u{2014} updated 07:05",
+                LanguageId::English.strings().window_title
+            )
+        );
+        assert!(
+            tray_updated_text(LanguageId::from_code("ru").unwrap(), 17, 52)
+                .ends_with("обновлено 17:52")
+        );
+        assert!(local_hour_minute(SystemTime::now()).is_some_and(|(h, m)| h < 24 && m < 60));
     }
 
     #[test]
