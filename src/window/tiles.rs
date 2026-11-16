@@ -27,7 +27,9 @@ pub(super) enum Tile {
     Split(SplitPool),
 }
 
-const TILE_COUNT: usize = 6 + SplitPool::ALL.len();
+/// Tiles before the split-pool tiles in `Tile::ALL`.
+const FIXED_TILES: usize = 6;
+const TILE_COUNT: usize = FIXED_TILES + SplitPool::ALL.len();
 
 impl Tile {
     pub(super) const ALL: [Tile; TILE_COUNT] = [
@@ -51,7 +53,7 @@ impl Tile {
             Tile::OpenCode => 3,
             Tile::Qoder => 4,
             Tile::AgyExternal => 5,
-            Tile::Split(pool) => 6 + pool.index(),
+            Tile::Split(pool) => FIXED_TILES + pool.index(),
         }
     }
 

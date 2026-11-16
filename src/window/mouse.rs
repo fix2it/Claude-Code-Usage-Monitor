@@ -699,21 +699,27 @@ mod hover_revalidation_tests {
     }
 }
 
-fn tile_hover_at(state: &super::AppState, hwnd: HWND, lparam: LPARAM, tile: Tile) -> bool {
+/// Which tiles of the hovered window's surface contain the cursor.
+fn tiles_hovered_at(
+    state: &super::AppState,
+    hwnd: HWND,
+    lparam: LPARAM,
+) -> [bool; Tile::ALL.len()] {
+    let none = [false; Tile::ALL.len()];
     let Some(surface) = surface_index_for_window(state, hwnd) else {
-        return false;
-    };
-    let Some(rect) = state.tiles.rect(surface, tile) else {
-        return false;
+        return none;
     };
     let Some(theme) = state.active_theme.as_ref() else {
-        return false;
+        return none;
     };
     let scale = theme_surface_scale(theme, surface).max(0.01);
     let (x, y) = mouse_client_point(lparam);
-    let lx = x / scale;
-    let ly = y / scale;
-    lx >= rect.0 && lx < rect.0 + rect.2 && ly >= rect.1 && ly < rect.1 + rect.3
+    let (lx, ly) = (x / scale, y / scale);
+    Tile::ALL.map(|tile| {
+        state.tiles.rect(surface, tile).is_some_and(|rect| {
+            lx >= rect.0 && lx < rect.0 + rect.2 && ly >= rect.1 && ly < rect.1 + rect.3
+        })
+    })
 }
 
 /// A duplicate `WM_MOUSEMOVE` at the same client point cannot change any
@@ -753,14 +759,11 @@ pub(super) fn update_mouse_hover(hwnd: HWND, lparam: LPARAM) {
     // `mouse_target_at` only returns objects with non-empty `mouse_events`,
     // and the provider wrappers have none, so tiles are detected with their
     // cached `object_bounds` rects.
-    let hovered = {
-        let state = lock_state();
-        Tile::ALL.map(|tile| {
-            state
-                .as_ref()
-                .is_some_and(|state| tile_hover_at(state, hwnd, lparam, tile))
-        })
-    };
+    let hovered = lock_state()
+        .as_ref()
+        .map_or([false; Tile::ALL.len()], |state| {
+            tiles_hovered_at(state, hwnd, lparam)
+        });
     for (tile, hovered) in Tile::ALL.into_iter().zip(hovered) {
         super::set_tile_hover(hwnd, tile, hovered);
     }

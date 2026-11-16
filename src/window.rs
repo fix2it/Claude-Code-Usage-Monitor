@@ -4129,7 +4129,8 @@ fn toggle_account_pool(state: &mut AppState, provider: ProviderId, main: bool) -
     let provider_on = state.providers.contains(provider);
     let pools = match provider {
         ProviderId::Claude => &mut state.accounts.claude,
-        _ => &mut state.accounts.codex,
+        ProviderId::Codex => &mut state.accounts.codex,
+        _ => return false,
     };
     if !pools.profiles.iter().any(|profile| profile.id == target_id) {
         pools.profiles.push(if main {
@@ -5788,7 +5789,8 @@ fn set_tile_hover(",
         for (i, tile) in super::Tile::ALL.into_iter().enumerate() {
             assert_eq!(tiles.rect(0, tile), bounds[i], "{tile:?}");
         }
-        for pool in crate::theme_engine::SplitPool::ALL {
+        for (i, pool) in crate::theme_engine::SplitPool::ALL.into_iter().enumerate() {
+            assert_eq!(pool.index(), i, "SplitPool::ALL follows the phase order");
             assert_eq!(super::Tile::Split(pool).object_id(), pool.object_id());
         }
     }
