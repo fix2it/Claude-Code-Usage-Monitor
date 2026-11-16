@@ -200,6 +200,13 @@ pub fn carry_forward_failures(
             let mut carried = last.clone();
             carried.mark_stale();
             merged.insert(provider, carried);
+            // A whole failed poll has no per-provider errors: an earlier
+            // failure of this provider still explains its stale reading.
+            if merged.provider_error(provider).is_none() {
+                if let Some(error) = previous.provider_error(provider) {
+                    merged.set_provider_error(provider, error);
+                }
+            }
         }
     }
     merged

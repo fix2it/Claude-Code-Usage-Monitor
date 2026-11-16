@@ -294,6 +294,10 @@ impl AppUsageData {
         self.provider_errors.insert(provider, error);
     }
 
+    pub fn provider_error(&self, provider: ProviderId) -> Option<crate::poller::PollError> {
+        self.provider_errors.get(&provider).copied()
+    }
+
     pub fn clear_provider_error(&mut self, provider: ProviderId) {
         self.provider_errors.remove(&provider);
     }
