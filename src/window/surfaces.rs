@@ -6,38 +6,55 @@ pub(super) fn sync_surface_windows() {
     sync_surface_windows_with(|| unsafe { create_desktop_surface_window() });
 }
 
-pub(super) fn sync_surface_windows_with(mut create_desktop: impl FnMut() -> HWND) {
+pub(super) fn sync_surface_windows_with(create_desktop: impl FnMut() -> HWND) {
     let primary = lock_state().as_ref().map(|state| state.hwnd.to_hwnd());
     let Some(primary) = primary else {
         return;
     };
-    if !lifecycle::surface_has_class(primary, "ClaudeCodeUsageSurface") {
-        let replacement = unsafe { lifecycle::create_primary_surface() };
-        if replacement.is_invalid() {
-            diagnose::log_recovery("unable to recreate primary surface; will retry");
-            return;
-        }
-        if let Some(state) = lock_state().as_mut() {
-            state.hwnd = SendHwnd::from_hwnd(replacement);
-            state.embedded = false;
-            state.taskbar_hwnd = None;
-            state.tray_notify_hwnd = None;
-            state.dragging = false;
-            state.pending_drag = false;
-            state.auto_ejected = false;
-            state.auto_ejected_for_capacity = false;
-            state.auto_ejected_origin = None;
-            state.auto_ejected_host = None;
-            state.is_snapped = false;
-            state.is_switching_window_style = false;
-            state.pending_mouse_click = None;
-            set_window_title(replacement, state.language.strings());
-        }
-        diagnose::log_recovery(format!("recreated primary surface hwnd={replacement:?}"));
-        // The replacement may stay hidden and never be positioned; recheck
-        // hover (and run any pending leave action) against it anyway.
-        mouse::request_hover_revalidation(replacement);
+    if !lifecycle::surface_has_class(primary, "ClaudeCodeUsageSurface")
+        && !recreate_primary_surface()
+    {
+        return;
     }
+    replace_destroyed_mirrors();
+    let (desired_total, desktop_surfaces) = desired_surface_layout();
+    reconcile_mirror_count(desired_total.saturating_sub(1));
+    reconcile_desktop_surfaces(desired_total, desktop_surfaces, create_desktop);
+}
+
+/// Replace a destroyed primary surface. Returns false when the replacement
+/// could not be created; the next sync retries.
+fn recreate_primary_surface() -> bool {
+    let replacement = unsafe { lifecycle::create_primary_surface() };
+    if replacement.is_invalid() {
+        diagnose::log_recovery("unable to recreate primary surface; will retry");
+        return false;
+    }
+    if let Some(state) = lock_state().as_mut() {
+        state.hwnd = SendHwnd::from_hwnd(replacement);
+        state.embedded = false;
+        state.taskbar_hwnd = None;
+        state.tray_notify_hwnd = None;
+        state.dragging = false;
+        state.pending_drag = false;
+        state.auto_ejected = false;
+        state.auto_ejected_for_capacity = false;
+        state.auto_ejected_origin = None;
+        state.auto_ejected_host = None;
+        state.is_snapped = false;
+        state.is_switching_window_style = false;
+        state.pending_mouse_click = None;
+        set_window_title(replacement, state.language.strings());
+    }
+    diagnose::log_recovery(format!("recreated primary surface hwnd={replacement:?}"));
+    // The replacement may stay hidden and never be positioned; recheck
+    // hover (and run any pending leave action) against it anyway.
+    mouse::request_hover_revalidation(replacement);
+    true
+}
+
+/// Recreate mirror windows that were destroyed behind our back, in place.
+fn replace_destroyed_mirrors() {
     let mirrors = lock_state()
         .as_ref()
         .map(|state| state.mirror_hwnds.clone())
@@ -61,33 +78,39 @@ pub(super) fn sync_surface_windows_with(mut create_desktop: impl FnMut() -> HWND
             }
         }
     }
-    let (desired_total, desktop_surfaces) = {
-        let state = lock_state();
-        state
-            .as_ref()
-            .map(|state| {
-                let surfaces = state
-                    .active_theme
-                    .as_ref()
-                    .map(|theme| {
-                        theme
-                            .surfaces
-                            .iter()
-                            .map(|surface| {
-                                surface
-                                    .placement
-                                    .nest
-                                    .resolve(surface.placement.reference.region)
-                                    == SurfaceNest::Desktop
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                (surfaces.len().max(1), surfaces)
-            })
-            .unwrap_or_else(|| (1, Vec::new()))
-    };
-    let desired_mirrors = desired_total.saturating_sub(1);
+}
+
+/// Surface count of the active theme (at least one) and which surfaces nest
+/// on the desktop.
+fn desired_surface_layout() -> (usize, Vec<bool>) {
+    let state = lock_state();
+    state
+        .as_ref()
+        .map(|state| {
+            let surfaces = state
+                .active_theme
+                .as_ref()
+                .map(|theme| {
+                    theme
+                        .surfaces
+                        .iter()
+                        .map(|surface| {
+                            surface
+                                .placement
+                                .nest
+                                .resolve(surface.placement.reference.region)
+                                == SurfaceNest::Desktop
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            (surfaces.len().max(1), surfaces)
+        })
+        .unwrap_or_else(|| (1, Vec::new()))
+}
+
+/// Destroy extra mirror windows and create missing ones.
+fn reconcile_mirror_count(desired_mirrors: usize) {
     loop {
         let remove = {
             let mut state = lock_state();
@@ -120,7 +143,15 @@ pub(super) fn sync_surface_windows_with(mut create_desktop: impl FnMut() -> HWND
             state.mirror_hwnds.push(SendHwnd::from_hwnd(mirror));
         }
     }
+}
 
+/// Drop desktop windows the theme no longer wants (or that died) and create
+/// the missing ones for desktop-nested surfaces.
+fn reconcile_desktop_surfaces(
+    desired_total: usize,
+    desktop_surfaces: Vec<bool>,
+    mut create_desktop: impl FnMut() -> HWND,
+) {
     let stale_desktop_windows = {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {
