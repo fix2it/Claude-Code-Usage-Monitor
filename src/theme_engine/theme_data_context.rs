@@ -144,9 +144,17 @@ impl DataContext {
     fn insert_display_flags(&mut self, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
         self.insert("display.countdown", runtime.countdown as u8 as f64);
         self.insert("display.show_pace", runtime.show_pace as u8 as f64);
+        let support = runtime.pool_split_support;
+        // Legacy all-provider key for themes written before F68.
+        self.insert("display.pool_split_supported", support.all() as u8 as f64);
         self.insert(
-            "display.pool_split_supported",
-            runtime.pool_split_supported as u8 as f64,
+            "display.claude_split_supported",
+            support.claude as u8 as f64,
+        );
+        self.insert("display.codex_split_supported", support.codex as u8 as f64);
+        self.insert(
+            "display.antigravity_split_supported",
+            support.antigravity as u8 as f64,
         );
         self.insert("display.show_fable", runtime.show_fable as u8 as f64);
         let (fable_main, fable_x) = fable_pools(runtime);

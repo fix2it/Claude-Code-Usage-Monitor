@@ -649,7 +649,7 @@ pub(super) fn mouse_action_object_context(
         .ok_or_else(|| format!("Surface {surface_index} does not exist"))?;
     let metrics = cached.map_or_else(
         || display_metrics(theme, data, runtime),
-        |metrics| metrics_for_phase(metrics.clone(), runtime),
+        |metrics| metrics_for_surface(theme, data, metrics, runtime),
     );
     let (width, height) =
         resolve_surface_content_size_with_metrics(theme, surface_index, data, runtime, &metrics);
@@ -837,7 +837,7 @@ impl MouseActionExecutionContext<'_> {
         let object_id = object.id.clone();
         let metrics = cached.map_or_else(
             || display_metrics(&effective, self.data, self.runtime),
-            |metrics| metrics_for_phase(metrics.clone(), self.runtime),
+            |metrics| metrics_for_surface(&effective, self.data, metrics, self.runtime),
         );
         let (width, height) = resolve_surface_content_size_with_metrics(
             &effective,

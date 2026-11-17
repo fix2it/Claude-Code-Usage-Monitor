@@ -133,6 +133,10 @@ fn runtime_with_geometry(
     let Some(surface) = theme.surfaces.get(surface_index) else {
         return runtime;
     };
+    // The primary gate already ran; a mirror can only narrow it (F66).
+    let support = runtime.pool_split_support;
+    let runtime = runtime
+        .with_pool_split_support(support.and(theme.surface_pool_split_support(surface_index)));
     let nest = surface
         .placement
         .nest

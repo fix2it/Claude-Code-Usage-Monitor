@@ -445,7 +445,7 @@ fn classic_providers_menu() -> ContextMenuItem {
             "Pools on one widget",
             action,
             &format!(
-                "display.pool_split_supported && providers.{provider}.enabled && {provider}.{first}.enabled && {provider}.{second}.enabled"
+                "display.{provider}_split_supported && providers.{provider}.enabled && {provider}.{first}.enabled && {provider}.{second}.enabled"
             ),
         )
     };
@@ -1087,7 +1087,13 @@ mod tests {
         ] {
             let item = providers.iter().find(|item| item.id == id).unwrap();
             for supported in [false, true] {
-                context.insert("display.pool_split_supported", supported as u8 as f64);
+                for key in [
+                    "display.claude_split_supported",
+                    "display.codex_split_supported",
+                    "display.antigravity_split_supported",
+                ] {
+                    context.insert(key, supported as u8 as f64);
+                }
                 for p in [false, true] {
                     for a in [false, true] {
                         for b in [false, true] {
