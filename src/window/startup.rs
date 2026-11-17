@@ -38,6 +38,11 @@ pub fn run() {
     let Some(_mutex) = acquire_single_instance(&args) else {
         return;
     };
+    // Only the instance holding the shared mutex may touch update files: a
+    // second launch must not delete a download the running one is staging.
+    if !args.allow_multiple {
+        updater::cleanup_after_update();
+    }
 
     let class_name = native_interop::wide_str("ClaudeCodeUsageMonitor");
 

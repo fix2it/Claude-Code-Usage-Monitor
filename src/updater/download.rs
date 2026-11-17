@@ -36,10 +36,12 @@ impl AssetIntegrity {
         Ok(Self { size, sha256 })
     }
 
+    #[cfg(test)]
     pub(super) fn size_arg(&self) -> String {
         self.size.to_string()
     }
 
+    #[cfg(test)]
     pub(super) fn digest_arg(&self) -> String {
         let hex: String = self
             .sha256

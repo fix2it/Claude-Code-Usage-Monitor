@@ -1,25 +1,28 @@
 use std::fs::File;
-use std::io;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
-use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-
 const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "2022-11-28";
-const HELPER_EXE_NAME: &str = "updater-helper.exe";
-const DOWNLOAD_EXE_NAME: &str = "update-download.exe";
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+/// Files the pre-2.23.603 helper-based updater left in
+/// `%LOCALAPPDATA%\ClaudeCodeUsageMonitor\updates`; removed on startup.
+const LEGACY_UPDATE_FILES: [&str; 3] = [
+    "updater-helper.exe",
+    "update-download.exe",
+    "update-download.exe.part",
+];
+/// How long startup keeps trying to delete `<exe>.old` while the previous
+/// process is still exiting (it holds the image mapped until it is gone).
+const LEFTOVER_CLEANUP_ATTEMPTS: u32 = 40;
+const LEFTOVER_CLEANUP_DELAY: Duration = Duration::from_millis(500);
 
 mod download;
 mod release;
 
-use download::{download_release_asset, open_verified_source, AssetIntegrity};
+#[cfg(test)]
+use download::AssetIntegrity;
+use download::{download_release_asset, open_verified_source};
 pub use release::ReleaseDescriptor;
 use release::{release_descriptor, GitHubRelease};
 
@@ -49,50 +52,6 @@ impl AvailableUpdate {
     }
 }
 
-pub fn handle_cli_mode(args: &[String]) -> Option<i32> {
-    if args.get(1).is_some_and(|arg| arg == "--apply-update") {
-        return Some(
-            match parse_apply_update_args(args).and_then(|(target, source, pid, integrity)| {
-                apply_update(target, source, pid, &integrity)
-            }) {
-                Ok(()) => 0,
-                Err(error) => {
-                    show_error_message("Update failed", &error);
-                    1
-                }
-            },
-        );
-    }
-
-    None
-}
-
-fn parse_apply_update_args(
-    args: &[String],
-) -> Result<(PathBuf, PathBuf, u32, AssetIntegrity), String> {
-    if args.len() != 7 {
-        return Err(
-            "The updater helper requires a target, source, process ID, size, and SHA-256 digest."
-                .into(),
-        );
-    }
-    let pid = args[4]
-        .parse::<u32>()
-        .ok()
-        .filter(|pid| *pid != 0)
-        .ok_or_else(|| "Invalid updater process ID.".to_string())?;
-    let size = args[5]
-        .parse::<u64>()
-        .map_err(|_| "Invalid update size.".to_string())?;
-    let integrity = AssetIntegrity::new(size, Some(&args[6]))?;
-    Ok((
-        PathBuf::from(&args[2]),
-        PathBuf::from(&args[3]),
-        pid,
-        integrity,
-    ))
-}
-
 pub fn current_install_channel() -> InstallChannel {
     // Fork builds always update from the fork's GitHub Releases, even when the
     // executable sits under a WinGet packages folder, so the upstream WinGet
@@ -116,69 +75,177 @@ fn check_channel_updates(
     }
 }
 
+/// Downloads the release next to the running exe, swaps it in by renaming
+/// and starts it. On `Ok` the caller must exit so the new process can take
+/// over the single-instance mutex; on `Err` the installed exe is in place.
+///
+/// No helper copy and no hidden child process: Windows allows renaming a
+/// running executable, so `<exe>` becomes `<exe>.old` and the verified
+/// `<exe>.new` becomes `<exe>`. The next start deletes `<exe>.old`.
 pub fn begin_self_update(release: &ReleaseDescriptor) -> Result<(), String> {
     let current_exe =
         std::env::current_exe().map_err(|e| format!("Unable to locate current executable: {e}"))?;
     ensure_target_location_writable(&current_exe)?;
 
-    let stage_dir = updates_dir()?;
-    std::fs::create_dir_all(&stage_dir)
-        .map_err(|e| format!("Unable to create updater working directory: {e}"))?;
-
-    let helper_path = stage_dir.join(HELPER_EXE_NAME);
-    let download_path = stage_dir.join(DOWNLOAD_EXE_NAME);
-    let partial_download_path = stage_dir.join(format!("{DOWNLOAD_EXE_NAME}.part"));
-
-    if helper_path.exists() {
-        let _ = std::fs::remove_file(&helper_path);
-    }
-    if download_path.exists() {
-        let _ = std::fs::remove_file(&download_path);
-    }
-    if partial_download_path.exists() {
-        let _ = std::fs::remove_file(&partial_download_path);
+    let staged = staged_path_for(&current_exe);
+    let partial = partial_path_for(&current_exe);
+    for stale in [&staged, &partial] {
+        if stale.exists() {
+            std::fs::remove_file(stale)
+                .map_err(|e| format!("Unable to remove {}: {e}", stale.display()))?;
+        }
     }
 
-    download_release_asset(release, &partial_download_path, &download_path)?;
-    std::fs::copy(&current_exe, &helper_path)
-        .map_err(|e| format!("Unable to prepare updater helper: {e}"))?;
+    download_release_asset(release, &partial, &staged)?;
+    // Re-check the staged bytes right before the swap. The handle denies
+    // writers meanwhile and is released so the file can be renamed.
+    let swapped = open_verified_source(&staged, &release.integrity).and_then(|handle| {
+        drop(handle);
+        swap_in_staged_binary(&current_exe, &staged)
+    });
+    if let Err(error) = swapped {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
 
-    let pid = std::process::id().to_string();
-    let target = current_exe.to_string_lossy().to_string();
-    let source = download_path.to_string_lossy().to_string();
-
-    Command::new(&helper_path)
-        .arg("--apply-update")
-        .arg(target)
-        .arg(source)
-        .arg(pid)
-        .arg(release.integrity.size_arg())
-        .arg(release.integrity.digest_arg())
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Unable to launch updater helper: {e}"))?;
-
+    if let Err(error) = launch_updated_binary(&current_exe) {
+        return Err(match rollback_swap(&current_exe, &staged) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&staged);
+                format!(
+                    "Unable to start the updated app: {error}. The previous version was restored."
+                )
+            }
+            Err(rollback_error) => {
+                format!("Unable to start the updated app: {error}. {rollback_error}")
+            }
+        });
+    }
     Ok(())
 }
 
-fn apply_update(
-    target: PathBuf,
-    source: PathBuf,
-    pid: u32,
-    integrity: &AssetIntegrity,
-) -> Result<(), String> {
-    // Keep this handle open through replacement so the checked bytes cannot change.
-    let verified_source = open_verified_source(&source, integrity)?;
-    let _ = wait_for_process_exit(pid, Duration::from_secs(30));
-    replace_target_binary(&target, &source)?;
-    relaunch_target(&target)?;
-    drop(verified_source);
-    let _ = std::fs::remove_file(&source);
+/// `target` -> `target.old`, then `staged` -> `target`. On failure `target`
+/// holds the previously installed exe again (or the error says where it is).
+fn swap_in_staged_binary(target: &Path, staged: &Path) -> Result<(), String> {
+    let backup = backup_path_for(target);
+    if backup.exists() {
+        // The backup may be the only copy of the installed exe (an earlier
+        // restore failed); drop it only while the target itself is in place.
+        if !target.exists() {
+            return Err(format!(
+                "Unable to update {}. The previous version is kept at {}.",
+                target.display(),
+                backup.display()
+            ));
+        }
+        std::fs::remove_file(&backup).map_err(|e| {
+            format!(
+                "Unable to remove the leftover {} from an earlier update: {e}",
+                backup.display()
+            )
+        })?;
+    }
 
+    std::fs::rename(target, &backup)
+        .map_err(|e| format!("Unable to move the running app aside: {e}"))?;
+
+    if let Err(error) = std::fs::rename(staged, target) {
+        return Err(match std::fs::rename(&backup, target) {
+            Ok(()) => format!("Unable to install the update: {error}"),
+            Err(restore_error) => format!(
+                "Unable to install the update: {error}. Restoring the previous version \
+                 failed ({restore_error}); it is kept at {}.",
+                backup.display()
+            ),
+        });
+    }
     Ok(())
+}
+
+/// Undoes [`swap_in_staged_binary`]: the new exe goes back to `staged`, the
+/// backup back to `target`.
+fn rollback_swap(target: &Path, staged: &Path) -> Result<(), String> {
+    let backup = backup_path_for(target);
+    std::fs::rename(target, staged)
+        .and_then(|()| std::fs::rename(&backup, target))
+        .map_err(|e| {
+            format!(
+                "Restoring the previous version failed ({e}); it is kept at {}.",
+                backup.display()
+            )
+        })
+}
+
+/// Starts the updated exe as an ordinary process with this process's
+/// arguments (keeps `--allow-multiple`, `--diagnose`). `CCUM_RELAUNCH` makes
+/// it wait for this process to release the single-instance mutex.
+fn launch_updated_binary(target: &Path) -> Result<(), String> {
+    let mut command = Command::new(target);
+    command.args(std::env::args_os().skip(1));
+    if let Some(parent) = target.parent() {
+        command.current_dir(parent);
+    }
+    command
+        .env(crate::window::ENV_RELAUNCH, "1")
+        .env_remove(crate::window::ENV_LAST_RELAUNCH_UNIX)
+        .env_remove(crate::window::ENV_HANG_RELAUNCHES)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// Startup housekeeping after an update. Runs only in the instance that owns
+/// the single-instance mutex, before any new update can start. Deletes a
+/// stale `<exe>.new` / `<exe>.new.part` at once, the files the old
+/// helper-based updater left in the local updates folder, and `<exe>.old`.
+/// The previous process may still be exiting and hold `<exe>.old` mapped, so
+/// that one is retried in the background; a failure is silent and retried on
+/// the next start. The retry can never hit the running exe moved aside by a
+/// later update: a mapped image cannot be deleted.
+pub fn cleanup_after_update() {
+    if let Ok(dir) = updates_dir() {
+        remove_legacy_update_files(&dir);
+    }
+    let Ok(current_exe) = std::env::current_exe() else {
+        return;
+    };
+    for stale in [
+        staged_path_for(&current_exe),
+        partial_path_for(&current_exe),
+    ] {
+        let _ = std::fs::remove_file(stale);
+    }
+    let backup = [backup_path_for(&current_exe)];
+    if remove_leftovers(&backup, 1, Duration::ZERO) == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        remove_leftovers(&backup, LEFTOVER_CLEANUP_ATTEMPTS, LEFTOVER_CLEANUP_DELAY);
+    });
+}
+
+/// Returns how many of `paths` still exist after the last attempt.
+fn remove_leftovers(paths: &[PathBuf], attempts: u32, delay: Duration) -> usize {
+    let mut pending = 0;
+    for attempt in 0..attempts {
+        pending = paths
+            .iter()
+            .filter(|path| path.exists() && std::fs::remove_file(path).is_err())
+            .count();
+        if pending == 0 || attempt + 1 == attempts {
+            break;
+        }
+        std::thread::sleep(delay);
+    }
+    pending
+}
+
+fn remove_legacy_update_files(dir: &Path) {
+    for name in LEGACY_UPDATE_FILES {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+    // Succeeds only when the folder is empty.
+    let _ = std::fs::remove_dir(dir);
 }
 
 fn fetch_latest_release() -> Result<Option<ReleaseDescriptor>, String> {
@@ -215,122 +282,6 @@ fn build_agent() -> Result<ureq::Agent, String> {
         .into())
 }
 
-fn replace_target_binary(target: &Path, source: &Path) -> Result<(), String> {
-    replace_target_binary_with_retries(target, source, 60, Duration::from_millis(500))
-}
-
-fn replace_target_binary_with_retries(
-    target: &Path,
-    source: &Path,
-    attempts: u32,
-    delay: Duration,
-) -> Result<(), String> {
-    let backup_path = backup_path_for(target);
-    let mut last_error = None;
-
-    for _ in 0..attempts {
-        // The backup may be the only copy of the installed exe (a failed
-        // restore, or an earlier interrupted update); drop it only while the
-        // target itself is still in place.
-        if target.exists() {
-            let _ = std::fs::remove_file(&backup_path);
-        } else if backup_path.exists() {
-            return Err(format!(
-                "Unable to replace {}. The previous version is kept at {}.",
-                target.display(),
-                backup_path.display()
-            ));
-        }
-
-        let renamed_existing = match std::fs::rename(target, &backup_path) {
-            Ok(()) => true,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
-            Err(error) => {
-                last_error = Some(error);
-                std::thread::sleep(delay);
-                continue;
-            }
-        };
-
-        match std::fs::copy(source, target) {
-            Ok(_) => {
-                let _ = std::fs::remove_file(&backup_path);
-                return Ok(());
-            }
-            Err(error) => {
-                let _ = std::fs::remove_file(target);
-                if renamed_existing {
-                    if let Err(restore_error) = std::fs::rename(&backup_path, target) {
-                        return Err(format!(
-                            "Unable to replace {}: {error}. Restoring the previous version \
-                             failed ({restore_error}); it is kept at {}.",
-                            target.display(),
-                            backup_path.display()
-                        ));
-                    }
-                }
-                last_error = Some(error);
-            }
-        }
-
-        std::thread::sleep(delay);
-    }
-
-    Err(format!(
-        "Unable to replace {}. {}",
-        target.display(),
-        last_error
-            .map(|error| error.to_string())
-            .unwrap_or_else(|| {
-                "The file may still be locked or the install directory may not be writable."
-                    .to_string()
-            })
-    ))
-}
-
-fn relaunch_target(target: &Path) -> Result<(), String> {
-    let mut command = Command::new(target);
-    if let Some(parent) = target.parent() {
-        command.current_dir(parent);
-    }
-
-    command
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "The update was installed, but the app could not be restarted automatically: {e}"
-            )
-        })?;
-
-    Ok(())
-}
-
-fn wait_for_process_exit(pid: u32, timeout: Duration) -> Result<(), String> {
-    if pid == 0 {
-        return Ok(());
-    }
-
-    unsafe {
-        let handle = OpenProcess(PROCESS_SYNCHRONIZE, false, pid)
-            .map_err(|e| format!("Unable to monitor the running app process: {e}"))?;
-
-        let result = WaitForSingleObject(handle, timeout.as_millis().min(u32::MAX as u128) as u32);
-        let _ = windows::Win32::Foundation::CloseHandle(handle);
-
-        if result == WAIT_OBJECT_0 {
-            Ok(())
-        } else if result == WAIT_TIMEOUT {
-            Err("Timed out waiting for the running app to exit.".to_string())
-        } else {
-            Err("Unable to confirm that the running app has exited.".to_string())
-        }
-    }
-}
-
 fn updates_dir() -> Result<PathBuf, String> {
     crate::known_folders::local_app_data_dir()
         .map(|dir| dir.join("ClaudeCodeUsageMonitor").join("updates"))
@@ -344,12 +295,27 @@ fn updates_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "Unable to resolve a writable local updates directory.".to_string())
 }
 
-fn backup_path_for(target: &Path) -> PathBuf {
-    let file_name = target
+/// `<exe>.<suffix>` next to the executable (`app.exe` -> `app.exe.old`).
+fn sibling_path(target: &Path, suffix: &str) -> PathBuf {
+    let mut name = target
         .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("app.exe");
-    target.with_file_name(format!("{file_name}.old"))
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "app.exe".into());
+    name.push(".");
+    name.push(suffix);
+    target.with_file_name(name)
+}
+
+fn backup_path_for(target: &Path) -> PathBuf {
+    sibling_path(target, "old")
+}
+
+fn staged_path_for(target: &Path) -> PathBuf {
+    sibling_path(target, "new")
+}
+
+fn partial_path_for(target: &Path) -> PathBuf {
+    sibling_path(target, "new.part")
 }
 
 fn ensure_target_location_writable(target: &Path) -> Result<(), String> {
@@ -387,23 +353,6 @@ fn github_repo() -> Result<(&'static str, &'static str), String> {
 
 fn user_agent() -> &'static str {
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
-}
-
-fn show_error_message(title: &str, message: &str) {
-    unsafe {
-        let title_wide = wide_str(title);
-        let message_wide = wide_str(message);
-        let _ = MessageBoxW(
-            Some(HWND::default()),
-            PCWSTR::from_raw(message_wide.as_ptr()),
-            PCWSTR::from_raw(title_wide.as_ptr()),
-            MB_OK | MB_ICONERROR,
-        );
-    }
-}
-
-fn wide_str(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg(test)]

@@ -1,3 +1,5 @@
+use std::os::windows::fs::OpenOptionsExt;
+
 use super::*;
 
 #[test]
@@ -15,108 +17,214 @@ fn configured_https_transport_validates_certificates() {
 
 const ABC_DIGEST: &str = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-fn helper_args() -> Vec<String> {
-    [
-        "helper.exe",
-        "--apply-update",
-        "target.exe",
-        "source.exe",
-        "1234",
-        "3",
-        ABC_DIGEST,
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-#[test]
-fn helper_requires_integrity_metadata() {
-    let args = helper_args();
-    let (target, source, pid, integrity) = parse_apply_update_args(&args).unwrap();
-    assert_eq!(target, PathBuf::from("target.exe"));
-    assert_eq!(source, PathBuf::from("source.exe"));
-    assert_eq!(pid, 1234);
-    assert_eq!(integrity.digest_arg(), ABC_DIGEST);
-    assert_eq!(integrity.size_arg(), "3");
-    for len in 0..args.len() {
-        assert!(parse_apply_update_args(&args[..len]).is_err());
-    }
-    let mut extra = args;
-    extra.push("unexpected".into());
-    assert!(parse_apply_update_args(&extra).is_err());
-}
-
-#[test]
-fn helper_rejects_invalid_process_size_and_hash_arguments() {
-    for (index, value) in [
-        (4, "0"),
-        (4, "bad"),
-        (5, "0"),
-        (5, "-1"),
-        (5, "104857601"),
-        (6, "sha256:00"),
-    ] {
-        let mut args = helper_args();
-        args[index] = value.into();
-        assert!(parse_apply_update_args(&args).is_err());
-    }
-}
-
-#[test]
-fn corrupt_update_never_replaces_the_installed_binary() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("download.exe");
-    let target = dir.path().join("app.exe");
-    std::fs::write(&source, b"abd").unwrap();
+fn installed(dir: &Path) -> PathBuf {
+    let target = dir.join("app.exe");
     std::fs::write(&target, b"original").unwrap();
+    target
+}
+
+fn stage(target: &Path, bytes: &[u8]) -> PathBuf {
+    let staged = staged_path_for(target);
+    std::fs::write(&staged, bytes).unwrap();
+    staged
+}
+
+#[test]
+fn update_files_sit_next_to_the_exe() {
+    let target = Path::new(r"C:\Apps\monitor.exe");
+    assert_eq!(
+        staged_path_for(target),
+        Path::new(r"C:\Apps\monitor.exe.new")
+    );
+    assert_eq!(
+        backup_path_for(target),
+        Path::new(r"C:\Apps\monitor.exe.old")
+    );
+    assert_eq!(
+        partial_path_for(target),
+        Path::new(r"C:\Apps\monitor.exe.new.part")
+    );
+}
+
+#[test]
+fn corrupt_staged_update_fails_verification() {
+    let dir = tempfile::tempdir().unwrap();
+    let staged = dir.path().join("app.exe.new");
+    std::fs::write(&staged, b"abd").unwrap();
     let integrity = AssetIntegrity::new(3, Some(ABC_DIGEST)).unwrap();
-    let error = apply_update(target.clone(), source, 0, &integrity).unwrap_err();
+    let error = open_verified_source(&staged, &integrity).unwrap_err();
     assert!(error.contains("SHA-256"));
+}
+
+#[test]
+fn swap_installs_the_staged_binary_and_keeps_the_old_one_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = installed(dir.path());
+    let staged = stage(&target, b"abc");
+
+    swap_in_staged_binary(&target, &staged).unwrap();
+
+    assert_eq!(std::fs::read(&target).unwrap(), b"abc");
+    assert_eq!(
+        std::fs::read(backup_path_for(&target)).unwrap(),
+        b"original"
+    );
+    assert!(!staged.exists());
+}
+
+#[test]
+fn swap_replaces_a_leftover_backup_from_an_earlier_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = installed(dir.path());
+    std::fs::write(backup_path_for(&target), b"older").unwrap();
+    let staged = stage(&target, b"abc");
+
+    swap_in_staged_binary(&target, &staged).unwrap();
+
+    assert_eq!(std::fs::read(&target).unwrap(), b"abc");
+    assert_eq!(
+        std::fs::read(backup_path_for(&target)).unwrap(),
+        b"original"
+    );
+}
+
+#[test]
+fn failed_install_rename_restores_the_installed_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = installed(dir.path());
+    // The staged file is missing, so the second rename fails.
+    let staged = staged_path_for(&target);
+
+    let error = swap_in_staged_binary(&target, &staged).unwrap_err();
+
+    assert!(error.contains("Unable to install the update"), "{error}");
     assert_eq!(std::fs::read(&target).unwrap(), b"original");
     assert!(!backup_path_for(&target).exists());
 }
 
 #[test]
-fn verified_source_can_replace_the_installed_binary() {
+fn failed_move_aside_leaves_everything_in_place() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("download.exe");
-    let target = dir.path().join("app.exe");
-    std::fs::write(&source, b"abc").unwrap();
-    std::fs::write(&target, b"original").unwrap();
-    let integrity = AssetIntegrity::new(3, Some(ABC_DIGEST)).unwrap();
-    let _guard = open_verified_source(&source, &integrity).unwrap();
-    replace_target_binary(&target, &source).unwrap();
-    assert_eq!(std::fs::read(&target).unwrap(), b"abc");
+    let target = installed(dir.path());
+    let staged = stage(&target, b"abc");
+    // A handle without FILE_SHARE_DELETE blocks renaming the target.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&target)
+        .unwrap();
+
+    let error = swap_in_staged_binary(&target, &staged).unwrap_err();
+    drop(lock);
+
+    assert!(error.contains("move the running app aside"), "{error}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"original");
+    assert_eq!(std::fs::read(&staged).unwrap(), b"abc");
     assert!(!backup_path_for(&target).exists());
 }
 
 #[test]
-fn failed_replacement_never_deletes_the_only_copy_in_the_backup() {
+fn swap_never_deletes_the_only_copy_in_the_backup() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("missing-download.exe");
     let target = dir.path().join("app.exe");
     let backup = backup_path_for(&target);
     // A previous restore failed: the installed exe survives only as the backup.
     std::fs::write(&backup, b"original").unwrap();
+    let staged = stage(&target, b"abc");
 
-    let error =
-        replace_target_binary_with_retries(&target, &source, 3, Duration::ZERO).unwrap_err();
+    let error = swap_in_staged_binary(&target, &staged).unwrap_err();
 
     assert!(error.contains("kept at"), "{error}");
     assert_eq!(std::fs::read(&backup).unwrap(), b"original");
+    assert!(!target.exists());
 }
 
 #[test]
-fn failed_copy_restores_the_installed_binary() {
+fn rollback_after_a_failed_launch_restores_the_installed_binary() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("missing-download.exe");
-    let target = dir.path().join("app.exe");
-    std::fs::write(&target, b"original").unwrap();
+    let target = installed(dir.path());
+    let staged = stage(&target, b"abc");
+    swap_in_staged_binary(&target, &staged).unwrap();
 
-    replace_target_binary_with_retries(&target, &source, 2, Duration::ZERO).unwrap_err();
+    rollback_swap(&target, &staged).unwrap();
 
     assert_eq!(std::fs::read(&target).unwrap(), b"original");
+    assert_eq!(std::fs::read(&staged).unwrap(), b"abc");
     assert!(!backup_path_for(&target).exists());
+}
+
+#[test]
+fn failed_rollback_reports_where_the_previous_version_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = installed(dir.path());
+    let staged = stage(&target, b"abc");
+    swap_in_staged_binary(&target, &staged).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&target)
+        .unwrap();
+
+    let error = rollback_swap(&target, &staged).unwrap_err();
+    drop(lock);
+
+    assert!(error.contains("kept at"), "{error}");
+    assert_eq!(
+        std::fs::read(backup_path_for(&target)).unwrap(),
+        b"original"
+    );
+}
+
+#[test]
+fn leftover_cleanup_removes_files_and_reports_locked_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("app.exe.old");
+    let locked = dir.path().join("app.exe.new");
+    let missing = dir.path().join("app.exe.new.part");
+    std::fs::write(&old, b"x").unwrap();
+    std::fs::write(&locked, b"x").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&locked)
+        .unwrap();
+    let paths = [old.clone(), locked.clone(), missing];
+
+    assert_eq!(remove_leftovers(&paths, 2, Duration::ZERO), 1);
+    assert!(!old.exists());
+    assert!(locked.exists());
+
+    drop(lock);
+    assert_eq!(remove_leftovers(&paths, 1, Duration::ZERO), 0);
+    assert!(!locked.exists());
+}
+
+#[test]
+fn legacy_helper_files_are_removed_with_their_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    std::fs::create_dir(&updates).unwrap();
+    for name in LEGACY_UPDATE_FILES {
+        std::fs::write(updates.join(name), b"x").unwrap();
+    }
+
+    remove_legacy_update_files(&updates);
+
+    assert!(!updates.exists());
+}
+
+#[test]
+fn legacy_cleanup_keeps_a_folder_with_unknown_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    std::fs::create_dir(&updates).unwrap();
+    std::fs::write(updates.join("updater-helper.exe"), b"x").unwrap();
+    std::fs::write(updates.join("keep.txt"), b"x").unwrap();
+
+    remove_legacy_update_files(&updates);
+
+    assert!(!updates.join("updater-helper.exe").exists());
+    assert!(updates.join("keep.txt").exists());
 }
 
 #[test]
