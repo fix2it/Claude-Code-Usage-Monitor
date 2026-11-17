@@ -6,6 +6,13 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.603] - 2026-11-17
+
+### Changed
+
+- The updater now swaps the executable by renaming it in place: the new build is downloaded next to the running exe, the running exe is renamed to `.old`, the new one takes its name, and it starts as a normal process. The hidden `updater-helper.exe` copy and the `--apply-update` mode are removed, because antivirus behavior monitors (Bitdefender Advanced Threat Defense) blocked that pattern. A failed step rolls the renames back, so the working exe is never lost. Leftover `.old`, `.new` and old helper files are cleaned up on the next start.
+- Updating from 2.23.602 to this version still uses the old helper, so an antivirus may block that one step; download this release manually in that case.
+
 ## [2.23.602] - 2026-11-17
 
 ### Changed
