@@ -52,7 +52,7 @@ two pools, **Main** and **X**; Antigravity has **Main** and **OpenCode**:
 | **Codex (Main)**, **Codex X** | Two Codex profiles: the default one and a second one in `~/.codex_x`. |
 | **Antigravity (Main)** | Antigravity pool A, from Antigravity's own sign-in. |
 | **Antigravity (OpenCode)** | Pool O, read-only from the Google token that OpenCode stores. It is never refreshed by the monitor; when the token is missing or expired the pool shows no data, and it is hidden when it matches pool A. |
-| **OpenCode**, **Qoder** | OpenCode Go and Qoder usage. |
+| **OpenCode**, **Qoder** | OpenCode Go and Qoder usage. OpenCode Go needs the workspace ID and the console cookie `__Host-console_session=st_...` (see the README); an old `Fe26.2**...` value is rejected by the console. |
 | **Cursor**, **Grok**, **Copilot** | Inherited from the original project; untested in this fork. |
 
 With both pools of a provider enabled, the indented **Pools on one widget**

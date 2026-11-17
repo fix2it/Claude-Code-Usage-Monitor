@@ -120,11 +120,11 @@ For OpenCode Go, set `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE`, o
 ```json
 {
   "workspaceId": "wrk_01...",
-  "authCookie": "__Host-console_session=your-session-cookie-value"
+  "authCookie": "__Host-console_session=st_your-session-value"
 }
 ```
 
-The workspace ID is part of the OpenCode Go console URL: `https://opencode.ai/console/<workspaceId>/go`. Copy the `__Host-console_session` cookie from an authenticated `opencode.ai` browser session, including its name as shown above. A full Cookie header containing `__Host-console_session` or the legacy `auth` cookie is also accepted unchanged; no empty `auth=;` prefix is needed. Bare legacy `auth` cookie values remain supported. These formats work for both `authCookie` and `OPENCODE_GO_AUTH_COOKIE`. Set `OPENCODE_GO_CONFIG_FILE` to use a different config path. The monitor reads usage from the console JSON API using this workspace ID and cookie.
+The workspace ID is part of the OpenCode Go console URL: `https://opencode.ai/console/<workspaceId>/go`. Copy the `__Host-console_session` cookie from an authenticated `opencode.ai` browser session, including its name: `__Host-console_session=st_...`. A full Cookie header containing `__Host-console_session` or the legacy `auth` cookie is sent unchanged. A bare value without a cookie name is tried as `__Host-console_session` first and as legacy `auth` if the console answers 401; the working form is remembered until the app restarts. An old `Fe26.2**...` value no longer works: the console rejects it, and the diagnostic log says so. These formats work for both `authCookie` and `OPENCODE_GO_AUTH_COOKIE`. Set `OPENCODE_GO_CONFIG_FILE` to use a different config path. The monitor reads usage from the console JSON API using this workspace ID and cookie.
 
 For Cursor, `CURSOR_SESSION_TOKEN` can override the automatically detected local session.
 

@@ -2,6 +2,7 @@ use super::non_empty_environment;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -232,24 +233,160 @@ fn extract_bearer_token(auth_cookie: &str) -> Option<&str> {
     }
 }
 
+const SESSION_COOKIE_NAME: &str = "__Host-console_session";
+const LEGACY_COOKIE_NAME: &str = "auth";
+
+/// How a configured credential is turned into a Cookie header.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CookieForm {
+    /// The value already names its cookie(s); sent unchanged.
+    AsIs,
+    /// A bare value sent as `__Host-console_session=<value>` (current console).
+    Session,
+    /// A bare value sent as `auth=<value>` (legacy console).
+    Legacy,
+}
+
+impl CookieForm {
+    fn label(self) -> &'static str {
+        match self {
+            CookieForm::AsIs => "full Cookie header as configured",
+            CookieForm::Session => SESSION_COOKIE_NAME,
+            CookieForm::Legacy => LEGACY_COOKIE_NAME,
+        }
+    }
+
+    fn header(self, value: &str) -> String {
+        match self {
+            CookieForm::AsIs => value.to_string(),
+            CookieForm::Session => format!("{SESSION_COOKIE_NAME}={value}"),
+            CookieForm::Legacy => format!("{LEGACY_COOKIE_NAME}={value}"),
+        }
+    }
+
+    fn other(self) -> Option<CookieForm> {
+        match self {
+            CookieForm::AsIs => None,
+            CookieForm::Session => Some(CookieForm::Legacy),
+            CookieForm::Legacy => Some(CookieForm::Session),
+        }
+    }
+}
+
+/// Bare-value cookie form that last got a non-401 answer, so a working
+/// form is tried first and steady polling makes one request, not two.
+/// 0 = session (default), 1 = legacy.
+static BARE_COOKIE_FORM: AtomicU8 = AtomicU8::new(0);
+
+fn names_its_cookie(auth_cookie: &str) -> bool {
+    auth_cookie.split(';').any(|part| {
+        let part = part.trim_start();
+        part.starts_with("auth=") || part.starts_with("__Host-console_session=")
+    })
+}
+
+fn load_form(store: &AtomicU8) -> CookieForm {
+    if store.load(Ordering::Relaxed) == 1 {
+        CookieForm::Legacy
+    } else {
+        CookieForm::Session
+    }
+}
+
+fn save_form(store: &AtomicU8, form: CookieForm) {
+    let value = match form {
+        CookieForm::Legacy => 1,
+        _ => 0,
+    };
+    store.store(value, Ordering::Relaxed);
+}
+
+/// The credential value without any cookie name, for format hints.
+fn cookie_value_hint(auth_cookie: &str) -> Option<&'static str> {
+    let stale = auth_cookie.split(';').any(|part| {
+        let part = part.trim();
+        let value = part.split_once('=').map_or(part, |(_, value)| value).trim();
+        part.starts_with("Fe26.2**") || value.starts_with("Fe26.2**")
+    });
+    stale.then_some(
+        "the value looks like the old `Fe26.2**` console cookie, which the console no longer \
+         accepts; copy `__Host-console_session` (a `st_...` value) from opencode.ai instead",
+    )
+}
+
 fn fetch_go_status(
     credentials: &DashboardCredentials,
     url: &str,
 ) -> Result<DashboardUsage, PollError> {
-    let cookie = if credentials.auth_cookie.split(';').any(|part| {
-        let part = part.trim_start();
-        part.starts_with("auth=") || part.starts_with("__Host-console_session=")
-    }) {
-        credentials.auth_cookie.clone()
+    fetch_go_status_with(credentials, url, &BARE_COOKIE_FORM)
+}
+
+fn fetch_go_status_with(
+    credentials: &DashboardCredentials,
+    url: &str,
+    form_store: &AtomicU8,
+) -> Result<DashboardUsage, PollError> {
+    let first = if names_its_cookie(&credentials.auth_cookie) {
+        CookieForm::AsIs
     } else {
-        // Bare legacy auth values may contain '=' padding; that alone does
-        // not identify a complete Cookie header.
-        format!("auth={}", credentials.auth_cookie)
+        load_form(form_store)
     };
 
-    let bearer_token = extract_bearer_token(&credentials.auth_cookie);
+    let result = match send_go_status(credentials, url, first) {
+        Err(Unauthorized(status)) => {
+            log_unauthorized(credentials, first, status);
+            match first.other() {
+                Some(second) => match send_go_status(credentials, url, second) {
+                    Err(Unauthorized(status)) => {
+                        log_unauthorized(credentials, second, status);
+                        Err(PollError::AuthRequired)
+                    }
+                    Ok(result) => {
+                        if result.is_ok() {
+                            save_form(form_store, second);
+                        }
+                        result
+                    }
+                },
+                None => Err(PollError::AuthRequired),
+            }
+        }
+        Ok(result) => result,
+    };
+    if result == Err(PollError::AuthRequired) {
+        if let Some(hint) = cookie_value_hint(&credentials.auth_cookie) {
+            diagnose::log(format!("OpenCode Go auth hint: {hint}"));
+        }
+    }
+    result
+}
 
-    let request = build_agent()?
+/// A 401/403 answer, kept apart so the caller can try the other cookie form.
+struct Unauthorized(u16);
+
+fn log_unauthorized(credentials: &DashboardCredentials, form: CookieForm, status: u16) {
+    diagnose::log(format!(
+        "OpenCode Go status returned HTTP {status} with cookie form `{}` from {}",
+        form.label(),
+        credentials.source
+    ));
+}
+
+fn send_go_status(
+    credentials: &DashboardCredentials,
+    url: &str,
+    form: CookieForm,
+) -> Result<Result<DashboardUsage, PollError>, Unauthorized> {
+    let cookie = form.header(&credentials.auth_cookie);
+    // Bearer follows the cookie actually sent: `auth=<token>` carries one,
+    // `__Host-console_session` does not.
+    let bearer_token = extract_bearer_token(&cookie);
+
+    let request = match build_agent() {
+        Ok(agent) => agent,
+        Err(error) => return Ok(Err(error)),
+    };
+    let request = request
         .get(url)
         .header("Accept", "application/json")
         .header("x-org-id", &credentials.workspace_id)
@@ -271,21 +408,25 @@ fn fetch_go_status(
 
     let mut response = match request.call().and_then(super::check_http_status) {
         Ok(response) => response,
-        Err(ureq::Error::StatusCode(401 | 403)) => return Err(PollError::AuthRequired),
+        Err(ureq::Error::StatusCode(401)) => return Err(Unauthorized(401)),
+        Err(ureq::Error::StatusCode(403)) => {
+            log_unauthorized(credentials, form, 403);
+            return Ok(Err(PollError::AuthRequired));
+        }
         Err(error) => {
             diagnose::log_error("OpenCode Go status request failed", error);
-            return Err(PollError::RequestFailed);
+            return Ok(Err(PollError::RequestFailed));
         }
     };
 
-    let status = response
-        .body_mut()
-        .read_json::<Option<GoStatus>>()
-        .map_err(|error| {
+    let status = match response.body_mut().read_json::<Option<GoStatus>>() {
+        Ok(status) => status,
+        Err(error) => {
             diagnose::log_error("OpenCode Go status response is not valid JSON", error);
-            PollError::RequestFailed
-        })?;
-    usage_from_status(status)
+            return Ok(Err(PollError::RequestFailed));
+        }
+    };
+    Ok(usage_from_status(status))
 }
 
 fn usage_from_status(status: Option<GoStatus>) -> Result<DashboardUsage, PollError> {
@@ -585,57 +726,215 @@ mod tests {
         body: &str,
         cookie: &str,
     ) -> (Result<DashboardUsage, PollError>, String) {
+        let body = body.to_string();
+        let (result, mut requests) =
+            mock_console(cookie, &AtomicU8::new(0), move |_| (status, body.clone()));
+        (result, requests.remove(0))
+    }
+
+    /// Stub console: `answer` maps the sent Cookie header to (status, body).
+    /// Serves until the client stops connecting; returns every raw request.
+    fn mock_console(
+        cookie: &str,
+        store: &AtomicU8,
+        answer: impl Fn(&str) -> (u16, String) + Send + 'static,
+    ) -> (Result<DashboardUsage, PollError>, Vec<String>) {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::time::Duration;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!(
-            "http://{}/console/api/go/status",
-            listener.local_addr().unwrap()
-        );
-        let response = format!(
-            "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/console/api/go/status");
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0; 1024];
-            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-                let count = stream.read(&mut buffer).unwrap();
-                assert_ne!(count, 0);
-                request.extend_from_slice(&buffer[..count]);
+            let mut requests = Vec::new();
+            loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                let request = String::from_utf8(request).unwrap();
+                // An empty connection is the test's "done" signal.
+                if request.is_empty() {
+                    return requests;
+                }
+                let (status, body) = answer(&header(&request, "cookie").unwrap_or_default());
+                let response = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                requests.push(request);
             }
-            stream.write_all(response.as_bytes()).unwrap();
-            String::from_utf8(request).unwrap()
         });
-        let result = fetch_go_status(
+        let result = fetch_go_status_with(
             &DashboardCredentials {
                 workspace_id: "wrk_example".into(),
                 auth_cookie: cookie.into(),
                 source: "test".into(),
             },
             &url,
+            store,
         );
+        drop(std::net::TcpStream::connect(address).unwrap());
         (result, server.join().unwrap())
+    }
+
+    fn header(request: &str, name: &str) -> Option<String> {
+        request.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name)
+                .then(|| value.trim_start().to_string())
+        })
+    }
+
+    /// The live console as observed on 2026-11-17: only a cookie named
+    /// `__Host-console_session` with an `st_` value authenticates.
+    fn current_console(cookie: &str) -> (u16, String) {
+        let accepted = cookie.split(';').any(|part| {
+            part.trim()
+                .strip_prefix("__Host-console_session=")
+                .is_some_and(|value| value.starts_with("st_"))
+        });
+        if accepted {
+            (200, GO_STATUS_JSON.to_string())
+        } else {
+            (401, "{}".to_string())
+        }
+    }
+
+    /// A legacy console that only accepts `auth=<value>`.
+    fn legacy_console(cookie: &str) -> (u16, String) {
+        if cookie.starts_with("auth=") && cookie.len() > 5 {
+            (200, GO_STATUS_JSON.to_string())
+        } else {
+            (401, "{}".to_string())
+        }
+    }
+
+    const SESSION: &str = "st_61dd5f7c-097c-41be-9e06-ba1356bb203f";
+
+    #[test]
+    fn current_console_cookie_forms_match_observed_answers() {
+        let named = format!("__Host-console_session={SESSION}");
+        let with_empty_auth = format!("auth=; __Host-console_session={SESSION}");
+        let legacy_named = format!("auth={SESSION}");
+        for (cookie, ok, sent) in [
+            (named.as_str(), true, vec![named.clone()]),
+            (
+                with_empty_auth.as_str(),
+                true,
+                vec![with_empty_auth.clone()],
+            ),
+            // A named `auth=` cookie is sent as-is and gets 401, no retry.
+            (legacy_named.as_str(), false, vec![legacy_named.clone()]),
+            // A bare `st_` value: session form first, which works.
+            (SESSION, true, vec![named.clone()]),
+            // The stale `Fe26.2**` value: both forms tried, both 401.
+            (
+                "Fe26.2**abc",
+                false,
+                vec![
+                    "__Host-console_session=Fe26.2**abc".into(),
+                    "auth=Fe26.2**abc".into(),
+                ],
+            ),
+        ] {
+            let store = AtomicU8::new(0);
+            let (result, requests) = mock_console(cookie, &store, current_console);
+            let sent_cookies: Vec<_> = requests
+                .iter()
+                .map(|request| header(request, "cookie").unwrap())
+                .collect();
+            assert_eq!(sent_cookies, sent, "cookie={cookie:?}");
+            if ok {
+                assert_eq!(result.unwrap().rolling.unwrap().usage_percent, 12.5);
+            } else {
+                assert_eq!(result, Err(PollError::AuthRequired), "cookie={cookie:?}");
+            }
+            // Session cookies never carry a Bearer token.
+            if cookie != legacy_named {
+                for request in &requests {
+                    if header(request, "cookie")
+                        .unwrap()
+                        .starts_with("__Host-console_session")
+                    {
+                        assert_eq!(header(request, "authorization"), None);
+                    }
+                }
+            }
+            assert_eq!(load_form(&store), CookieForm::Session);
+        }
+    }
+
+    #[test]
+    fn bare_value_falls_back_to_auth_and_remembers_it() {
+        let store = AtomicU8::new(0);
+        let (result, requests) = mock_console("legacy-token", &store, legacy_console);
+        assert!(result.is_ok());
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            header(&requests[0], "cookie").unwrap(),
+            "__Host-console_session=legacy-token"
+        );
+        assert_eq!(header(&requests[0], "authorization"), None);
+        assert_eq!(header(&requests[1], "cookie").unwrap(), "auth=legacy-token");
+        assert_eq!(
+            header(&requests[1], "authorization").unwrap(),
+            "Bearer legacy-token"
+        );
+        assert_eq!(load_form(&store), CookieForm::Legacy);
+
+        // Next poll goes straight to the remembered form: one request.
+        let (result, requests) = mock_console("legacy-token", &store, legacy_console);
+        assert!(result.is_ok());
+        assert_eq!(requests.len(), 1);
+        assert_eq!(header(&requests[0], "cookie").unwrap(), "auth=legacy-token");
+
+        // The user switches to a session value: the remembered legacy form
+        // fails once, the session form wins and is remembered again.
+        let (result, requests) = mock_console(SESSION, &store, current_console);
+        assert!(result.is_ok());
+        assert_eq!(requests.len(), 2);
+        assert_eq!(load_form(&store), CookieForm::Session);
+    }
+
+    #[test]
+    fn forbidden_answer_is_not_retried() {
+        let store = AtomicU8::new(0);
+        let (result, requests) = mock_console(SESSION, &store, |_| (403, "{}".into()));
+        assert_eq!(result, Err(PollError::AuthRequired));
+        assert_eq!(requests.len(), 1);
+    }
+
+    #[test]
+    fn stale_cookie_hint_matches_only_fe26_values() {
+        assert!(cookie_value_hint("Fe26.2**abc").is_some());
+        assert!(cookie_value_hint("Fe26.2**a=b**c").is_some());
+        assert!(cookie_value_hint("auth=Fe26.2**abc").is_some());
+        assert!(cookie_value_hint("theme=dark; auth=Fe26.2**abc").is_some());
+        assert!(cookie_value_hint(SESSION).is_none());
+        assert!(cookie_value_hint("__Host-console_session=st_x").is_none());
     }
 
     #[test]
     fn console_request_sends_workspace_context_and_normalizes_auth_cookie() {
         for (cookie, expected_cookie, expected_authorization) in [
-            ("test-token", "auth=test-token", Some("Bearer test-token")),
-            (
-                "test-token==",
-                "auth=test-token==",
-                Some("Bearer test-token=="),
-            ),
+            // Bare values go out as the current session cookie first.
+            ("test-token", "__Host-console_session=test-token", None),
+            ("test-token==", "__Host-console_session=test-token==", None),
             (
                 "auth=test-token; theme=dark",
                 "auth=test-token; theme=dark",
