@@ -11,8 +11,9 @@ use windows::Win32::System::Threading::{
     INFINITE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetClassNameW, GetWindowThreadProcessId, IsWindow, MessageBoxW, PostMessageW,
-    SetForegroundWindow, ShowWindowAsync, MB_ICONERROR, MB_OK, SW_RESTORE, WM_CLOSE,
+    FindWindowW, GetClassNameW, GetPropW, GetWindowThreadProcessId, IsWindow, MessageBoxW,
+    PostMessageW, SetForegroundWindow, SetPropW, ShowWindowAsync, MB_ICONERROR, MB_OK, SW_RESTORE,
+    WM_CLOSE,
 };
 
 pub(crate) const DASHBOARD_TITLE: &str = "Claude Code Usage Monitor";
@@ -58,6 +59,46 @@ pub(crate) fn publish_update_status(owner: HWND, status: UpdateStatus) {
     };
     if let Err(error) = crate::app_settings::write_json_atomic(&update_status_path(), &snapshot) {
         crate::diagnose::log_error("dashboard update status save failed", error);
+    }
+}
+
+const SETTINGS_SAVE_ERROR_PROP: &str = "ClaudeCodeUsageMonitor.SettingsSaveError";
+/// Stored for a failure that carries no Windows error code.
+const SETTINGS_SAVE_ERROR_UNKNOWN: usize = u32::MAX as usize;
+
+/// Record the monitor's last settings save on its controller window. A window
+/// property, not a file, so Studio still learns about the failure when the
+/// settings folder itself rejects writes.
+pub(crate) fn publish_settings_save_result(owner: HWND, error: Option<Option<u32>>) {
+    if owner.is_invalid() {
+        return;
+    }
+    let value = match error {
+        None => 0,
+        Some(Some(code)) if code != 0 => code as usize,
+        Some(_) => SETTINGS_SAVE_ERROR_UNKNOWN,
+    };
+    let name = crate::native_interop::wide_str(SETTINGS_SAVE_ERROR_PROP);
+    unsafe {
+        let _ = SetPropW(
+            owner,
+            PCWSTR::from_raw(name.as_ptr()),
+            Some(HANDLE(value as *mut _)),
+        );
+    }
+}
+
+/// The monitor's last settings save failure: `Some(Some(code))` with the
+/// Windows error code, `Some(None)` when the code is unknown.
+pub(crate) fn read_settings_save_error(owner: isize) -> Option<Option<u32>> {
+    monitor_process_id(owner)?;
+    let name = crate::native_interop::wide_str(SETTINGS_SAVE_ERROR_PROP);
+    let value =
+        unsafe { GetPropW(HWND(owner as *mut _), PCWSTR::from_raw(name.as_ptr())) }.0 as usize;
+    match value {
+        0 => None,
+        SETTINGS_SAVE_ERROR_UNKNOWN => Some(None),
+        code => Some(Some(code as u32)),
     }
 }
 

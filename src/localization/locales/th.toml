@@ -431,6 +431,7 @@ qoder_window_title = "ตัวติดตามการใช้งาน Qod
 "Unable to open dashboard" = "ไม่สามารถเปิดแดชบอร์ดได้"
 "Unable to open theme" = "ไม่สามารถเปิดธีมได้"
 "Unable to save settings" = "ไม่สามารถบันทึกการตั้งค่าได้"
+"The monitor could not save settings" = "The monitor could not save settings"
 "Unable to save theme" = "ไม่สามารถบันทึกธีมได้"
 "Unable to signal the running monitor" = "ไม่สามารถส่งสัญญาณไปยังโปรแกรมที่กำลังทำงานอยู่ได้"
 "Unable to start the dashboard" = "ไม่สามารถเริ่มแดชบอร์ดได้"

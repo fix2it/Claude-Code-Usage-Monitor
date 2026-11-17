@@ -22,6 +22,9 @@ fn test_app() -> StudioApp {
         usage_has_error: false,
         last_cache_read: Instant::now(),
         settings_error: None,
+        monitor_save_error: None,
+        monitor_save_error_shown: None,
+        synced_settings: SettingsFile::default(),
         theme_error: None,
     }
 }
@@ -747,4 +750,98 @@ fn disconnected_update_button_reports_error_without_staying_busy() {
         .unwrap()
         .contains("not connected"));
     assert!(!app.update_status.is_busy());
+}
+
+#[test]
+fn monitor_save_failure_is_shown_with_code_and_cleared_after_success() {
+    let mut app = test_app();
+    app.sync_monitor_save_error(Some(Some(5)));
+    let shown = app.settings_error.clone().expect("monitor error shown");
+    assert!(shown.contains("Windows error 5"), "{shown}");
+
+    app.sync_monitor_save_error(None);
+    assert_eq!(app.settings_error, None);
+
+    // A Studio-side error is not cleared by the monitor's later success.
+    app.sync_monitor_save_error(Some(None));
+    app.settings_error = Some("studio error".into());
+    app.sync_monitor_save_error(None);
+    assert_eq!(app.settings_error.as_deref(), Some("studio error"));
+}
+
+#[test]
+fn studio_refresh_adopts_frequency_saved_by_the_monitor_menu() {
+    let mut app = test_app();
+    app.settings.poll_interval_ms = POLL_1_MIN;
+    app.synced_poll_interval_ms = POLL_1_MIN;
+    let mut persisted = app_settings::load_settings();
+    persisted.poll_interval_ms = POLL_15_MIN;
+    app_settings::save_settings(&persisted).unwrap();
+
+    app.last_cache_read = Instant::now() - Duration::from_secs(2);
+    app.refresh_usage_cache();
+    assert_eq!(app.settings.poll_interval_ms, POLL_15_MIN);
+}
+
+#[test]
+fn studio_adopts_other_menu_changes_but_keeps_local_edits() {
+    let mut app = test_app();
+    app.synced_settings = app.settings.clone();
+    let mut persisted = app.settings.clone();
+    persisted.show_pace = !app.settings.show_pace;
+    persisted.language = Some("de".into());
+    app.settings.language = Some("fr".into()); // local, unsaved edit
+
+    app.sync_other_settings(&persisted);
+    assert_eq!(app.settings.show_pace, persisted.show_pace);
+    assert_eq!(app.settings.language.as_deref(), Some("fr"));
+}
+
+#[test]
+fn monitor_save_warning_returns_after_another_action_clears_it() {
+    let mut app = test_app();
+    app.sync_monitor_save_error(Some(Some(5)));
+    app.settings_error = None; // e.g. a successful Refresh
+    app.sync_monitor_save_error(Some(Some(5)));
+    assert!(app.settings_error.unwrap().contains("Windows error 5"));
+}
+
+#[test]
+fn studio_adopts_a_setting_the_monitor_removed_from_the_file() {
+    let mut app = test_app();
+    app.settings.language = Some("de".into());
+    app.synced_settings = app.settings.clone();
+    let mut persisted = app.settings.clone();
+    persisted.language = None; // "System" is not serialized
+
+    app.sync_other_settings(&persisted);
+    assert_eq!(app.settings.language, None);
+}
+
+#[test]
+fn monitor_warning_clears_after_recovery_even_if_language_changed() {
+    let mut app = test_app();
+    app.sync_monitor_save_error(Some(Some(5)));
+    app.settings.language = Some("pl".into());
+    app.sync_monitor_save_error(None);
+    assert_eq!(app.settings_error, None);
+}
+
+#[test]
+fn settings_merge_keeps_legacy_values_and_treats_system_language_as_unset() {
+    let mut app = test_app();
+    app.settings.language = None;
+    app.synced_settings = app.settings.clone();
+    app.settings.language = Some("system".into()); // Settings page display
+    app.settings.tray_offset = 42;
+    app.settings.legacy_placement_pending = true;
+    app.settings.widget_visible = false;
+    let mut persisted = app.synced_settings.clone();
+    persisted.language = Some("de".into());
+
+    app.sync_other_settings(&persisted);
+    assert_eq!(app.settings.language.as_deref(), Some("de"));
+    assert_eq!(app.settings.tray_offset, 42);
+    assert!(app.settings.legacy_placement_pending);
+    assert!(!app.settings.widget_visible);
 }

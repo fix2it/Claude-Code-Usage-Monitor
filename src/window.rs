@@ -1205,15 +1205,33 @@ fn save_state_settings() {
         // The dashboard process owns its dimensions, so leave the freshly
         // loaded values unchanged when monitor actions persist settings.
     }
-    if let Err(error) = save_settings(&persisted) {
-        diagnose::log(format!("unable to save settings: {error}"));
-    }
+    save_settings_or_log(&persisted, "unable to save settings");
 }
 
+/// Save, log a failure with its Windows error code, and publish the outcome
+/// on the controller window so an open Studio can show it.
 fn save_settings_or_log(settings: &SettingsFile, context: &str) {
-    if let Err(error) = save_settings(settings) {
+    let result = save_settings(settings);
+    if let Err(error) = &result {
         diagnose::log(format!("{context}: {error}"));
     }
+    record_settings_save(&result);
+}
+
+/// Last monitor settings save outcome, kept so a failure from before the
+/// controller window existed still reaches Studio.
+static LAST_SETTINGS_SAVE: Mutex<Option<Option<u32>>> = Mutex::new(None);
+
+fn record_settings_save(result: &Result<(), crate::app_settings::WriteError>) {
+    let outcome = result.as_ref().err().map(|error| error.os_code);
+    *LAST_SETTINGS_SAVE.lock().unwrap_or_else(|e| e.into_inner()) = outcome;
+    publish_last_settings_save();
+}
+
+fn publish_last_settings_save() {
+    let outcome = *LAST_SETTINGS_SAVE.lock().unwrap_or_else(|e| e.into_inner());
+    let controller = SendHwnd(CONTROLLER_HWND.load(Ordering::Relaxed)).to_hwnd();
+    crate::dashboard::publish_settings_save_result(controller, outcome);
 }
 
 pub(super) fn toggle_taskbar_lock(hwnd: HWND) {

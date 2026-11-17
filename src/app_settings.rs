@@ -453,10 +453,10 @@ pub fn load_settings() -> SettingsFile {
     settings
 }
 
-pub fn save_settings(settings: &SettingsFile) -> Result<(), String> {
+pub fn save_settings(settings: &SettingsFile) -> Result<(), WriteError> {
     let mut normalized = settings.clone();
     normalized.normalize();
-    write_json_atomic(&settings_path(), &settings_json(&normalized))
+    write_json_atomic_detailed(&settings_path(), &settings_json(&normalized))
 }
 
 fn decode_settings(content: &str) -> Option<SettingsFile> {
@@ -523,35 +523,112 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
     serde_json::from_str(&content).ok()
 }
 
+/// A failed atomic write. `os_code` is the Windows error code when the
+/// failure came from the file system, so callers can report it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteError {
+    pub message: String,
+    pub os_code: Option<u32>,
+}
+
+impl WriteError {
+    fn io(context: &str, error: std::io::Error) -> Self {
+        Self {
+            message: format!("{context}: {error}"),
+            os_code: error.raw_os_error().map(|code| code as u32),
+        }
+    }
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.os_code {
+            Some(code) => write!(f, "{} (Windows error {code})", self.message),
+            None => f.write_str(&self.message),
+        }
+    }
+}
+
+impl From<WriteError> for String {
+    fn from(error: WriteError) -> Self {
+        error.to_string()
+    }
+}
+
+/// Windows errors after which a replace is worth retrying: another process
+/// (a reader, an indexer, an antivirus scan) briefly holds the destination.
+fn is_transient_replace_error(code: u32) -> bool {
+    const ERROR_ACCESS_DENIED: u32 = 5;
+    const ERROR_SHARING_VIOLATION: u32 = 32;
+    const ERROR_LOCK_VIOLATION: u32 = 33;
+    matches!(
+        code,
+        ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION
+    )
+}
+
+const REPLACE_RETRY_DELAYS_MS: [u64; 4] = [25, 50, 100, 200];
+
 pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let parent = path.parent().ok_or("Invalid settings path")?;
-    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    write_json_atomic_detailed(path, value).map_err(String::from)
+}
+
+pub fn write_json_atomic_detailed<T: Serialize>(path: &Path, value: &T) -> Result<(), WriteError> {
+    let parent = path.parent().ok_or_else(|| WriteError {
+        message: "Invalid settings path".into(),
+        os_code: None,
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| WriteError::io("Unable to create the settings folder", error))?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("state.json");
     let temporary = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
-    let json = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    let json = serde_json::to_vec_pretty(value).map_err(|error| WriteError {
+        message: error.to_string(),
+        os_code: None,
+    })?;
     {
         use std::io::Write;
-        let mut file = std::fs::File::create(&temporary).map_err(|error| error.to_string())?;
-        file.write_all(&json).map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
+        let mut file = std::fs::File::create(&temporary)
+            .map_err(|error| WriteError::io("Unable to create a temporary settings file", error))?;
+        file.write_all(&json)
+            .and_then(|()| file.sync_all())
+            .map_err(|error| {
+                let _ = std::fs::remove_file(&temporary);
+                WriteError::io("Unable to write a temporary settings file", error)
+            })?;
     }
     let source = wide_path(&temporary);
     let destination = wide_path(path);
-    let moved = unsafe {
-        MoveFileExW(
-            PCWSTR::from_raw(source.as_ptr()),
-            PCWSTR::from_raw(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if moved.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-        return Err("Unable to replace the settings file".into());
+    let mut delays = REPLACE_RETRY_DELAYS_MS.iter();
+    loop {
+        let moved = unsafe {
+            MoveFileExW(
+                PCWSTR::from_raw(source.as_ptr()),
+                PCWSTR::from_raw(destination.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        let Err(error) = moved else {
+            return Ok(());
+        };
+        // HRESULT_FROM_WIN32 keeps the Win32 code in the low 16 bits.
+        let code = (error.code().0 as u32) & 0xFFFF;
+        match delays.next() {
+            Some(delay) if is_transient_replace_error(code) => {
+                std::thread::sleep(std::time::Duration::from_millis(*delay));
+            }
+            _ => {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(WriteError {
+                    message: format!("Unable to replace {}: {}", path.display(), error.message()),
+                    os_code: Some(code),
+                });
+            }
+        }
     }
-    Ok(())
 }
 
 fn wide_path(path: &Path) -> Vec<u16> {
@@ -623,6 +700,57 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Open `path` the way a scanner or another reader can: without
+    /// FILE_SHARE_DELETE, so MoveFileEx cannot replace it.
+    fn hold_without_delete_share(path: &Path) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(path)
+            .unwrap()
+    }
+
+    fn temporary_files(directory: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(directory)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn blocked_replace_reports_windows_code_and_keeps_old_file() {
+        let path = app_data_directory().join("blocked.json");
+        write_json_atomic(&path, &1).unwrap();
+        let held = hold_without_delete_share(&path);
+
+        let error = write_json_atomic_detailed(&path, &2).unwrap_err();
+        drop(held);
+
+        let code = error.os_code.expect("Windows error code");
+        assert!(is_transient_replace_error(code), "code {code}");
+        assert!(error.to_string().contains(&format!("Windows error {code}")));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "1");
+        assert!(temporary_files(path.parent().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn replace_retries_while_the_destination_is_briefly_held() {
+        let path = app_data_directory().join("briefly-held.json");
+        write_json_atomic(&path, &1).unwrap();
+        let held = hold_without_delete_share(&path);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            drop(held);
+        });
+
+        write_json_atomic_detailed(&path, &2).unwrap();
+        release.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "2");
+    }
 
     #[test]
     fn windows_default_font_is_on_for_existing_settings_and_persists_when_disabled() {
