@@ -311,7 +311,7 @@ const UI_PROBE_TIMEOUT_MS: u32 = 1_000;
 /// freezes in turn, behind an explorer.exe that stays hung for instance, is
 /// given twice as long as the previous one before the next attempt, instead of
 /// being replaced every half minute for as long as the cause lasts.
-const ENV_HANG_RELAUNCHES: &str = "CCUM_HANG_RELAUNCHES";
+pub(crate) const ENV_HANG_RELAUNCHES: &str = "CCUM_HANG_RELAUNCHES";
 
 /// A hang relaunch only extends the streak when the replacement freezes within
 /// this long of being started; past it, the next hang starts over at 30 s.
@@ -439,10 +439,10 @@ const RELAUNCH_THROTTLE_SECS: u64 = 10;
 const RELAUNCH_BACKOFF_SECS: u64 = 30;
 /// Environment flag set on a relaunched child so it waits for the previous
 /// instance's single-instance mutex instead of exiting immediately.
-const ENV_RELAUNCH: &str = "CCUM_RELAUNCH";
+pub(crate) const ENV_RELAUNCH: &str = "CCUM_RELAUNCH";
 /// Unix timestamp (seconds) of the relaunch that spawned this process, passed to
 /// the child so it can detect a relaunch storm.
-const ENV_LAST_RELAUNCH_UNIX: &str = "CCUM_LAST_RELAUNCH_UNIX";
+pub(crate) const ENV_LAST_RELAUNCH_UNIX: &str = "CCUM_LAST_RELAUNCH_UNIX";
 
 /// A process restart is reserved for an unresponsive UI thread. Shell-hosted
 /// surface loss is recovered in place by the controller.
