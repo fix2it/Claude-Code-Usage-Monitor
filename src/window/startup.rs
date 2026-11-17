@@ -78,6 +78,7 @@ pub fn run() {
         )
         .expect("create application controller");
         CONTROLLER_HWND.store(SendHwnd::from_hwnd(controller).0, Ordering::Relaxed);
+        publish_last_settings_save();
         let hwnd = lifecycle::create_primary_surface();
         if hwnd.is_invalid() {
             let _ = DestroyWindow(controller);
@@ -221,7 +222,9 @@ fn load_startup_theme(settings: &mut SettingsFile) -> StartupTheme {
                     settings.custom_theme_enabled = true;
                     settings.consume_legacy_placement();
                     settings.consume_legacy_widget_visibility();
-                    if let Err(error) = save_settings(settings) {
+                    let saved = save_settings(settings);
+                    record_settings_save(&saved);
+                    if let Err(error) = saved {
                         diagnose::log(format!(
                             "migrated theme created but settings cleanup failed: {error}"
                         ));

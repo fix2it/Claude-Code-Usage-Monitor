@@ -71,6 +71,7 @@ impl StudioApp {
             page: initial_page,
             synced_poll_interval_ms: settings.poll_interval_ms,
             synced_taskbar_lock: settings.lock_taskbar,
+            synced_settings: settings.clone(),
             poll_interval_editor_generation: 0,
             settings,
             startup_enabled: crate::window::is_startup_enabled(),
@@ -82,6 +83,8 @@ impl StudioApp {
             usage_has_error,
             last_cache_read: Instant::now(),
             settings_error: None,
+            monitor_save_error: None,
+            monitor_save_error_shown: None,
             theme_error: None,
         }
     }
@@ -119,6 +122,92 @@ impl StudioApp {
         self.synced_poll_interval_ms = persisted_interval;
     }
 
+    fn monitor_save_error_text(&self, error: Option<u32>) -> String {
+        let text = self.language().text("The monitor could not save settings");
+        match error {
+            Some(code) => format!("{text} (Windows error {code})"),
+            None => text.to_string(),
+        }
+    }
+
+    /// Show the monitor's settings save failure, and clear it once a later
+    /// save succeeds. A Studio-side error stays until Studio replaces it.
+    pub(super) fn sync_monitor_save_error(&mut self, error: Option<Option<u32>>) {
+        if error == self.monitor_save_error {
+            // Another Studio action may have replaced or cleared the warning;
+            // bring it back while the monitor still reports the failure.
+            if let (Some(code), None) = (error, &self.settings_error) {
+                self.monitor_save_error_shown = Some(self.monitor_save_error_text(code));
+                self.settings_error = self.monitor_save_error_shown.clone();
+            }
+            return;
+        }
+        // Compare with the text actually shown: the language may have changed.
+        if self.monitor_save_error_shown.is_some()
+            && self.settings_error == self.monitor_save_error_shown
+        {
+            self.settings_error = None;
+        }
+        self.monitor_save_error_shown = error.map(|code| self.monitor_save_error_text(code));
+        if self.monitor_save_error_shown.is_some() {
+            self.settings_error = self.monitor_save_error_shown.clone();
+        }
+        self.monitor_save_error = error;
+    }
+
+    /// Adopt every other value the monitor saved since the last sync, unless
+    /// Studio has a local edit of it. Compared per top-level settings key.
+    pub(super) fn sync_other_settings(&mut self, persisted: &SettingsFile) {
+        use serde_json::Value;
+        let (Ok(Value::Object(mut local)), Ok(Value::Object(synced)), Ok(Value::Object(disk))) = (
+            serde_json::to_value(&self.settings),
+            serde_json::to_value(&self.synced_settings),
+            serde_json::to_value(persisted),
+        ) else {
+            return;
+        };
+        // The Settings page shows an unset language as "system"; both mean the
+        // same thing and must not count as a local edit.
+        if local.get("language").and_then(Value::as_str) == Some("system") {
+            local.remove("language");
+        }
+        let mut changed = false;
+        // A key can be missing on disk, e.g. language "System" is omitted.
+        let keys: std::collections::BTreeSet<String> = local
+            .keys()
+            .chain(synced.keys())
+            .chain(disk.keys())
+            .cloned()
+            .collect();
+        for key in keys {
+            // Handled with their own editor state above.
+            if key == "poll_interval_ms" || key == "lock_taskbar" {
+                continue;
+            }
+            let local_value = local.get(&key);
+            let disk_value = disk.get(&key);
+            if local_value == synced.get(&key) && local_value != disk_value {
+                match disk_value {
+                    Some(value) => local.insert(key, value.clone()),
+                    None => local.remove(&key),
+                };
+                changed = true;
+            }
+        }
+        if changed {
+            if let Ok(mut merged) = serde_json::from_value::<SettingsFile>(Value::Object(local)) {
+                // Fields that never serialize keep their in-memory values.
+                merged.tray_offset = self.settings.tray_offset;
+                merged.taskbar_index = self.settings.taskbar_index;
+                merged.widget_visible = self.settings.widget_visible;
+                merged.legacy_placement_pending = self.settings.legacy_placement_pending;
+                merged.legacy_visibility_pending = self.settings.legacy_visibility_pending;
+                self.settings = merged;
+            }
+        }
+        self.synced_settings = persisted.clone();
+    }
+
     pub(super) fn sync_taskbar_lock(&mut self, persisted_lock: bool) {
         // Preserve a local toggle; unrelated edits adopt the latest menu value.
         if self.settings.lock_taskbar == self.synced_taskbar_lock {
@@ -131,8 +220,10 @@ impl StudioApp {
         let persisted = app_settings::load_settings();
         self.sync_poll_interval(persisted.poll_interval_ms);
         self.sync_taskbar_lock(persisted.lock_taskbar);
+        self.sync_other_settings(&persisted);
         match app_settings::save_settings(&self.settings) {
             Ok(()) => {
+                self.synced_settings = self.settings.clone();
                 self.synced_poll_interval_ms = self.settings.poll_interval_ms;
                 self.synced_taskbar_lock = self.settings.lock_taskbar;
                 self.settings_error = None;
@@ -219,6 +310,8 @@ impl StudioApp {
         let persisted = app_settings::load_settings();
         self.sync_poll_interval(persisted.poll_interval_ms);
         self.sync_taskbar_lock(persisted.lock_taskbar);
+        self.sync_other_settings(&persisted);
+        self.sync_monitor_save_error(crate::dashboard::read_settings_save_error(self.owner));
         if let Some(cache) = app_settings::load_usage_cache() {
             self.update_usage_cache(cache);
         }

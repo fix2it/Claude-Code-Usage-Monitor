@@ -211,6 +211,8 @@ struct StudioApp {
     settings: SettingsFile,
     synced_poll_interval_ms: u32,
     synced_taskbar_lock: bool,
+    /// Settings as last read from or written to disk, for `sync_other_settings`.
+    synced_settings: SettingsFile,
     poll_interval_editor_generation: u64,
     startup_enabled: bool,
     theme: ThemeDocument,
@@ -221,6 +223,11 @@ struct StudioApp {
     usage_has_error: bool,
     last_cache_read: Instant,
     settings_error: Option<String>,
+    /// Last settings save failure the monitor reported (see
+    /// `dashboard::read_settings_save_error`).
+    monitor_save_error: Option<Option<u32>>,
+    /// The warning text shown for `monitor_save_error`.
+    monitor_save_error_shown: Option<String>,
     theme_error: Option<String>,
 }
 
