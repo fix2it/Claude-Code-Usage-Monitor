@@ -421,70 +421,135 @@ pub(super) fn run(
 mod tests {
     use super::*;
 
-    #[test]
-    fn warp_renders_partial_textures_at_zoom_and_frees_after_paint() {
-        use egui::epaint::{ClippedShape, ImageDelta, Mesh, Shape};
-        let (mut device, mut immediate) = (None, None);
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_WARP,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                Some(&[D3D_FEATURE_LEVEL_11_0]),
-                D3D11_SDK_VERSION,
-                Some(&mut device),
-                None,
-                Some(&mut immediate),
-            )
-            .unwrap();
-        }
-        let device = device.unwrap();
-        let immediate = immediate.unwrap();
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: 16,
-            Height: 16,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
-            ..Default::default()
-        };
-        let (mut texture, mut target, mut readback) = (None, None, None);
-        unsafe {
-            device
-                .CreateTexture2D(&desc, None, Some(&mut texture))
-                .unwrap();
-            device
-                .CreateRenderTargetView(texture.as_ref().unwrap(), None, Some(&mut target))
-                .unwrap();
-            device
-                .CreateTexture2D(
-                    &D3D11_TEXTURE2D_DESC {
-                        Usage: D3D11_USAGE_STAGING,
-                        BindFlags: 0,
-                        CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                        ..desc
-                    },
+    use egui::epaint::{ClippedShape, ImageDelta, Mesh, Shape};
+
+    /// 16x16 WARP render target with a CPU readback copy and a renderer
+    /// whose egui context runs at zoom 2.0.
+    struct WarpTarget {
+        immediate: ID3D11DeviceContext,
+        texture: ID3D11Texture2D,
+        target: ID3D11RenderTargetView,
+        readback: ID3D11Texture2D,
+        renderer: egui_directx11::Renderer,
+        context: egui::Context,
+    }
+
+    impl WarpTarget {
+        fn new() -> Self {
+            let (mut device, mut immediate) = (None, None);
+            unsafe {
+                D3D11CreateDevice(
                     None,
-                    Some(&mut readback),
+                    D3D_DRIVER_TYPE_WARP,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    Some(&[D3D_FEATURE_LEVEL_11_0]),
+                    D3D11_SDK_VERSION,
+                    Some(&mut device),
+                    None,
+                    Some(&mut immediate),
+                )
+                .unwrap();
+            }
+            let device: ID3D11Device = device.unwrap();
+            let immediate = immediate.unwrap();
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: 16,
+                Height: 16,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
+                ..Default::default()
+            };
+            let (mut texture, mut target, mut readback) = (None, None, None);
+            unsafe {
+                device
+                    .CreateTexture2D(&desc, None, Some(&mut texture))
+                    .unwrap();
+                device
+                    .CreateRenderTargetView(texture.as_ref().unwrap(), None, Some(&mut target))
+                    .unwrap();
+                device
+                    .CreateTexture2D(
+                        &D3D11_TEXTURE2D_DESC {
+                            Usage: D3D11_USAGE_STAGING,
+                            BindFlags: 0,
+                            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                            ..desc
+                        },
+                        None,
+                        Some(&mut readback),
+                    )
+                    .unwrap();
+            }
+            let renderer = egui_directx11::Renderer::new(&device).unwrap();
+            let context = egui::Context::default();
+            context.set_zoom_factor(2.0);
+            let mut warmup = context.run_ui(Default::default(), |_| {});
+            warmup.textures_delta.clear();
+            Self {
+                immediate,
+                texture: texture.unwrap(),
+                target: target.unwrap(),
+                readback: readback.unwrap(),
+                renderer,
+                context,
+            }
+        }
+
+        fn clear_and_render(
+            &mut self,
+            textures_delta: egui::TexturesDelta,
+            shapes: Vec<ClippedShape>,
+        ) {
+            unsafe {
+                self.immediate
+                    .ClearRenderTargetView(&self.target, &[0.0, 0.0, 0.0, 1.0]);
+            }
+            self.renderer
+                .render(
+                    &self.immediate,
+                    &self.target,
+                    &self.context,
+                    egui_directx11::RendererOutput {
+                        textures_delta,
+                        shapes,
+                        pixels_per_point: 2.0,
+                    },
                 )
                 .unwrap();
         }
-        let texture: ID3D11Texture2D = texture.unwrap();
-        let target = target.unwrap();
-        let readback: ID3D11Texture2D = readback.unwrap();
-        let mut renderer = egui_directx11::Renderer::new(&device).unwrap();
-        let context = egui::Context::default();
-        context.set_zoom_factor(2.0);
-        let mut warmup = context.run_ui(Default::default(), |_| {});
-        warmup.textures_delta.clear();
-        let id = egui::TextureId::Managed(123);
+
+        fn read_pixel(&self, x: usize, y: usize) -> [u8; 4] {
+            unsafe {
+                self.immediate.CopyResource(&self.readback, &self.texture);
+                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                self.immediate
+                    .Map(&self.readback, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                    .unwrap();
+                let pointer = mapped
+                    .pData
+                    .cast::<u8>()
+                    .add(y * mapped.RowPitch as usize + x * 4);
+                let pixel = [*pointer, *pointer.add(1), *pointer.add(2), *pointer.add(3)];
+                self.immediate.Unmap(&self.readback, 0);
+                pixel
+            }
+        }
+    }
+
+    const PARTIAL_TEXTURE: egui::TextureId = egui::TextureId::Managed(123);
+
+    /// A 3x2 red texture with one blue texel patched in at (2, 1), freed
+    /// after this paint.
+    fn partial_texture_delta_freed_after_paint() -> egui::TexturesDelta {
+        let id = PARTIAL_TEXTURE;
         let mut delta = egui::TexturesDelta::default();
         delta.set.entry(id).or_default().push(ImageDelta::full(
             egui::ColorImage::filled([3, 2], egui::Color32::RED),
@@ -496,68 +561,46 @@ mod tests {
             egui::TextureOptions::NEAREST,
         ));
         delta.free.insert(id);
-        let mut mesh = Mesh::with_texture(id);
+        delta
+    }
+
+    /// One 3x2-point mesh sampling the whole partial texture.
+    fn partial_texture_shapes() -> Vec<ClippedShape> {
+        let mut mesh = Mesh::with_texture(PARTIAL_TEXTURE);
         mesh.add_rect_with_uv(
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(3.0, 2.0)),
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-        let shapes = vec![ClippedShape::new(egui::Rect::EVERYTHING, Shape::mesh(mesh))];
-        let read_pixel = |x: usize, y: usize| -> [u8; 4] {
-            unsafe {
-                immediate.CopyResource(&readback, &texture);
-                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                immediate
-                    .Map(&readback, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                    .unwrap();
-                let pointer = mapped
-                    .pData
-                    .cast::<u8>()
-                    .add(y * mapped.RowPitch as usize + x * 4);
-                let pixel = [*pointer, *pointer.add(1), *pointer.add(2), *pointer.add(3)];
-                immediate.Unmap(&readback, 0);
-                pixel
-            }
-        };
-        unsafe {
-            immediate.ClearRenderTargetView(&target, &[0.0, 0.0, 0.0, 1.0]);
-        }
-        renderer
-            .render(
-                &immediate,
-                &target,
-                &context,
-                egui_directx11::RendererOutput {
-                    textures_delta: delta,
-                    shapes: shapes.clone(),
-                    pixels_per_point: 2.0,
-                },
-            )
-            .unwrap();
-        assert_eq!(read_pixel(1, 1), [255, 0, 0, 255]);
-        assert_eq!(read_pixel(5, 3), [0, 0, 255, 255]);
+        vec![ClippedShape::new(egui::Rect::EVERYTHING, Shape::mesh(mesh))]
+    }
+
+    #[test]
+    fn warp_renders_partial_textures_at_zoom() {
+        let mut warp = WarpTarget::new();
+        warp.clear_and_render(
+            partial_texture_delta_freed_after_paint(),
+            partial_texture_shapes(),
+        );
+        assert_eq!(warp.read_pixel(1, 1), [255, 0, 0, 255]);
+        assert_eq!(warp.read_pixel(5, 3), [0, 0, 255, 255]);
         assert_eq!(
-            read_pixel(8, 2),
+            warp.read_pixel(8, 2),
             [0, 0, 0, 255],
             "zoom must only be applied once"
         );
-        unsafe {
-            immediate.ClearRenderTargetView(&target, &[0.0, 0.0, 0.0, 1.0]);
-        }
-        renderer
-            .render(
-                &immediate,
-                &target,
-                &context,
-                egui_directx11::RendererOutput {
-                    textures_delta: Default::default(),
-                    shapes,
-                    pixels_per_point: 2.0,
-                },
-            )
-            .unwrap();
+    }
+
+    #[test]
+    fn warp_frees_textures_after_paint() {
+        let mut warp = WarpTarget::new();
+        warp.clear_and_render(
+            partial_texture_delta_freed_after_paint(),
+            partial_texture_shapes(),
+        );
+        warp.clear_and_render(Default::default(), partial_texture_shapes());
         assert_eq!(
-            read_pixel(1, 1),
+            warp.read_pixel(1, 1),
             [0, 0, 0, 255],
             "freed textures must not draw stale resources"
         );

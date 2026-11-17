@@ -6606,9 +6606,9 @@ fn split_codex_pools_keep_their_data_and_independent_modes() {
     }
 }
 
-#[test]
-fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
-    let theme = quad_theme();
+/// Claude, Codex and Antigravity each with a main pool at 20%/30% and a
+/// second pool (claude_x 40%, codex_x 50%, antigravity_x 60%, external 70%).
+fn split_pools_data() -> AppUsageData {
     let mut data = AppUsageData::default();
     for provider in [
         ProviderId::Claude,
@@ -6638,7 +6638,12 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
             selected: id == "default",
         });
     }
-    let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([
+    data
+}
+
+/// All three providers with both pools enabled and every pool split out.
+fn split_pools_runtime() -> ThemeRuntime {
+    ThemeRuntime::from_providers(ProviderSet::from_enabled([
         ProviderId::Claude,
         ProviderId::Codex,
         ProviderId::Antigravity,
@@ -6648,7 +6653,13 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
     .with_antigravity_pools(true, true, 1.0)
     .with_antigravity_external_x(true)
     .with_antigravity_x(true)
-    .with_pool_layouts(false, false, false);
+    .with_pool_layouts(false, false, false)
+}
+
+#[test]
+fn split_pools_render_each_pools_data() {
+    let data = split_pools_data();
+    let runtime = split_pools_runtime();
     let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
     for (template, expected) in [
         ("{claude.session.display:usage_line}", "20%"),
@@ -6661,14 +6672,22 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
     ] {
         assert_eq!(format_template(template, &context), expected, "{template}");
     }
-    let mut missing_o = data.clone();
+}
+
+#[test]
+fn split_agy_pool_without_usage_does_not_borrow_main_pool_data() {
+    let mut missing_o = split_pools_data();
     missing_o
         .accounts
         .iter_mut()
         .find(|account| account.profile.id == "antigravity_x")
         .unwrap()
         .usage = None;
-    let no_o = DataContext::from_usage_with_runtime(Some(&missing_o), &Canvas::default(), runtime);
+    let no_o = DataContext::from_usage_with_runtime(
+        Some(&missing_o),
+        &Canvas::default(),
+        split_pools_runtime(),
+    );
     assert_eq!(
         format_template("{antigravity_o.gemini.session.display:usage_line}", &no_o),
         "--"
@@ -6677,6 +6696,13 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
         format_template("{antigravity.gemini.session.display:usage_line}", &no_o),
         "20%"
     );
+}
+
+#[test]
+fn split_pools_keep_adaptive_order_and_hover_targets() {
+    let theme = quad_theme();
+    let data = split_pools_data();
+    let runtime = split_pools_runtime();
     let metrics = display_metrics(&theme, Some(&data), runtime);
     let ids = ["antigravity-provider", "antigravity_o-provider"];
     let bounds =
@@ -6710,6 +6736,14 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
             Some(id)
         );
     }
+}
+
+#[test]
+fn split_pools_use_compact_bar_width_and_cubes() {
+    let theme = quad_theme();
+    let data = split_pools_data();
+    let runtime = split_pools_runtime();
+    let context = DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
     for key in [
         "claude",
         "claude_x",
@@ -6745,34 +6779,55 @@ fn split_pools_render_data_and_keep_adaptive_order_and_hover_targets() {
             compact_bar_cubes(widget_count(Some(&data), runtime))
         );
     }
+}
+
+#[test]
+fn split_agy_main_pool_hover_shows_its_external_row() {
+    let data = split_pools_data();
     let hovered = DataContext::from_usage_with_runtime(
         Some(&data),
         &Canvas::default(),
         ThemeRuntime {
             crossfade_opacity: 0.0,
-            ..runtime
+            ..split_pools_runtime()
         },
     );
     assert_eq!(hovered.get("antigravity.hover_phase"), Some(1.0));
     assert_eq!(hovered.get("antigravity.external.opacity"), Some(1.0));
 }
 
-#[test]
-fn split_agy_pools_embed_each_pools_external_row() {
-    let theme = quad_theme();
-    let by_id: HashMap<&str, &SceneObject> = theme.surfaces[0]
+fn split_agy_data() -> AppUsageData {
+    agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))))
+}
+
+/// `a`/`o`: whether the main / second agy pool shows its external row.
+fn split_agy_pool_runtime(a: bool, o: bool, combined: bool) -> ThemeRuntime {
+    agy_runtime(a, true)
+        .with_antigravity_external_x(o)
+        .with_pool_layouts(true, true, combined)
+        .with_widget_mode_phase("antigravity_o", 2.0)
+        .with_widget_mode_phase("agy_external_o", 1.0)
+}
+
+const SPLIT_AGY_EXTERNAL_CASES: [(bool, bool); 4] =
+    [(false, false), (true, false), (false, true), (true, true)];
+
+fn scene_index(theme: &ThemeDocument) -> HashMap<&str, &SceneObject> {
+    theme.surfaces[0]
         .children
         .iter()
         .map(|o| (o.id.as_str(), o))
-        .collect();
-    let data = agy_data_with_pool_o(Ok(agy_pool_fixture(70.0, Some(55.0))));
+        .collect()
+}
+
+#[test]
+fn split_agy_pools_widget_count_and_provider_visibility() {
+    let theme = quad_theme();
+    let by_id = scene_index(&theme);
+    let data = split_agy_data();
     for combined in [true, false] {
-        for (a, o) in [(false, false), (true, false), (false, true), (true, true)] {
-            let runtime = agy_runtime(a, true)
-                .with_antigravity_external_x(o)
-                .with_pool_layouts(true, true, combined)
-                .with_widget_mode_phase("antigravity_o", 2.0)
-                .with_widget_mode_phase("agy_external_o", 1.0);
+        for (a, o) in SPLIT_AGY_EXTERNAL_CASES {
+            let runtime = split_agy_pool_runtime(a, o, combined);
             let context =
                 DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
             let expected = if combined { 1 + usize::from(a || o) } else { 2 };
@@ -6785,114 +6840,151 @@ fn split_agy_pools_embed_each_pools_external_row() {
                 scene_object_renders(by_id["agy_external_o-provider"], &by_id, &context),
                 false
             );
-            if !combined {
-                assert_eq!(
-                    context.get("antigravity.gemini.session.percentage"),
-                    Some(10.0)
-                );
-                assert_eq!(
-                    context.get("antigravity_o.gemini.session.percentage"),
-                    Some(70.0)
-                );
-                assert_eq!(
-                    context.get("antigravity_o.external.session.percentage"),
-                    Some(55.0)
-                );
-                assert_eq!(context.get("display.mode_phase.antigravity"), Some(0.0));
-                assert_eq!(context.get("display.mode_phase.antigravity_o"), Some(2.0));
-                assert_eq!(context.get("antigravity.dual_mode"), Some(a as u8 as f64));
-                assert_eq!(context.get("antigravity_o.dual_mode"), Some(o as u8 as f64));
-                assert_eq!(
-                    context.get("antigravity.row2.session.percentage"),
-                    Some(30.0)
-                );
-                assert_eq!(
-                    context.get("antigravity_o.row2.session.percentage"),
-                    Some(55.0)
-                );
-                let mut dark = context.clone();
-                dark.insert("system.dark", 1.0);
-                for (id, visible) in [
-                    ("antigravity-gemini-5h-dark-normal", a),
-                    ("antigravity-external-5h-dark-normal", a),
-                    ("split-antigravity_o-antigravity-gemini-5h-dark-normal", o),
-                    ("split-antigravity_o-antigravity-external-5h-dark-normal", o),
-                    ("antigravity-session-gemini-solo-dark", !a),
-                    (
-                        "split-antigravity_o-antigravity-session-gemini-solo-dark",
-                        !o,
-                    ),
-                ] {
-                    assert_eq!(
-                        scene_object_renders(by_id[id], &by_id, &dark),
-                        visible,
-                        "{id}: a={a} o={o}"
-                    );
-                }
-                let mut hovered = DataContext::from_usage_with_runtime(
-                    Some(&data),
-                    &Canvas::default(),
-                    runtime
-                        .with_antigravity_pools(true, a, 0.0)
-                        .with_split_hover_phases([0.0, 1.0, 0.0, 0.0]),
-                );
-                assert_eq!(hovered.get("antigravity.hover_phase"), Some(1.0));
-                assert_eq!(hovered.get("antigravity_o.hover_phase"), Some(1.0));
-                hovered.insert("system.dark", 1.0);
-                for (id, visible) in [
-                    ("antigravity-gemini-5h-dark-hover", a),
-                    ("antigravity-external-5h-dark-hover", a),
-                    ("split-antigravity_o-antigravity-gemini-5h-dark-hover", o),
-                    ("split-antigravity_o-antigravity-external-5h-dark-hover", o),
-                ] {
-                    assert_eq!(
-                        scene_object_renders(by_id[id], &by_id, &hovered),
-                        visible,
-                        "{id}: a={a} o={o}"
-                    );
-                }
-                if !a {
-                    assert_eq!(hovered.get("antigravity.gemini.opacity"), Some(1.0));
-                    assert_eq!(hovered.get("antigravity.external.opacity"), Some(0.0));
-                }
-                if !o {
-                    assert_eq!(hovered.get("antigravity_o.gemini.opacity"), Some(1.0));
-                    assert_eq!(hovered.get("antigravity_o.external.opacity"), Some(0.0));
-                }
-                let metrics = display_metrics(&theme, Some(&data), runtime);
-                for id in ["antigravity-provider", "antigravity_o-provider"] {
-                    assert!(
-                        object_bounds_with_metrics(&theme, 0, Some(&data), runtime, id, &metrics)
-                            .is_some(),
-                        "{id}"
-                    );
-                }
-                assert_eq!(
-                    object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        Some(&data),
-                        runtime,
-                        "antigravity-external-provider",
-                        &metrics
-                    )
-                    .is_some(),
-                    false
-                );
-                assert_eq!(
-                    object_bounds_with_metrics(
-                        &theme,
-                        0,
-                        Some(&data),
-                        runtime,
-                        "agy_external_o-provider",
-                        &metrics
-                    )
-                    .is_some(),
-                    false
-                );
-            }
         }
+    }
+}
+
+#[test]
+fn split_agy_pools_keep_their_data_and_modes() {
+    let data = split_agy_data();
+    for (a, o) in SPLIT_AGY_EXTERNAL_CASES {
+        let runtime = split_agy_pool_runtime(a, o, false);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        assert_eq!(
+            context.get("antigravity.gemini.session.percentage"),
+            Some(10.0)
+        );
+        assert_eq!(
+            context.get("antigravity_o.gemini.session.percentage"),
+            Some(70.0)
+        );
+        assert_eq!(
+            context.get("antigravity_o.external.session.percentage"),
+            Some(55.0)
+        );
+        assert_eq!(context.get("display.mode_phase.antigravity"), Some(0.0));
+        assert_eq!(context.get("display.mode_phase.antigravity_o"), Some(2.0));
+        assert_eq!(context.get("antigravity.dual_mode"), Some(a as u8 as f64));
+        assert_eq!(context.get("antigravity_o.dual_mode"), Some(o as u8 as f64));
+        assert_eq!(
+            context.get("antigravity.row2.session.percentage"),
+            Some(30.0)
+        );
+        assert_eq!(
+            context.get("antigravity_o.row2.session.percentage"),
+            Some(55.0)
+        );
+    }
+}
+
+#[test]
+fn split_agy_pools_embed_each_pools_external_row() {
+    let theme = quad_theme();
+    let by_id = scene_index(&theme);
+    let data = split_agy_data();
+    for (a, o) in SPLIT_AGY_EXTERNAL_CASES {
+        let runtime = split_agy_pool_runtime(a, o, false);
+        let mut dark =
+            DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
+        dark.insert("system.dark", 1.0);
+        for (id, visible) in [
+            ("antigravity-gemini-5h-dark-normal", a),
+            ("antigravity-external-5h-dark-normal", a),
+            ("split-antigravity_o-antigravity-gemini-5h-dark-normal", o),
+            ("split-antigravity_o-antigravity-external-5h-dark-normal", o),
+            ("antigravity-session-gemini-solo-dark", !a),
+            (
+                "split-antigravity_o-antigravity-session-gemini-solo-dark",
+                !o,
+            ),
+        ] {
+            assert_eq!(
+                scene_object_renders(by_id[id], &by_id, &dark),
+                visible,
+                "{id}: a={a} o={o}"
+            );
+        }
+    }
+}
+
+#[test]
+fn split_agy_pools_hover_their_own_external_rows() {
+    let theme = quad_theme();
+    let by_id = scene_index(&theme);
+    let data = split_agy_data();
+    for (a, o) in SPLIT_AGY_EXTERNAL_CASES {
+        let runtime = split_agy_pool_runtime(a, o, false);
+        let mut hovered = DataContext::from_usage_with_runtime(
+            Some(&data),
+            &Canvas::default(),
+            runtime
+                .with_antigravity_pools(true, a, 0.0)
+                .with_split_hover_phases([0.0, 1.0, 0.0, 0.0]),
+        );
+        assert_eq!(hovered.get("antigravity.hover_phase"), Some(1.0));
+        assert_eq!(hovered.get("antigravity_o.hover_phase"), Some(1.0));
+        hovered.insert("system.dark", 1.0);
+        for (id, visible) in [
+            ("antigravity-gemini-5h-dark-hover", a),
+            ("antigravity-external-5h-dark-hover", a),
+            ("split-antigravity_o-antigravity-gemini-5h-dark-hover", o),
+            ("split-antigravity_o-antigravity-external-5h-dark-hover", o),
+        ] {
+            assert_eq!(
+                scene_object_renders(by_id[id], &by_id, &hovered),
+                visible,
+                "{id}: a={a} o={o}"
+            );
+        }
+        if !a {
+            assert_eq!(hovered.get("antigravity.gemini.opacity"), Some(1.0));
+            assert_eq!(hovered.get("antigravity.external.opacity"), Some(0.0));
+        }
+        if !o {
+            assert_eq!(hovered.get("antigravity_o.gemini.opacity"), Some(1.0));
+            assert_eq!(hovered.get("antigravity_o.external.opacity"), Some(0.0));
+        }
+    }
+}
+
+#[test]
+fn split_agy_pools_have_bounds_but_external_widgets_do_not() {
+    let theme = quad_theme();
+    let data = split_agy_data();
+    for (a, o) in SPLIT_AGY_EXTERNAL_CASES {
+        let runtime = split_agy_pool_runtime(a, o, false);
+        let metrics = display_metrics(&theme, Some(&data), runtime);
+        for id in ["antigravity-provider", "antigravity_o-provider"] {
+            assert!(
+                object_bounds_with_metrics(&theme, 0, Some(&data), runtime, id, &metrics).is_some(),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "antigravity-external-provider",
+                &metrics
+            )
+            .is_some(),
+            false
+        );
+        assert_eq!(
+            object_bounds_with_metrics(
+                &theme,
+                0,
+                Some(&data),
+                runtime,
+                "agy_external_o-provider",
+                &metrics
+            )
+            .is_some(),
+            false
+        );
     }
 }
 

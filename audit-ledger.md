@@ -76,7 +76,7 @@ More long functions:
 - F30 | S1 | src/window/window_context_menu.rs:224-365 | `show_context_menu_document` | proposal: build / track popup / dispatch | fixed (refactor/8-long-functions)
 - F31 | S1 | src/window/window_context_menu.rs:481-618 | `context_menu_checked_with_origin` | proposal: per-action-family check state | fixed (refactor/8-long-functions)
 - F32 | S1 | src/context_menu.rs:369-574 | `classic_context_menu` | proposal: provider and settings menu builders | fixed (refactor/8-long-functions)
-- F33 | S1 | src/context_menu.rs:824-953 | test `classic_provider_children_follow_their_parents` (L6: test shape) | proposal: split into focused cases | open (part 8: skipped, test-only split, not cheap)
+- F33 | S1 | src/context_menu.rs:824-953 | test `classic_provider_children_follow_their_parents` (L6: test shape) | proposal: split into focused cases | fixed (L6 test split: 4 focused tests + shared helpers)
 UI-thread blocking (round 3):
 - F35 | S1/M1 | src/window.rs:1172 | `save_state_settings` loads and writes settings file while holding the global state lock (called from menu actions) | proposal: snapshot under lock, do file I/O after release | fixed (refactor/2: file I/O outside STATE; SETTINGS_IO mutex serializes saves, lock order SETTINGS_IO → STATE)
 - F36 | S1/M6 | src/native_interop.rs:435-541 (484,493) | `find_desktop_host` (~105 lines) can block UI thread up to 2×1 s in `SendMessageTimeoutW` when cached host is invalid | proposal: background/bounded rediscovery; split cached-host validation vs discovery | partly fixed (refactor/2: SMTO_ABORTIFHUNG (hung Explorer → no wait) + second WorkerW request skipped after a failed first one (timeout → 1 s instead of 2 s). Still up to ~2 s when the first request succeeds slowly and the second times out; a shared deadline would skip a request that used to succeed. Background rediscovery not done: three callers need the host synchronously, moving it off-thread changes placement timing — visible behavior)
@@ -94,7 +94,7 @@ Round 4:
 - F48 | S1 | src/theme_engine/theme_rendering.rs:117 | each surface render builds the full usage `DataContext` twice (incl. formatted dynamic limit keys) | proposal: build once per frame, patch canvas-size values | fixed (refactor/3-render-hot-path)
 - F49 | M2 | src/poller/copilot.rs:331 (+ cursor, grok, opencode) | env-value normalization duplicated in 4 pollers; secret-signature logic duplicated in copilot and cursor | proposal: shared helpers in poller.rs | fixed (refactor/5-pool-table): non_empty_environment and secret_signature in poller.rs
 - F50 | M5 | src/updater.rs:48 | `InstallChannel::Winget` dead in production (`allow(dead_code)`), plus its update path | proposal: remove or gate under cfg(test) | fixed (refactor/4-dead-code)
-- F51 | M4 | src/studio_app/warp.rs:425-564 | test `warp_renders_partial_textures_at_zoom_and_frees_after_paint` 140 lines (L6: test shape) | proposal: split | open (part 8: skipped, test-only split, not cheap)
+- F51 | M4 | src/studio_app/warp.rs:425-564 | test `warp_renders_partial_textures_at_zoom_and_frees_after_paint` 140 lines (L6: test shape) | proposal: split | fixed (L6 test split: WarpTarget harness + 2 focused tests)
 Round 5:
 - F53 | S1 | src/window.rs:4328 | hover setters for Claude, Codex, Antigravity, OpenCode, Qoder, agy external repeat state-change + animation + timer logic | proposal: one generic hover-animation helper with per-provider eligibility | fixed (refactor/5-pool-table): set_tile_hover + tile_hover_animates over the Tile table
 - F54 | S1 | src/window.rs:1490-1588 | `sync_tray_icon` (~100) mixes state collection, surface filter, render, shell sync | proposal: extract themed-icon build | fixed (refactor/6-window-split; tray_status.rs: TrayFrame (surface_renders, render_icon))
@@ -174,7 +174,7 @@ Long functions on this path (already in ledger, relevant for part 5): F6 `sync_s
 ### Level 6 — Preferences
 - F60 | P7 | src/window/message_loop.rs:884-905 | flag selection by `if id == …` chain | proposal: map command → `&mut bool` accessor | fixed (refactor/5-pool-table): menu command -> provider -> pools_one_widget_mut
 - F61 | P9 | src/window/widget_tooltip.rs:320 tests | no tooltip test with distinct main/side pool values (would catch F58) | fixed (fix/pool-split-l4: widget_summary_lists_side_pools_with_their_own_numbers, unpolled_second_pool_never_shows_first_pool_reading)
-- F65 | P9 | src/theme_engine/tests.rs:6599 (~150 lines), 6751 (~135 lines) | long split tests | proposal: split into focused tests | open (part 8: skipped, test-only split, not cheap)
+- F65 | P9 | src/theme_engine/tests.rs:6599 (~150 lines), 6751 (~135 lines) | long split tests | proposal: split into focused tests | fixed (L6 test split: 10 focused tests + shared fixtures)
 - F68 | P8 | src/theme_engine.rs:4127 | split capability requires all four providers' split objects; a custom theme with only Claude split cannot split anything (documented design) | proposal: per-provider capability, plus tests for partial/mixed themes (placement_regression_tests.rs:120) | open (reviewer: 4; orchestrator: 6, deliberate documented rule)
 
 ## Validation (pool-split audit)
