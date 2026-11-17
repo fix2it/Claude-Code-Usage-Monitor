@@ -6,6 +6,12 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.605] - 2026-11-17
+
+### Fixed
+
+- OpenCode Go works again with the console's current session cookie (#195). A cookie value without a name is now sent as `__Host-console_session` first and as the legacy `auth` cookie only if the console answers 401; the working form is remembered, so a normal poll makes one request. Each 401 logs which cookie form was sent (name only), and an outdated `Fe26.2**` value gets its own hint. Copy `__Host-console_session=st_...` from opencode.ai.
+
 ## [2.23.604] - 2026-11-17
 
 ### Fixed
