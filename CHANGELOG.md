@@ -6,6 +6,17 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.606] - 2026-11-18
+
+### Changed
+
+- Custom themes can split pools per provider. A theme that draws only Claude's second-pool tile now splits Claude's pools while the other providers stay on one widget. New theme keys `display.claude_split_supported`, `display.codex_split_supported` and `display.antigravity_split_supported`; the old `display.pool_split_supported` still means all providers. The "Pools on one widget" menu item is shown per provider.
+
+### Fixed
+
+- A mirror widget whose theme has no split tiles keeps its pools on one widget, and its size is measured for that layout instead of the primary widget's.
+- The desktop host no longer asks Explorer to create a WorkerW window when one already exists.
+
 ## [2.23.605] - 2026-11-17
 
 ### Fixed
