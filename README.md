@@ -7,6 +7,8 @@ Claude Code Usage Monitor sits in your Windows taskbar to track active AI usage 
 
 This project is a standalone fork of [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor). Warm thanks to Code Zeno, whose great work and MIT-licensed foundation made this possible. The fork evolves independently at [fix2it/Claude-Code-Usage-Monitor](https://github.com/fix2it/Claude-Code-Usage-Monitor) to focus on multi-account pool monitoring, compact taskbar layouts, per-widget control, and rendering efficiency.
 
+The two-bar per-provider layout was inspired by the **Capsula** theme proposal from [@pedroadami](https://github.com/pedroadami) in [CodeZeno/Claude-Code-Usage-Monitor#154](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/issues/154) — thank you for the idea!
+
 Please report problems with fork builds in this repository, not to the original project.
 
 Besides Claude Code, Codex, and Antigravity, the monitor supports Qoder and
