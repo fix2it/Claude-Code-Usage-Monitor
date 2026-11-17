@@ -6,6 +6,13 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.604] - 2026-11-17
+
+### Fixed
+
+- Settings saves no longer fail silently. When Windows refuses to replace `settings.json` (for example, an antivirus holds the file), the save is retried briefly, and the error, including the Windows error code, is logged and shown in Studio.
+- Studio now picks up every setting changed from the tray menu (poll interval, providers, language, and the rest) instead of only the poll interval and taskbar lock, so saving in Studio no longer overwrites menu changes.
+
 ## [2.23.603] - 2026-11-17
 
 ### Changed
