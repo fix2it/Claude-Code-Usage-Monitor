@@ -9,8 +9,35 @@ struct ThemeHostGeometry {
 
 // Store values rather than native handles so readers need no Win32 calls.
 // Readers may hold STATE; writers must never acquire STATE while holding this lock.
-static THEME_HOST_GEOMETRY: Mutex<Vec<ThemeHostGeometry>> = Mutex::new(Vec::new());
-static REFRESHING: AtomicBool = AtomicBool::new(false);
+struct HostGeometryCache {
+    geometry: Mutex<Vec<ThemeHostGeometry>>,
+    refreshing: AtomicBool,
+}
+
+impl HostGeometryCache {
+    const fn new() -> Self {
+        Self {
+            geometry: Mutex::new(Vec::new()),
+            refreshing: AtomicBool::new(false),
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn host_geometry_cache() -> &'static HostGeometryCache {
+    static CACHE: HostGeometryCache = HostGeometryCache::new();
+    &CACHE
+}
+
+/// Test threads get independent snapshots: tests that inject fake geometry
+/// must not change the host size seen by layout tests running in parallel.
+#[cfg(test)]
+fn host_geometry_cache() -> &'static HostGeometryCache {
+    thread_local! {
+        static CACHE: &'static HostGeometryCache = Box::leak(Box::new(HostGeometryCache::new()));
+    }
+    CACHE.with(|cache| *cache)
+}
 
 /// Called at startup and on shell/display layout changes, with STATE unlocked.
 pub(super) fn refresh_theme_host_geometry() {
@@ -32,18 +59,24 @@ pub(super) fn refresh_theme_host_geometry() {
 fn refresh_with(query: impl FnOnce() -> Vec<ThemeHostGeometry>) {
     // Layout queries can dispatch another layout notification before returning.
     // Reentrant readers keep using the last complete snapshot; never wait here.
-    if REFRESHING.swap(true, Ordering::Acquire) {
+    if host_geometry_cache()
+        .refreshing
+        .swap(true, Ordering::Acquire)
+    {
         return;
     }
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
-            REFRESHING.store(false, Ordering::Release);
+            host_geometry_cache()
+                .refreshing
+                .store(false, Ordering::Release);
         }
     }
     let _reset = Reset;
     let mut geometry = query();
-    let mut cached = THEME_HOST_GEOMETRY
+    let mut cached = host_geometry_cache()
+        .geometry
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     retain_taskbar_geometry(&mut geometry, &cached);
@@ -74,14 +107,16 @@ pub(super) fn theme_runtime_for_surface(
     surface_index: usize,
     runtime: ThemeRuntime,
 ) -> ThemeRuntime {
-    let geometry = THEME_HOST_GEOMETRY
+    let geometry = host_geometry_cache()
+        .geometry
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     runtime_with_geometry(theme, surface_index, runtime, &geometry)
 }
 
 pub(super) fn taskbar_is_horizontal(display_index: usize) -> bool {
-    THEME_HOST_GEOMETRY
+    host_geometry_cache()
+        .geometry
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(display_index)
@@ -132,7 +167,8 @@ pub(super) fn floating_host_for_theme(
     theme: &ThemeDocument,
     saved: Option<&app_settings::FloatingHost>,
 ) -> Option<app_settings::FloatingHost> {
-    let geometry = THEME_HOST_GEOMETRY
+    let geometry = host_geometry_cache()
+        .geometry
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     floating_host_with_geometry(theme, saved, &geometry)
@@ -421,6 +457,21 @@ mod tests {
             runtime.with_nest(SurfaceNest::TrayIcon)
         );
         assert_eq!(runtime_with_geometry(&theme, 99, runtime, &[host]), runtime);
+    }
+
+    #[test]
+    fn injected_geometry_is_invisible_to_other_test_threads() {
+        let theme = ThemeDocument::starter();
+        let runtime = ThemeRuntime::default();
+        refresh_with(|| vec![display()]);
+        let injected = theme_runtime_for_surface(&theme, 0, runtime);
+        let other = std::thread::spawn(move || {
+            theme_runtime_for_surface(&ThemeDocument::starter(), 0, runtime)
+        })
+        .join()
+        .unwrap();
+        assert_ne!(other, injected);
+        assert_eq!(other.host_dimensions(), runtime.host_dimensions());
     }
 
     #[test]
