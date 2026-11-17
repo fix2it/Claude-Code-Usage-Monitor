@@ -192,3 +192,8 @@ Long functions on this path (already in ledger, relevant for part 5): F6 `sync_s
 
 ## Result (pool-split audit)
 Stopped incomplete after 4 passes (still new findings, P5/P9 read selectively). 13 new (F56–F68): L4 ×2 (F58, F62), L5 ×7 (F56, F57, F59, F63, F64, F66, F67), L6 ×4 (F60, F61, F65, F68). No L1–L3. Duplicates dropped: 1 (mirror hover in round 2).
+
+## Flaky tests (2026-11-17, main e0e34df)
+
+- F72 | L4 | src/window/host_geometry.rs:12 (THEME_HOST_GEOMETRY) | test-only race: `shell_query_can_reenter_state_and_read_previous_geometry` writes fake 3840×92 geometry into the process-wide host cache while parallel layout tests read it; `window::placement_regression_tests::absent_saved_monitor_preserves_the_choice_while_using_host_fallbacks` computes two placements and got host 292×104 (empty cache) vs 3840×92. Reproduced 1 of 15 runs with `--test-threads=64` plus a parallel build; 0 of 20 plain runs | fixed (claude/fix-flaky-tests-ed41c1): cache + refresh guard behind `host_geometry_cache()`; release build keeps one static, test builds get one per test thread (same pattern as `app_data_directory`). App behavior unchanged.
+- Watch list (not reproduced, timing-based asserts): `poller::tests::concurrent_polling_is_bounded_and_preserves_results` and `poller::accounts` peak test (`peak > 1` relies on 20 ms sleeps overlapping); `app_settings::replace_retries_while_the_destination_is_briefly_held` (40 ms hold vs 375 ms retry budget). Open.
