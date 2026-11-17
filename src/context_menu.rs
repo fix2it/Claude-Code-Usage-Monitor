@@ -938,20 +938,28 @@ mod tests {
         assert!(legacy.is_builtin());
     }
 
-    #[test]
-    fn classic_provider_children_follow_their_parents() {
-        let menu = classic_context_menu();
-        let submenu = |id: &str| {
-            let item = menu.items.iter().find(|item| item.id == id).unwrap();
-            let ContextMenuItemKind::Submenu { items } = &item.kind else {
-                panic!("expected submenu")
-            };
-            items
+    fn classic_submenu<'a>(menu: &'a ContextMenuDocument, id: &str) -> &'a [ContextMenuItem] {
+        let item = menu.items.iter().find(|item| item.id == id).unwrap();
+        let ContextMenuItemKind::Submenu { items } = &item.kind else {
+            panic!("expected submenu")
         };
-        assert!(!submenu("settings")
+        items
+    }
+
+    fn classic_providers_context() -> DataContext {
+        let mut context = DataContext::from_usage(None, &theme_engine::Canvas::default());
+        context.insert("providers.claude.enabled", 1.0);
+        context.insert("providers.antigravity.enabled", 1.0);
+        context
+    }
+
+    #[test]
+    fn classic_fable_toggles_live_under_providers_not_settings() {
+        let menu = classic_context_menu();
+        assert!(!classic_submenu(&menu, "settings")
             .iter()
             .any(|item| item.id == "show-fable"));
-        let providers = submenu("providers");
+        let providers = classic_submenu(&menu, "providers");
         assert!(matches!(
             providers[1].kind,
             ContextMenuItemKind::Action {
@@ -968,9 +976,13 @@ mod tests {
             serde_json::to_string(&ContextMenuAction::ToggleShowFableX).unwrap(),
             r#"{"type":"toggle_show_fable_x"}"#
         );
-        let mut context = DataContext::from_usage(None, &theme_engine::Canvas::default());
-        context.insert("providers.claude.enabled", 1.0);
-        context.insert("providers.antigravity.enabled", 1.0);
+    }
+
+    #[test]
+    fn classic_antigravity_pools_are_first_level_provider_items() {
+        let menu = classic_context_menu();
+        let providers = classic_submenu(&menu, "providers");
+        let context = classic_providers_context();
         // agy mirrors Claude: two first-level pool items, each with its own
         // External models child; no separate agy parent any more.
         for (id, label) in [
@@ -984,6 +996,13 @@ mod tests {
         assert!(providers
             .iter()
             .all(|item| item.id != "provider-antigravity-gemini" && !item.label.contains("agy (")));
+    }
+
+    #[test]
+    fn classic_provider_children_follow_their_parents() {
+        let menu = classic_context_menu();
+        let providers = classic_submenu(&menu, "providers");
+        let mut context = classic_providers_context();
         for (parent, child, binding, label) in [
             (
                 "provider-claude-main",
@@ -1028,6 +1047,23 @@ mod tests {
             assert!(!item.should_render(&context));
             context.insert(binding, 1.0);
             assert!(item.should_render(&context));
+        }
+    }
+
+    #[test]
+    fn classic_pools_one_widget_needs_split_support_provider_and_both_pools() {
+        let menu = classic_context_menu();
+        let providers = classic_submenu(&menu, "providers");
+        let mut context = classic_providers_context();
+        // Every pool of the other providers stays enabled, as after the
+        // parent/child checks.
+        for binding in [
+            "claude.main.enabled",
+            "claude.x.enabled",
+            "antigravity.a.enabled",
+            "antigravity.x.enabled",
+        ] {
+            context.insert(binding, 1.0);
         }
         for (id, provider, main, x) in [
             (
