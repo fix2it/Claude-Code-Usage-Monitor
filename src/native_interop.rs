@@ -433,27 +433,6 @@ pub fn make_popup(hwnd: HWND, topmost: bool) {
 /// above the wallpaper WorkerW. Older shells accept a child of the separate
 /// top-level wallpaper WorkerW.
 pub fn find_desktop_host() -> Option<DesktopHost> {
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        if find_child_window(hwnd, "SHELLDLL_DefView").is_some() {
-            let class = wide_str("WorkerW");
-            if let Ok(worker) = unsafe {
-                FindWindowExW(
-                    None,
-                    Some(hwnd),
-                    PCWSTR::from_raw(class.as_ptr()),
-                    PCWSTR::null(),
-                )
-            } {
-                if !worker.is_invalid() {
-                    let result = unsafe { &mut *(lparam.0 as *mut HWND) };
-                    *result = worker;
-                    return BOOL(0);
-                }
-            }
-        }
-        BOOL(1)
-    }
-
     unsafe {
         let cached = *DESKTOP_HOST
             .lock()
@@ -479,54 +458,108 @@ pub fn find_desktop_host() -> Option<DesktopHost> {
             .ok()
             .filter(|hwnd| !hwnd.is_invalid())?;
 
-        // Ask Explorer to create the wallpaper WorkerW on shell versions that
-        // do not keep it alive until a desktop-hosted surface is requested.
-        // This runs on the UI thread, so bound the wait (F36): give up at once
-        // when Explorer is hung, and skip the second request when the first
-        // already timed out instead of waiting a second time. A slow success
-        // followed by a timeout can still take ~2 s; see F36 in the ledger.
-        if request_wallpaper_worker(progman, 0) {
+        // F36: discovery runs on the UI thread, so first look for a shell
+        // that already has its wallpaper WorkerW and only then ask Explorer
+        // to create one. Explorer answers that request synchronously, and a
+        // slow answer used to block us for up to ~2 s on every rediscovery.
+        if let Some(host) = existing_desktop_host(progman) {
+            cache_desktop_host(host);
+            return Some(host);
+        }
+        // Not spawned yet. On Windows 10 DefView still sits under Progman at
+        // this point and the request moves it into a WorkerW, so the layout
+        // must be read after the request.
+        if claim_wallpaper_worker_request(progman) && request_wallpaper_worker(progman, 0) {
             let _ = request_wallpaper_worker(progman, 1);
         }
-
-        // In the raised-desktop architecture Progman has both DefView and the
-        // wallpaper WorkerW as direct children. A layered child of WorkerW is
-        // suppressed by its DirectComposition wallpaper surface. Instead, our
-        // child must be a Progman sibling immediately below DefView; DefView is
-        // mostly transparent and paints the icons above us.
-        let direct_def_view = find_child_window(progman, "SHELLDLL_DefView");
-        let host = if let Some(def_view) = direct_def_view {
-            DesktopHost {
-                parent: progman,
-                insert_after: def_view,
-            }
-        } else {
-            // Older shells move DefView under another top-level window and
-            // expose a separate wallpaper WorkerW behind it.
-            let mut top_level_worker = HWND::default();
-            let _ = EnumWindows(
-                Some(enum_proc),
-                LPARAM(&mut top_level_worker as *mut _ as isize),
-            );
-            DesktopHost {
-                parent: if top_level_worker.is_invalid() {
-                    progman
-                } else {
-                    top_level_worker
-                },
-                insert_after: if top_level_worker.is_invalid() {
-                    HWND_TOP
-                } else {
-                    HWND_BOTTOM
-                },
-            }
-        };
-        *DESKTOP_HOST
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) =
-            Some((host.parent.0 as isize, host.insert_after.0 as isize));
-        Some(host)
+        if let Some(host) = existing_desktop_host(progman) {
+            cache_desktop_host(host);
+            return Some(host);
+        }
+        // Fallback while Explorer has no wallpaper WorkerW. It is not cached,
+        // so a later call retries the request once the throttle allows it.
+        Some(DesktopHost {
+            parent: progman,
+            insert_after: find_child_window(progman, "SHELLDLL_DefView").unwrap_or(HWND_TOP),
+        })
     }
+}
+
+fn cache_desktop_host(host: DesktopHost) {
+    *DESKTOP_HOST
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) =
+        Some((host.parent.0 as isize, host.insert_after.0 as isize));
+}
+
+/// The desktop host of a shell whose wallpaper WorkerW already exists, found
+/// without sending Explorer any message.
+fn existing_desktop_host(progman: HWND) -> Option<DesktopHost> {
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        if find_child_window(hwnd, "SHELLDLL_DefView").is_some() {
+            let class = wide_str("WorkerW");
+            if let Ok(worker) = unsafe {
+                FindWindowExW(
+                    None,
+                    Some(hwnd),
+                    PCWSTR::from_raw(class.as_ptr()),
+                    PCWSTR::null(),
+                )
+            } {
+                if !worker.is_invalid() {
+                    let result = unsafe { &mut *(lparam.0 as *mut HWND) };
+                    *result = worker;
+                    return BOOL(0);
+                }
+            }
+        }
+        BOOL(1)
+    }
+
+    // Raised-desktop shells (current Windows 11) keep DefView and the
+    // wallpaper WorkerW as direct Progman children. A layered child of WorkerW
+    // is suppressed by its DirectComposition wallpaper surface, so our child
+    // is a Progman sibling immediately below DefView; DefView is mostly
+    // transparent and paints the icons above us.
+    if let Some(def_view) = find_child_window(progman, "SHELLDLL_DefView") {
+        return find_child_window(progman, "WorkerW").map(|_| DesktopHost {
+            parent: progman,
+            insert_after: def_view,
+        });
+    }
+    // Older shells move DefView under another top-level window and expose a
+    // separate wallpaper WorkerW behind it.
+    let mut top_level_worker = HWND::default();
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_proc),
+            LPARAM(&mut top_level_worker as *mut _ as isize),
+        );
+    }
+    (!top_level_worker.is_invalid()).then_some(DesktopHost {
+        parent: top_level_worker,
+        insert_after: HWND_BOTTOM,
+    })
+}
+
+/// Last synchronous WorkerW request: Progman handle and when it was sent.
+static WALLPAPER_WORKER_REQUEST: Mutex<Option<(isize, std::time::Instant)>> = Mutex::new(None);
+
+/// Allow a synchronous WorkerW request for this Progman at most once per
+/// retry interval, so a slow or busy Explorer costs one bounded wait instead
+/// of one per placement.
+fn claim_wallpaper_worker_request(progman: HWND) -> bool {
+    const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+    let now = std::time::Instant::now();
+    let mut last = WALLPAPER_WORKER_REQUEST
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let allowed = !matches!(*last, Some((handle, at))
+        if handle == progman.0 as isize && now.duration_since(at) < RETRY_INTERVAL);
+    if allowed {
+        *last = Some((progman.0 as isize, now));
+    }
+    allowed
 }
 
 /// Send Progman the undocumented "spawn wallpaper WorkerW" request with a
