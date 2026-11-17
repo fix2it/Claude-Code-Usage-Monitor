@@ -809,12 +809,10 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
             state.codex_pools_one_widget,
             state.antigravity_pools_one_widget,
         )
-        .with_pool_split_support(
-            state
-                .active_theme
-                .as_ref()
-                .is_some_and(ThemeDocument::supports_pool_splitting),
-        )
+        .with_pool_split_support(state.active_theme.as_ref().map_or(
+            crate::theme_engine::PoolSplitSupport::NONE,
+            ThemeDocument::pool_split_support,
+        ))
         .with_view_mode(state.view_mode)
         .with_mode_phase(state.mode_phase)
         .with_opencode_state(state.tiles[Tile::OpenCode].phase)

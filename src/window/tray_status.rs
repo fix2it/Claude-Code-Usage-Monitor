@@ -496,7 +496,8 @@ impl TrayFrame<'_> {
             return false;
         };
         let surface_runtime = theme_runtime_for_surface(self.theme, surface_index, self.runtime);
-        let surface_metrics = theme_engine::metrics_for_phase(metrics.clone(), surface_runtime);
+        let surface_metrics =
+            theme_engine::metrics_for_surface(self.theme, self.data, metrics, surface_runtime);
         theme_engine::surface_should_render_with_metrics(
             self.theme,
             surface_index,
@@ -514,8 +515,12 @@ impl TrayFrame<'_> {
         usage_tooltip: Option<&str>,
     ) -> Option<tray_icon::ThemedTrayIcon> {
         let surface_runtime = theme_runtime_for_surface(self.theme, surface_index, self.runtime);
-        let surface_metrics =
-            theme_engine::metrics_for_phase(self.metrics.unwrap().clone(), surface_runtime);
+        let surface_metrics = theme_engine::metrics_for_surface(
+            self.theme,
+            self.data,
+            self.metrics.unwrap(),
+            surface_runtime,
+        );
         let (logical_width, logical_height) = theme_engine::resolve_surface_size_with_metrics(
             self.theme,
             surface_index,

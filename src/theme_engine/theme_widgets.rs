@@ -106,6 +106,51 @@ pub(crate) fn widget_count(data: Option<&AppUsageData>, runtime: ThemeRuntime) -
         + agy_separate(data, runtime) as usize
 }
 
+/// Which providers' second pools the active surface can show as their own
+/// tiles. A provider without its split objects keeps one widget (F68).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PoolSplitSupport {
+    pub claude: bool,
+    pub codex: bool,
+    /// Needs both Antigravity tiles: one setting splits pools O and external O.
+    pub antigravity: bool,
+}
+
+impl PoolSplitSupport {
+    pub const ALL: Self = Self::uniform(true);
+    pub const NONE: Self = Self::uniform(false);
+
+    pub const fn uniform(supported: bool) -> Self {
+        Self {
+            claude: supported,
+            codex: supported,
+            antigravity: supported,
+        }
+    }
+
+    /// From a predicate telling whether a split tile's object exists.
+    pub(crate) fn from_pools(has: impl Fn(SplitPool) -> bool) -> Self {
+        Self {
+            claude: has(SplitPool::ClaudeX),
+            codex: has(SplitPool::CodexX),
+            antigravity: has(SplitPool::AntigravityO) && has(SplitPool::AgyExternalO),
+        }
+    }
+
+    pub const fn all(self) -> bool {
+        self.claude && self.codex && self.antigravity
+    }
+
+    /// Both sides must allow a provider's split.
+    pub const fn and(self, other: Self) -> Self {
+        Self {
+            claude: self.claude && other.claude,
+            codex: self.codex && other.codex,
+            antigravity: self.antigravity && other.antigravity,
+        }
+    }
+}
+
 /// A second pool that gets its own tile while its provider's pools are split
 /// ("Pools on one widget" off). The table drives the tile's theme object, its
 /// binding namespace, its hover phase and its hit-test rect.

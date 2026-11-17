@@ -774,7 +774,7 @@ pub struct ThemeRuntime {
     pub show_fable_x: bool,
     pub claude_pools_one_widget: bool,
     pub codex_pools_one_widget: bool,
-    pub pool_split_supported: bool,
+    pub pool_split_support: PoolSplitSupport,
     pub antigravity_pools_one_widget: bool,
     /// Selected widget view mode (1..3) and its continuous animation phase
     /// (0.0 = mode 1, 1.0 = mode 2, 2.0 = mode 3).
@@ -826,7 +826,7 @@ impl Default for ThemeRuntime {
             show_fable_x: false,
             claude_pools_one_widget: true,
             codex_pools_one_widget: true,
-            pool_split_supported: true,
+            pool_split_support: PoolSplitSupport::ALL,
             antigravity_pools_one_widget: true,
             view_mode: 1,
             mode_phase: 0.0,
@@ -886,7 +886,7 @@ impl ThemeRuntime {
             show_fable_x: false,
             claude_pools_one_widget: true,
             codex_pools_one_widget: true,
-            pool_split_supported: true,
+            pool_split_support: PoolSplitSupport::ALL,
             antigravity_pools_one_widget: true,
             view_mode: 1,
             mode_phase: 0.0,
@@ -1036,13 +1036,11 @@ impl ThemeRuntime {
 
     /// Unsupported themes keep the existing combined layout while preserving
     /// the user's persisted choices for a later supporting theme.
-    pub fn with_pool_split_support(mut self, supported: bool) -> Self {
-        self.pool_split_supported = supported;
-        if !supported {
-            self.claude_pools_one_widget = true;
-            self.codex_pools_one_widget = true;
-            self.antigravity_pools_one_widget = true;
-        }
+    pub fn with_pool_split_support(mut self, support: PoolSplitSupport) -> Self {
+        self.pool_split_support = support;
+        self.claude_pools_one_widget |= !support.claude;
+        self.codex_pools_one_widget |= !support.codex;
+        self.antigravity_pools_one_widget |= !support.antigravity;
         self
     }
 
@@ -1115,15 +1113,23 @@ impl ThemeRuntime {
 }
 
 impl ThemeDocument {
-    /// Splitting is an all-provider capability: every required widget must
-    /// exist on the primary surface before any saved split choice takes effect.
-    pub fn supports_pool_splitting(&self) -> bool {
-        self.surfaces.first().is_some_and(|surface| {
-            SplitPool::ALL.iter().all(|pool| {
-                surface.children.iter().any(|object| {
-                    object.id == pool.object_id()
-                        && object.parent.as_deref() == Some("provider-row")
-                })
+    /// Splitting is a per-provider capability: a provider's saved split
+    /// choice takes effect only while the primary surface has its second-pool
+    /// widgets.
+    pub fn pool_split_support(&self) -> PoolSplitSupport {
+        self.surface_pool_split_support(0)
+    }
+
+    /// The same capability for one surface. A mirror with the combined layout
+    /// has no second-pool tiles, so it must keep the pools on one widget even
+    /// when the primary surface can split them.
+    pub fn surface_pool_split_support(&self, surface_index: usize) -> PoolSplitSupport {
+        let Some(surface) = self.surfaces.get(surface_index) else {
+            return PoolSplitSupport::NONE;
+        };
+        PoolSplitSupport::from_pools(|pool| {
+            surface.children.iter().any(|object| {
+                object.id == pool.object_id() && object.parent.as_deref() == Some("provider-row")
             })
         })
     }

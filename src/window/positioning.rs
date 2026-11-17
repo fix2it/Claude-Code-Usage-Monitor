@@ -760,7 +760,7 @@ pub(super) fn watchdog_surface_should_render(
     runtime: ThemeRuntime,
     metrics: &theme_engine::DisplayMetrics,
 ) -> bool {
-    let metrics = theme_engine::metrics_for_phase(metrics.clone(), runtime);
+    let metrics = theme_engine::metrics_for_surface(theme, data, metrics, runtime);
     theme_engine::surface_should_render_with_metrics(theme, surface_index, data, runtime, &metrics)
 }
 

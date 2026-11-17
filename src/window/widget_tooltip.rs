@@ -93,8 +93,9 @@ fn content(owner: HWND) -> Option<(String, bool, HWND)> {
         return None;
     }
     let primary_runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let prepared = prepared_metrics(state, &theme, primary_runtime);
     let metrics =
-        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary_runtime), runtime);
+        theme_engine::metrics_for_surface(&theme, state.data.as_ref(), &prepared, runtime);
     if !theme_engine::surface_should_render_with_metrics(
         &theme,
         surface_index,

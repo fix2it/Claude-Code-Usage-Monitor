@@ -35,8 +35,9 @@ pub(super) fn mouse_target_at(hwnd: HWND, lparam: LPARAM) -> Option<(usize, Stri
     let scale = theme_surface_scale(&theme, surface_index).max(0.01);
     let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
     let primary_runtime = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let prepared = prepared_metrics(state, &theme, primary_runtime);
     let metrics =
-        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary_runtime), runtime);
+        theme_engine::metrics_for_surface(&theme, state.data.as_ref(), &prepared, runtime);
     let (x, y) = mouse_client_point(lparam);
     let object_id = theme_engine::hit_test_mouse_event_with_metrics(
         &theme,
@@ -100,8 +101,9 @@ fn mode_target_at(lparam: LPARAM, surface_index: usize) -> Option<(usize, bool)>
     let scale = theme_surface_scale(&theme, surface_index).max(0.01);
     let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
     let primary = theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
+    let prepared = prepared_metrics(state, &theme, primary);
     let metrics =
-        theme_engine::metrics_for_phase(prepared_metrics(state, &theme, primary), runtime);
+        theme_engine::metrics_for_surface(&theme, state.data.as_ref(), &prepared, runtime);
     let (x, y) = mouse_client_point(lparam);
     let id = theme_engine::hit_test_widget_with_metrics(
         &theme,

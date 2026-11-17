@@ -144,8 +144,10 @@ fn render_surface(frame: &FrameInput, trigger: RenderTrigger, surface_index: usi
     let surface_metrics = if surface_index == 0 {
         std::borrow::Cow::Borrowed(&frame.metrics)
     } else {
-        std::borrow::Cow::Owned(theme_engine::metrics_for_phase(
-            frame.metrics.clone(),
+        std::borrow::Cow::Owned(theme_engine::metrics_for_surface(
+            &frame.theme,
+            frame.usage_data.as_ref(),
+            &frame.metrics,
             surface_runtime,
         ))
     };

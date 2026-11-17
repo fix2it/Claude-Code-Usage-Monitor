@@ -39,6 +39,9 @@ pub struct DisplayMetrics {
     claude_separate: bool,
     codex_separate: bool,
     agy_separate: bool,
+    /// The split capability these metrics were measured for. A surface with
+    /// another capability has a different widget row (F66).
+    pool_split_support: PoolSplitSupport,
 }
 
 impl DisplayMetrics {
@@ -72,6 +75,7 @@ impl DisplayMetrics {
             claude_separate: pool_separate(runtime, ProviderId::Claude),
             codex_separate: pool_separate(runtime, ProviderId::Codex),
             agy_separate: agy_separate(None, runtime),
+            pool_split_support: runtime.pool_split_support,
         };
         let dual = claude_dual(runtime);
         metrics.fable = fable_column(
@@ -741,6 +745,22 @@ fn provider_marker_column(
             },
         ),
         _ => (0.0, 0.0),
+    }
+}
+
+/// Metrics for one surface from metrics prepared for another (usually the
+/// primary). Phases apply on top while both share the split capability;
+/// otherwise the surface's own widget row is measured (cached).
+pub(crate) fn metrics_for_surface(
+    theme: &ThemeDocument,
+    data: Option<&AppUsageData>,
+    prepared: &DisplayMetrics,
+    runtime: ThemeRuntime,
+) -> DisplayMetrics {
+    if prepared.pool_split_support == runtime.pool_split_support {
+        metrics_for_phase(prepared.clone(), runtime)
+    } else {
+        display_metrics(theme, data, runtime)
     }
 }
 

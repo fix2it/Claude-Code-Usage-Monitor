@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme_engine::PoolSplitSupport;
 
 pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
     AppState {
@@ -110,7 +111,7 @@ fn unsupported_theme_keeps_combined_pools_without_changing_preferences() {
                 | "agy_external_o-provider"
         ) && !object.id.starts_with("split-")
     });
-    assert!(!custom.supports_pool_splitting());
+    assert!(custom.pool_split_support() == PoolSplitSupport::NONE);
     let mut state = state_for(custom, placement("taskbar"));
     state.providers = ProviderSet::from_enabled([
         ProviderId::Claude,
@@ -132,7 +133,7 @@ fn unsupported_theme_keeps_combined_pools_without_changing_preferences() {
     state.codex_pools_one_widget = false;
     state.antigravity_pools_one_widget = false;
     let runtime = theme_runtime_from_state(&state);
-    assert!(!runtime.pool_split_supported);
+    assert_eq!(runtime.pool_split_support, PoolSplitSupport::NONE);
     assert!(
         runtime.claude_pools_one_widget
             && runtime.codex_pools_one_widget
@@ -179,12 +180,144 @@ fn unsupported_theme_keeps_combined_pools_without_changing_preferences() {
 
     state.active_theme = Some(ThemeDocument::starter());
     let runtime = theme_runtime_from_state(&state);
-    assert!(runtime.pool_split_supported);
+    assert!(runtime.pool_split_support.all());
     assert!(
         !runtime.claude_pools_one_widget
             && !runtime.codex_pools_one_widget
             && !runtime.antigravity_pools_one_widget
     );
+}
+
+#[test]
+fn combined_mirror_keeps_pools_together_while_the_primary_splits() {
+    let mut theme = ThemeDocument::starter();
+    let mut mirror = theme.surfaces[0].clone();
+    mirror.children.retain(|object| {
+        !matches!(
+            object.id.as_str(),
+            "claude_x-provider"
+                | "codex_x-provider"
+                | "antigravity_o-provider"
+                | "agy_external_o-provider"
+        )
+    });
+    theme.surfaces.push(mirror);
+    assert!(theme.pool_split_support().all());
+    let mirror_index = theme.surfaces.len() - 1;
+    assert_eq!(
+        theme.surface_pool_split_support(mirror_index),
+        PoolSplitSupport::NONE
+    );
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    state
+        .accounts
+        .claude
+        .profiles
+        .push(crate::accounts::AccountProfile {
+            id: "claude_x".into(),
+            enabled: true,
+            ..Default::default()
+        });
+    state.claude_pools_one_widget = false;
+    state.codex_pools_one_widget = false;
+    state.antigravity_pools_one_widget = false;
+    let base = theme_runtime_from_state(&state);
+    let primary = theme_runtime_for_surface(&theme, 0, base);
+    assert!(primary.pool_split_support.all() && !primary.claude_pools_one_widget);
+    let mirror = theme_runtime_for_surface(&theme, mirror_index, base);
+    assert_eq!(mirror.pool_split_support, PoolSplitSupport::NONE);
+    assert!(
+        mirror.claude_pools_one_widget
+            && mirror.codex_pools_one_widget
+            && mirror.antigravity_pools_one_widget
+    );
+    // The combined mirror measures its own, smaller widget row.
+    let primary_metrics = theme_engine::display_metrics(&theme, None, primary);
+    // Every consumer derives mirror metrics from the primary's prepared ones.
+    let mirror_metrics = theme_engine::metrics_for_surface(&theme, None, &primary_metrics, mirror);
+    assert!(mirror_metrics.widget_count < primary_metrics.widget_count);
+    // A split-capable mirror cannot re-enable splitting the primary refused.
+    let mut combined = theme.clone();
+    combined.surfaces.swap(0, mirror_index);
+    state.active_theme = Some(combined.clone());
+    let base = theme_runtime_from_state(&state);
+    assert_eq!(
+        theme_runtime_for_surface(&combined, mirror_index, base).pool_split_support,
+        PoolSplitSupport::NONE
+    );
+}
+
+fn starter_without(ids: &[&str]) -> ThemeDocument {
+    let mut theme = ThemeDocument::starter();
+    theme.surfaces[0]
+        .children
+        .retain(|object| !ids.contains(&object.id.as_str()));
+    theme
+}
+
+fn split_runtime(theme: ThemeDocument) -> ThemeRuntime {
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    state.claude_pools_one_widget = false;
+    state.codex_pools_one_widget = false;
+    state.antigravity_pools_one_widget = false;
+    theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(&state))
+}
+
+#[test]
+fn partial_theme_splits_only_the_providers_it_draws() {
+    // Only Claude's second-pool tile.
+    let theme = starter_without(&[
+        "codex_x-provider",
+        "antigravity_o-provider",
+        "agy_external_o-provider",
+    ]);
+    let support = theme.pool_split_support();
+    assert!(support.claude && !support.codex && !support.antigravity);
+    let runtime = split_runtime(theme);
+    assert!(!runtime.claude_pools_one_widget);
+    assert!(runtime.codex_pools_one_widget && runtime.antigravity_pools_one_widget);
+    let context = theme_engine::DataContext::from_usage_with_runtime(
+        None,
+        &theme_engine::Canvas::default(),
+        runtime,
+    );
+    assert_eq!(context.get("display.claude_split_supported"), Some(1.0));
+    assert_eq!(context.get("display.codex_split_supported"), Some(0.0));
+    assert_eq!(
+        context.get("display.antigravity_split_supported"),
+        Some(0.0)
+    );
+    assert_eq!(context.get("display.pool_split_supported"), Some(0.0));
+}
+
+#[test]
+fn mixed_theme_needs_both_antigravity_tiles() {
+    // Claude and Codex split; Antigravity has only one of its two tiles.
+    let theme = starter_without(&["agy_external_o-provider"]);
+    let support = theme.pool_split_support();
+    assert!(support.claude && support.codex && !support.antigravity);
+    let runtime = split_runtime(theme);
+    assert!(!runtime.claude_pools_one_widget && !runtime.codex_pools_one_widget);
+    assert!(runtime.antigravity_pools_one_widget);
+}
+
+#[test]
+fn mirror_narrows_split_support_per_provider() {
+    let mut theme = ThemeDocument::starter();
+    let mut mirror = theme.surfaces[0].clone();
+    mirror
+        .children
+        .retain(|object| object.id != "codex_x-provider");
+    theme.surfaces.push(mirror);
+    let mirror_index = theme.surfaces.len() - 1;
+    let mut state = state_for(theme.clone(), placement("taskbar"));
+    state.claude_pools_one_widget = false;
+    state.codex_pools_one_widget = false;
+    let base = theme_runtime_from_state(&state);
+    let mirror = theme_runtime_for_surface(&theme, mirror_index, base);
+    assert!(!mirror.claude_pools_one_widget);
+    assert!(mirror.codex_pools_one_widget);
+    assert!(!theme_runtime_for_surface(&theme, 0, base).codex_pools_one_widget);
 }
 
 #[test]

@@ -399,10 +399,9 @@ pub(super) fn context_menu_data_context(origin: Option<&(usize, String)>) -> Dat
             runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
             let primary_runtime =
                 theme_runtime_for_surface(&theme, 0, theme_runtime_from_state(state));
-            let metrics = theme_engine::metrics_for_phase(
-                prepared_metrics(state, &theme, primary_runtime),
-                runtime,
-            );
+            let prepared = prepared_metrics(state, &theme, primary_runtime);
+            let metrics =
+                theme_engine::metrics_for_surface(&theme, state.data.as_ref(), &prepared, runtime);
             let (width, height) = theme_engine::resolve_surface_content_size_with_metrics(
                 &theme,
                 surface_index,
@@ -570,7 +569,14 @@ fn widget_checked(state: &AppState) -> bool {
                 );
                 let metrics = state.prepared_metrics.as_ref().map_or_else(
                     || theme_engine::display_metrics(&effective, state.data.as_ref(), runtime),
-                    |metrics| theme_engine::metrics_for_phase(metrics.clone(), runtime),
+                    |metrics| {
+                        theme_engine::metrics_for_surface(
+                            &effective,
+                            state.data.as_ref(),
+                            metrics,
+                            runtime,
+                        )
+                    },
                 );
                 theme_engine::surface_should_render_with_metrics(
                     &effective,
@@ -644,7 +650,7 @@ fn toggle_layer_render_state_with_metrics(
         .position(|surface| surface.id.eq_ignore_ascii_case(target))
     {
         let runtime = theme_runtime_for_surface(theme, surface_index, base_runtime);
-        let metrics = theme_engine::metrics_for_phase(metrics, runtime);
+        let metrics = theme_engine::metrics_for_surface(theme, data, &metrics, runtime);
         return Some(theme_engine::surface_should_render_with_metrics(
             theme,
             surface_index,
@@ -660,7 +666,7 @@ fn toggle_layer_render_state_with_metrics(
         .iter()
         .position(|object| object.id.eq_ignore_ascii_case(target))?;
     let runtime = theme_runtime_for_surface(theme, origin_surface, base_runtime);
-    let metrics = theme_engine::metrics_for_phase(metrics, runtime);
+    let metrics = theme_engine::metrics_for_surface(theme, data, &metrics, runtime);
     Some(
         theme_engine::resolve_object_bounds_with_metrics(
             theme,
