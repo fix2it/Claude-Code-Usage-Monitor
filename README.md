@@ -3,61 +3,48 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **This is a standalone fork** of
-> [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor).
-> Many thanks to Code Zeno, the original author, for creating the monitor and
-> releasing it under the MIT License. The fork is developed separately at
-> [fix2it/Claude-Code-Usage-Monitor](https://github.com/fix2it/Claude-Code-Usage-Monitor); please report problems with
-> fork builds here, not to the original project.
+Claude Code Usage Monitor sits in your Windows taskbar to track active AI usage limits, reset countdowns, and quota windows across multiple accounts and services in one place.
 
-A Windows taskbar widget for people who juggle several AI quota pools. Where
-the original shows one tile per provider, this fork gives each Claude, Codex,
-and Antigravity pool its own widget (or combines them with one toggle), shows
-Fable usage per Claude pool, reads a second Antigravity pool from the OpenCode
-token, and adds Qoder. Each widget keeps its own compact view mode, and pace
-ticks show whether you are ahead of or behind the reset window. To keep the
-app lean, it ships a single theme, Compact Fluent Quad, in a horizontal
-taskbar layout only; Theme Studio and the other themes, including the vertical
-one, are removed.
+This project is a standalone fork of [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor). Warm thanks to Code Zeno, whose great work and MIT-licensed foundation made this possible. The fork evolves independently at [fix2it/Claude-Code-Usage-Monitor](https://github.com/fix2it/Claude-Code-Usage-Monitor) to focus on multi-account pool monitoring, compact taskbar layouts, per-widget control, and rendering efficiency.
 
-OpenCode Go is supported too. Cursor, Grok Build, and GitHub Copilot support is
+Please report problems with fork builds in this repository, not to the original project.
+A [Russian version](docs/README.ru.md) of this overview is available.
+
+Besides Claude Code, Codex, and Antigravity, the monitor supports Qoder and
+OpenCode Go. Cursor, Grok Build, and GitHub Copilot support is
 inherited from the original project and is untested in this fork. See the
 [user guide](USER_GUIDE.md) for everyday use and the
 [changelog](CHANGELOG.md) for version history and notable changes.
 
 ![The fork's widget in the Windows taskbar, with usage gauges and pace ticks for several pools](.github/widget.png)
 
-## What the fork changes
+## How it differs from the original
 
-Compared with the original project, this fork:
+1. **Dedicated widgets for multi-account pools & "Pools on one widget" toggle:** To keep an eye on each account's pool on its own, the fork adds separate widgets for Claude (Claude / Claude X), Codex (Codex / Codex X), and Antigravity (A / O) with a menu toggle to group them into one tile or split them across individual tiles for simultaneous monitoring.
 
-- Removes Theme Studio, the context-menu editor, the Assets page, and the extra
-  bundled themes. The settings window keeps Settings and Diagnostics; Compact
-  Fluent Quad is the only bundled theme. User themes still load.
-- Adds three compact view modes for the widget, switched with a click or the
-  mouse wheel. Each widget keeps its own mode; hold Shift to change all widgets.
-- Shows separate pool widgets for Claude, Codex, and Antigravity (agy), with a
-  **Pools on one widget** menu toggle to combine or split them.
-- Adds a second Antigravity pool, **O**, read-only from the OpenCode token, next
-  to pool **A**; external models get their own widget state.
-- Shows Fable usage per Claude pool, with its own toggle in each pool's menu.
-- Nests Fable and External models under their providers in a multi-select
-  provider menu.
-- Draws pace ticks on usage gauges (**Show pace**) and animates hover
-  crossfades between pools and labels.
-- Sizes compact rows from the measured text and markers, so widths adapt to
-  the content.
-- Reworks the OpenCode Go widget: it keeps the 7-day window and the billing
-  period start, adds dual-mode gauges and markers with a hover swap between
-  the weekly and monthly pools, and sends the `Authorization: Bearer` header
-  that the OpenCode console API requires.
-- Adds a Qoder provider read from the `qodercli` `/usage` panel (Qoder has no
-  plain usage API; probes run at most every 15 minutes). The widget shows the
-  plan on the top row and the extra credit pool in use below, with pace ticks;
-  when both extra pools are in use, hover swaps between them. Pace assumes a 30-day window because Qoder reports only
-  end dates. See [Qoder provider](docs/qoder-provider.md).
-- Updates only from this fork's own GitHub Releases through the portable
-  updater; the original project's WinGet package is not used.
+2. **Second Antigravity pool (Pool O) from OpenCode:** Users working with Antigravity directly and through OpenCode needed visibility into both quotas, so the fork adds read-only polling for pool O from OpenCode's stored token alongside pool A, showing both allowances side-by-side without extra logins.
+
+3. **Fable tracking per Claude pool:** Because Fable usage is counted separately, each Claude pool now includes its own Fable row with 5-cube bars and pace ticks, giving clear per-profile visibility alongside standard 5-hour and 7-day windows.
+
+4. **Per-widget compact view modes:** Since different providers need different detail levels, widgets now support three compact modes cycled by clicking or the mouse wheel, letting you tailor text and gauge width per tile or hold Shift to adjust all of them at once.
+
+5. **Hierarchical context menu:** As more multi-pool and model settings were added, the context menu was organized into a nested hierarchy—placing Fable under Claude pools and External models under Antigravity—making it easy to find and configure options without visual clutter.
+
+6. **Adaptive widget widths:** To prevent clipped numbers or wasted taskbar margins, widget widths are measured dynamically from active text and cached, keeping each tile exactly as wide as its current readings need.
+
+7. **Pace ticks on usage gauges:** A percentage alone does not show whether consumption is outpacing the reset window, so an optional pace tick marks elapsed time on the gauge to show right away if you are burning quota faster than scheduled.
+
+8. **Integrated Qoder provider:** Because Qoder lacks a public REST API, a background poller queries `qodercli /usage` at most every 15 minutes, displaying plan and credit pools on the taskbar with hover switching and 30-day pace marks.
+
+9. **Reworked OpenCode Go support:** To work with OpenCode's current console API and show both weekly and monthly limits, requests now include the required bearer authorization header and dual gauges crossfade on hover, letting you inspect both periods on one tile.
+
+10. **Independent updates and binary protection:** To prevent upstream releases or WinGet from replacing fork builds and safeguard against failed updates, the built-in updater points to the fork repository, uses encoded patch versions (such as `2.23.601`), and keeps your working binary safe if replacement fails.
+
+11. **Render performance and non-blocking UI:** To eliminate per-frame overhead and UI stalls, v2.23.602 caches theme and dark-mode states, reuses buffers, moves settings I/O off the state lock, and uses non-blocking `Present(0)`—rendering frames 30–36% faster (as measured for v2.23.602) while keeping the interface responsive.
+
+12. **Focused theme and lighter footprint:** Since the focus is a dedicated taskbar widget, Theme Studio and the other bundled themes were removed in favor of a single tuned **Compact Fluent Quad** horizontal theme (with custom JSON themes still supported), resulting in a lighter app that is easier to maintain.
+
+13. **Codebase audit and hardening:** To address edge cases like false 0% readings and oversized functions, a multi-round audit (`audit-ledger.md`) decomposed key subsystems into modular steps and fixed recorded issues, ensuring accurate tooltip reporting and cleaner, maintainable code.
 
 See the [changelog](CHANGELOG.md) for details.
 
