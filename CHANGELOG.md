@@ -6,6 +6,13 @@ changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
 ## [Unreleased]
 
+## [2.23.607] - 2026-11-21
+
+### Fixed
+
+- A mouse pointer hidden while typing in another app no longer reappears on every widget refresh. The taskbar widget is no longer re-hosted or moved when it is already in place (from upstream #219).
+- "Start with Windows" now saves the program path in quotes, so a path with spaces cannot start another program at sign-in. An existing unquoted entry for this copy of the program is rewritten at startup (from upstream v2.25.0).
+
 ## [2.23.606] - 2026-11-18
 
 ### Changed
