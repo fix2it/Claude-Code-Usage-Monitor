@@ -43,6 +43,8 @@ pub fn run() {
     if !args.allow_multiple {
         updater::cleanup_after_update();
     }
+    // Only the mutex holder rewrites the shared Run-key value.
+    upgrade_legacy_startup_command();
 
     let class_name = native_interop::wide_str("ClaudeCodeUsageMonitor");
 

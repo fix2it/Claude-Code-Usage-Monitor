@@ -587,6 +587,34 @@ pub(super) fn position_custom_theme_internal(
     true
 }
 
+/// True when a hosted child is already the top sibling at exactly this
+/// rectangle (origin in `parent` client coordinates).
+unsafe fn hosted_child_is_placed(
+    hwnd: HWND,
+    parent: HWND,
+    origin: POINT,
+    width: i32,
+    height: i32,
+) -> bool {
+    unsafe {
+        if GetTopWindow(Some(parent)).ok() != Some(hwnd) {
+            return false;
+        }
+        let Some(rect) = native_interop::get_window_rect_safe(hwnd) else {
+            return false;
+        };
+        let mut current = [POINT {
+            x: rect.left,
+            y: rect.top,
+        }];
+        MapWindowPoints(None, Some(parent), &mut current);
+        current[0].x == origin.x
+            && current[0].y == origin.y
+            && rect.right - rect.left == width
+            && rect.bottom - rect.top == height
+    }
+}
+
 /// Parents and moves a theme surface for its nest; false when it was hidden.
 unsafe fn place_surface(
     hwnd: HWND,
@@ -608,15 +636,22 @@ unsafe fn place_surface(
                 ensure_tray_event_hook_for_taskbar(hwnd, taskbar.hwnd);
                 let mut point = [POINT { x, y }];
                 MapWindowPoints(None, Some(taskbar.hwnd), &mut point);
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOP),
-                    point[0].x,
-                    point[0].y,
-                    width,
-                    height,
-                    window_pos_flags(hwnd, point[0].x, point[0].y, width, height),
-                );
+                // Routine renders land on the same rectangle; only touch the
+                // window when its place or z-order actually has to change.
+                // Even a SWP_NOMOVE | SWP_NOSIZE call with HWND_TOP is a
+                // placement change that makes Windows post an unmoved
+                // WM_MOUSEMOVE (upstream #219).
+                if !hosted_child_is_placed(hwnd, taskbar.hwnd, point[0], width, height) {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOP),
+                        point[0].x,
+                        point[0].y,
+                        width,
+                        height,
+                        window_pos_flags(hwnd, point[0].x, point[0].y, width, height),
+                    );
+                }
             }
             SurfaceNest::Desktop => {
                 if let Some(desktop) = native_interop::find_desktop_host() {

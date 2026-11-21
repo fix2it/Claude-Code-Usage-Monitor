@@ -1318,8 +1318,26 @@ fn update_language_change() -> bool {
 const STARTUP_REGISTRY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const STARTUP_REGISTRY_KEY: &str = "ClaudeCodeUsageMonitor";
 
-/// Returns true only if the startup registry value points to this executable.
-pub(crate) fn is_startup_enabled() -> bool {
+/// Run-key command for an executable. Always quote it: Windows otherwise
+/// resolves an unquoted path containing spaces by trying each prefix, so
+/// `C:\Program Files\...` could launch `C:\Program.exe` at sign-in.
+/// Ported from upstream v2.25.0.
+fn startup_command(executable: &str) -> String {
+    format!("\"{executable}\"")
+}
+
+/// Whether a Run-key command launches exactly this executable, accepting the
+/// legacy unquoted form. Commands with arguments are not ours.
+fn startup_command_targets(command: &str, executable: &str) -> bool {
+    let command = command.trim();
+    let target = command
+        .strip_prefix('"')
+        .and_then(|quoted| quoted.strip_suffix('"'))
+        .unwrap_or(command);
+    !target.contains('"') && target.eq_ignore_ascii_case(executable)
+}
+
+fn read_startup_command() -> Option<String> {
     unsafe {
         let path = native_interop::wide_str(STARTUP_REGISTRY_PATH);
         let key_name = native_interop::wide_str(STARTUP_REGISTRY_KEY);
@@ -1333,7 +1351,7 @@ pub(crate) fn is_startup_enabled() -> bool {
             &mut hkey,
         );
         if result.is_err() {
-            return false;
+            return None;
         }
 
         // Query the size of the value
@@ -1348,7 +1366,7 @@ pub(crate) fn is_startup_enabled() -> bool {
         );
         if result.is_err() || data_size == 0 {
             let _ = RegCloseKey(hkey);
-            return false;
+            return None;
         }
 
         // Read the value
@@ -1363,26 +1381,44 @@ pub(crate) fn is_startup_enabled() -> bool {
         );
         let _ = RegCloseKey(hkey);
         if result.is_err() {
-            return false;
+            return None;
         }
 
         // Convert the registry value (UTF-16) to a string
         let wide_slice =
             std::slice::from_raw_parts(buf.as_ptr() as *const u16, data_size as usize / 2);
-        let reg_value = String::from_utf16_lossy(wide_slice)
-            .trim_end_matches('\0')
-            .to_string();
+        Some(
+            String::from_utf16_lossy(wide_slice)
+                .trim_end_matches('\0')
+                .to_string(),
+        )
+    }
+}
 
-        // Get the current executable path
-        let mut exe_buf = [0u16; 260];
-        let len = GetModuleFileNameW(None, &mut exe_buf) as usize;
-        if len == 0 {
-            return false;
-        }
-        let current_exe = String::from_utf16_lossy(&exe_buf[..len]);
+fn current_executable_path() -> Option<String> {
+    let mut exe_buf = [0u16; 260];
+    let len = unsafe { GetModuleFileNameW(None, &mut exe_buf) } as usize;
+    (len > 0).then(|| String::from_utf16_lossy(&exe_buf[..len]))
+}
 
-        // Case-insensitive comparison (Windows paths are case-insensitive)
-        reg_value.eq_ignore_ascii_case(&current_exe)
+/// Returns true only if the startup registry value points to this executable.
+pub(crate) fn is_startup_enabled() -> bool {
+    match (read_startup_command(), current_executable_path()) {
+        (Some(command), Some(executable)) => startup_command_targets(&command, &executable),
+        _ => false,
+    }
+}
+
+/// Rewrite this executable's legacy unquoted startup command in quoted form,
+/// leaving disabled startup and other installations' commands untouched.
+fn upgrade_legacy_startup_command() {
+    let (Some(command), Some(executable)) = (read_startup_command(), current_executable_path())
+    else {
+        return;
+    };
+    if command != startup_command(&executable) && startup_command_targets(&command, &executable) {
+        set_startup_enabled(true);
+        diagnose::log("startup command upgraded to a quoted path");
     }
 }
 
@@ -1405,19 +1441,17 @@ pub(crate) fn set_startup_enabled(enable: bool) {
         let key_name = native_interop::wide_str(STARTUP_REGISTRY_KEY);
 
         if enable {
-            let mut exe_buf = [0u16; 260];
-            let len = GetModuleFileNameW(None, &mut exe_buf) as usize;
-            if len > 0 {
+            if let Some(executable) = current_executable_path() {
                 // Write the wide string including null terminator
-                let byte_len = ((len + 1) * 2) as u32;
+                let command = native_interop::wide_str(&startup_command(&executable));
                 let _ = RegSetValueExW(
                     hkey,
                     PCWSTR::from_raw(key_name.as_ptr()),
                     None,
                     REG_SZ,
                     Some(std::slice::from_raw_parts(
-                        exe_buf.as_ptr() as *const u8,
-                        byte_len as usize,
+                        command.as_ptr() as *const u8,
+                        command.len() * 2,
                     )),
                 );
             }
@@ -2548,6 +2582,42 @@ mod widget_tooltip;
 use mouse::*;
 mod window_context_menu;
 use window_context_menu::*;
+
+#[cfg(test)]
+mod startup_command_tests {
+    use super::{startup_command, startup_command_targets};
+
+    const EXE: &str = r"C:\Program Files\Usage Monitor\claude-code-usage-monitor.exe";
+
+    #[test]
+    fn startup_command_quotes_paths_with_spaces() {
+        let command = startup_command(EXE);
+        assert_eq!(command, format!("\"{EXE}\""));
+        assert!(startup_command_targets(&command, EXE));
+    }
+
+    #[test]
+    fn legacy_unquoted_and_case_variant_commands_still_target_this_executable() {
+        assert!(startup_command_targets(EXE, EXE));
+        assert!(startup_command_targets(&EXE.to_ascii_uppercase(), EXE));
+        assert!(startup_command_targets(&format!("  \"{EXE}\"  "), EXE));
+    }
+
+    #[test]
+    fn other_installations_and_commands_with_arguments_are_not_ours() {
+        assert!(!startup_command_targets(
+            r"C:\Other\claude-code-usage-monitor.exe",
+            EXE
+        ));
+        assert!(!startup_command_targets(
+            &format!("\"{EXE}\" --dashboard"),
+            EXE
+        ));
+        assert!(!startup_command_targets(&format!("\"{EXE}"), EXE));
+        assert!(!startup_command_targets(&format!("\"\"{EXE}\"\""), EXE));
+        assert!(!startup_command_targets("", EXE));
+    }
+}
 
 #[cfg(test)]
 mod placement_tests;
