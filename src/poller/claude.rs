@@ -190,7 +190,23 @@ fn account_watch_signature_with_desktop(path: &Path, desktops: &[PathBuf]) -> St
 
 pub(super) fn fetch_usage_with_fallback(token: &str) -> Result<UsageData, PollError> {
     // Try the dedicated usage endpoint first
-    if let Some(data) = try_usage_endpoint(token)? {
+    let endpoint = match try_usage_endpoint(token) {
+        // The usage endpoint has its own request-rate limit, separate from the
+        // Messages API. A header probe still reads the real quota then (and
+        // spends nothing once the quota itself is spent), so a 429 here,
+        // including one replayed from the cooldown, must not leave the
+        // account blank for the length of the ban.
+        Err(PollError::HttpStatus(429)) => {
+            return fetch_usage_via_messages(token).map_err(|error| {
+                diagnose::log(format!(
+                    "usage endpoint rate limited and Messages API probe failed ({error:?})"
+                ));
+                PollError::HttpStatus(429)
+            });
+        }
+        other => other?,
+    };
+    if let Some(data) = endpoint {
         // If reset timers are missing, fill them in from the Messages API
         if (data.session.available && data.session.resets_at.is_none())
             || (data.weekly.available && data.weekly.resets_at.is_none())
@@ -325,10 +341,10 @@ fn usage_from_response(response: UsageResponse) -> UsageData {
 enum UsageEndpointFailure {
     /// The credentials were rejected.
     Auth,
-    /// Rate limited, a server-side fault, or the network. Retrying later is
-    /// the right move. Asking the Messages API instead would spend real quota
-    /// on a request whose only purpose is to read headers, and during a rate
-    /// limit it would add to the load that caused it.
+    /// Rate limited, a server-side fault, or the network. Retrying the
+    /// endpoint later is the right move. A 429 alone also falls back to the
+    /// Messages API header probe (see `fetch_usage_with_fallback`): that limit
+    /// belongs to this endpoint, not to the quota the probe reads.
     Transient,
     /// The endpoint is not usable on this account, which is what the Messages
     /// API fallback exists for.
@@ -1540,9 +1556,9 @@ mod tests {
     }
 
     #[test]
-    fn rate_limits_and_server_faults_do_not_trigger_the_messages_fallback() {
-        // Spending quota on a Messages request is the wrong answer to being
-        // rate limited, and it feeds the condition that caused it.
+    fn rate_limits_and_server_faults_are_transient_endpoint_failures() {
+        // Transient failures keep their status; only the caller decides that
+        // a 429 is worth a Messages API header probe.
         assert_eq!(
             classify_usage_failure(&status_error(429)),
             UsageEndpointFailure::Transient
